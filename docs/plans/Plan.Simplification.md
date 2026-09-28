@@ -1,0 +1,1292 @@
+# Plan: Harvester simplification
+
+Written 2026-09-28 from the design brief agreed with the owner that day (three read-only
+audits plus a blindspot pass). The brief's decisions are settled and are not re-opened here;
+this plan turns them into phases, grounds each phase in the code, and names the checks,
+documents and decision-log entries each phase needs. Revised the same day after a Codex plan
+review: crash-safe result-store and runtime-state migrations, a reconciliation of Batch API
+results before removal, a saved-results index that also covers Last 24h, summary-body export
+through that index, and a cross-phase carry-over fixture. The owner's answers to the open
+questions are folded in. Revised again after a second review
+(`docs/plans/Plan.Simplification.Review.2026-09-28.md`): pinned temporary-file names, carry-over
+assertions scoped to paid results, a visible store refusal, the pending-intake field, the
+estimate test and the view-state save cadence. Phase numbers are local to this plan:
+durable documents, code comments and decision-log entries name behaviours, never phases.
+
+## For the owner: what changes and where to stop
+
+Harvester keeps doing the same job: each morning it collects AI-company news, downloads the
+articles, asks OpenAI to triage, summarise and score them, and lets you read the results and
+export `archive.md`. The desktop app looks and behaves the same. What changes:
+
+- **Paid results are never thrown away again.** Today the summary store would start deleting
+  old paid summaries in about three weeks, and a crash mid-run loses every result of that run.
+  After the second phase, every result is saved within a few seconds of arriving and nothing
+  is deleted. One visible change comes with this: if a saved-results file is ever damaged,
+  Harvester no longer quietly starts over with an empty file (which would overwrite what you
+  paid for). It says which file failed and keeps the AI steps off until you restore the file
+  from a backup or move it aside.
+- **The desktop remembers everything after a restart.** Priorities, summaries, the Results
+  list, the archive meter, the list tab you had open and the article you were reading are all
+  there when you reopen the app, without pressing Run. Export works straight after a restart.
+- **The morning command-line run gets faster and simpler.** The Batch API is removed (about
+  $5 more per month, as agreed), so the run no longer waits in five-minute provider cycles.
+  The runtime-state file shrinks from 78 MB, so saving no longer takes 10 seconds per
+  download. The busy console dashboard becomes a short per-stage progress block.
+- **Unused features go:** aggregate briefing, trends, stale-summary refresh, dry-run, the
+  repeating batch mode, linked-page download, the indirect-link pool, the old concatenated
+  export and the never-built Script source type. Browser-page import, checkpoint editing on
+  the command line, "open a link found in the article", the signal-candidate exclusion toggle
+  and replay records stay.
+- **Several small bugs are fixed:** articles a feed offered beyond the per-poll limit are no
+  longer silently skipped forever, polls that finish after Stop no longer lose their articles,
+  the desktop and command-line runs can no longer write to the same folder at the same time,
+  and an empty API key is treated as "no AI" everywhere.
+
+**Natural stopping point.** Phases 1 to 9 are the cleanup stage. Each is useful on its own
+and leaves a working app. After Phase 9 the plan stops at an explicit checkpoint with a short
+report (code size, test counts, speed measurements), and you decide whether to go on. The
+later phases replace the internal machinery that schedules the AI work with a simpler
+per-article pipeline. They make the code much smaller and easier to change (for example for
+the planned extra "standing-lens" AI step), but they are not needed for speed: the cleanup
+stage is expected to remove most of the morning run's wall time.
+
+Your actions during the work are few: confirm before the Batch API code goes (Phase 4), try
+the app or the morning run where a phase says "human testing recommended", and decide at the
+checkpoint. Old files that Harvester stops using are listed for you to delete or archive; the
+plan never deletes your data.
+
+## Goal and definition of done
+
+The same user-visible product (brief section 3) on a much smaller codebase: the reducer-owned
+wave, admission and session orchestration replaced by a straightforward per-article pipeline;
+the Batch API and dormant features gone; the bugs in brief section 5 fixed with regression
+tests; documentation accurate; all standing checks green. The cleanup stage alone must deliver
+the restart-state requirement, export from saved results, paid-result safety, and the measured
+speed-ups.
+
+## Settled inputs this plan follows
+
+- Brief sections 2 and 9 (owner decisions, including the blindspot pass). In particular:
+  policy stays in the pure reducer and every effect is one unit of I/O (brief 9.1, which
+  supersedes the brief's earlier "pipeline on the effect side" sentence); export and view
+  after a restart use saved results under the current keys only (9.2); every paid result is
+  kept and saved in small batches (9.3); a keyless replay benchmark comes first and a go/no-go
+  checkpoint follows the cleanup phases (9.4); screen behaviours are restated per article and
+  look the same (9.5); the exclusion toggle stays and `.sources.ron` keeps parsing (9.6).
+- `Agents.md`: input -> action -> reducer -> state -> render; pure reducers; `engine_logging`
+  with job, URL or operation context; launch scripts change only with launch policy; corpus
+  layout changes update `docs/CorpusFormat.md`, `CORPUS_SCHEMA_VERSION` and the marker; UI
+  follows `docs/visual_design/VisualDesignSpec.md`; keyless verification only.
+- Decision log entries that stay as behaviour: 2026-09-04 (restricted `UiIntent`, local assets,
+  rfd only for pre-window lock refusal), 2026-09-06 (job-list bounds and cap), 2026-09-07 (run
+  progress accumulated in the reducer), 2026-09-08 (50-entry feed; summary-only reading pane),
+  2026-09-09 (runs never navigate), 2026-09-11 (channel-2 fixtures), 2026-09-19 (archive
+  contract), 2026-09-27 (Stop drains; one primary Run action). Entries this plan refines or
+  supersedes are listed in "Decision-log entries" below.
+- `docs/plans/Plan.ArchiveExportContract.md` Phase 3: 3b is independent and may land at any
+  time; 3c, 3d and 3e wait for the new pipeline (see "Sequencing with the archive contract").
+- Owner answers after the plan review (2026-09-28), settled:
+  - **No dual-write after the result-store switch.** From Phase 2 on only the new
+    append-friendly files are written; the old RON cache files stay untouched as a backup.
+    Returning to a pre-switch build is an emergency-only step via git; results made since the
+    switch could be converted back by hand or by a small tool if ever needed. That tool is not
+    part of this plan.
+  - **Jobs whose fetch time cannot be recovered stay hidden with the note.** Restored jobs with
+    no article file keep no fetch time, stay hidden from the desktop list, keep blocking
+    re-download of their URL, and are never deleted. The "N jobs are hidden because their fetch
+    time is missing" note stays and shows the remaining count. Fetch times are still recovered
+    from existing article files wherever possible (investigated in Phase 1, done in Phase 7).
+  - **`archive.md`, and everything that predicts it, keeps today's summary rule.** Today the
+    places that resolve summaries for the archive use the newest saved summary for the
+    article's content hash under any prompt, model or context key
+    (`lookup_any_by_content_hash`):
+    - the exported summary body (`build_summary_map`, `update/archive.rs:330`);
+    - the dialog's summary-mode token estimate (`archive_token_estimates`,
+      `state/batch.rs:280`), and the header meter's estimate, which uses the same any-key
+      fallback through the view's summary lookup (`view_builder.rs:323-372`);
+    - `summary_result_for_url` (`state/signal_candidate_access.rs:154-167`): live summary
+      session first, then the any-key cache. Its callers are at `signal_candidate_access.rs:243`
+      and `job_access.rs:152` and `230`. The `:243` and `:152` callers go with the aggregate
+      briefing (Phase 5) and the preview pipeline (Phase 6); any caller that remains keeps the
+      same semantics.
+
+    All of these keep their semantics, so `archive.md` stays byte-identical to a post-run
+    export today and the estimates keep predicting it. The only change is where the content
+    hash comes from: the saved-results index instead of the live sessions. Current-key-only
+    results (brief 9.2) apply to triage and priority, selection, annotations and coverage
+    counters. The reading pane shows only current-key summaries: today it reads only the live
+    summary session (`view_builder.rs:746-748`), which holds current-key results.
+
+## Verified facts (grounding)
+
+Each claim was checked in the code on 2026-09-28 unless marked "to verify", in which case the
+named phase verifies it first.
+
+**Bugs from the brief**
+
+- Bug 1 (`--dry-run` marks entries seen): `crates/harvester_batch/src/runner/dry_run.rs`,
+  `crates/harvester_engine/src/rss_seen_set.rs:39-53`,
+  `crates/harvester_core/src/update/polling.rs:52-59`. Resolved by removal (Phase 4).
+- Bug 2 (excess entries marked seen): verified for RSS and Brave. `filter_unseen_entries` marks
+  every entry seen (`rss_seen_set.rs:39-53`) before `poll_rss_source` applies `take(limit)`
+  (`crates/harvester_engine/src/source_poll.rs:131-144`); the production caller is
+  `crates/harvester_io/src/effect_helpers.rs:104`, so the `#[allow(dead_code)]` on
+  `poll_rss_source` is stale. Brave does the same: `BraveSeenSet::filter_unseen` marks all
+  (`crates/harvester_engine/src/brave_seen_set.rs:56-65`) before `take(limit)`
+  (`effect_helpers.rs:687-692`). The existing test `poll_rss_source_applies_max_after_dedup`
+  (`source_poll.rs:293`) passes while the fourth entry is lost.
+- Bug 3 (polls after Stop): verified. `handle_source_poll_completed` drops URLs when intake is
+  closed, with a comment claiming the next run will collect them (`polling.rs:52-59`), but the
+  seen-sets were already saved by the poll thread (`effect_helpers.rs:122-129`, `694-701`).
+  To verify in Phase 3: whether downloads cancelled by Stop before they started are
+  re-enqueued by the next run and survive a restart (only completed jobs are persisted,
+  `crates/harvester_io/src/persistence.rs:9-37`), which would be the same class of loss.
+- Bug 4 (results saved late): verified. Triage persists only when the session settles
+  (`crates/harvester_core/src/update/triage.rs:220-241`); summaries only in
+  `settle_summaries` and aggregate completion (`update/briefing.rs:285-333`,
+  `update/llm_completed.rs:423-456`); the signal cache is cloned and rewritten after every
+  completion (`update/signal_candidate.rs:502-521`). Every persist effect carries a full clone
+  of its cache (`crates/harvester_core/src/effect.rs:119-130`). Additional hazard, verified for
+  all three stores: a cache file that fails to parse ends up as an empty cache, and the next
+  save overwrites the paid results with it. The summary store returns an empty cache on parse
+  failure (`crates/harvester_io/src/summary_cache_store.rs:64-92`, pinned by the test
+  `load_corrupt_file_returns_empty_cache` at `:230`). The triage store does the same, pinned
+  by `corrupt_file_returns_empty_and_warns` (`triage_cache_store.rs:227`). The signal store's
+  `load` returns an error (`signal_candidate_cache_store.rs:70-86`); `host_bootstrap.rs:259-268`
+  logs it and continues without hydrating, so the next full-clone save replaces the file. An
+  unknown signal-cache version is also discarded as empty (`:77-84`).
+- Bug 5 (two lock files): verified. `.harvester_gui.lock`
+  (`crates/harvester_io/src/run_lock.rs:18-23`) and `.harvester_batch.lock`
+  (`crates/harvester_batch/src/runner.rs:28-33`).
+- Bug 6 (export needs a live session): verified. `handle_archive_clicked` uses
+  `state.archive_corpus()` (`update/archive.rs:16`), which is
+  `CurrentWorkingCorpus::select_for_archive` over the live triage session
+  (`state/batch.rs:162-164`) and is Unavailable unless triage is Complete
+  (`working_corpus.rs:639-657`). Annotations and the priority snapshot also read only the live
+  sessions (`update/archive.rs:229-265`).
+- Bug 7 (empty API key on desktop): verified. The desktop checks only `is_err()`
+  (`crates/harvester_ui/src/host.rs:783-788`) and `OpenAiProvider::from_env` accepts an empty
+  string (`crates/openai_provider_kit/src/openai.rs:23-28`); the batch host treats empty as
+  unavailable (`runner.rs:35-38`).
+- Bug 8 (iteration cap): verified. `MAX_ITERATIONS = 10_000` with a 100 ms receive timeout in
+  `crates/harvester_batch/src/runner/dispatch_loop.rs:214-240` and the same pattern in
+  `crates/harvester_batch/src/import_mode.rs:230-247`.
+- Bug 9 (performance): verified. Whole-state clone per message in the batch loop
+  (`dispatch_loop.rs:269`, `304`) and import loop (`import_mode.rs:262`, `313`). Every
+  successful download emits `PersistRuntimeState` (`update/mod.rs:55-65`, `659-663`) whose
+  snapshot copies all completed jobs with their links (`effect.rs:19-24`). The desktop driver
+  rebuilds and deep-compares the full view after every message batch (`crates/harvester_ui_bridge/src/driver.rs:233-240`)
+  on a 75 ms tick (`host.rs:806-810`), and every view build walks the entire summary cache
+  (`state/view_builder.rs:323-356`).
+
+**Restart state and export**
+
+- The reading pane reads `self.briefing.summary_for_url(url)` (`view_builder.rs:746-748`) and
+  row priorities read the live triage session (`view_builder.rs:269-276`), so both are empty
+  after a restart. The archive meter instead uses the cache-derived index
+  (`state/batch.rs:166-248`) built from current-metadata lookups
+  (`TriageCache::lookup_current_priority_parts`, `triage_cache.rs:165-181`). The current-key
+  lookup the restart fix needs therefore already exists and works at startup, and
+  `TriageCache::lookup` returns the stored key for provenance (`triage_cache.rs:125-141`).
+- The exported summary bodies come from `build_summary_map` (`update/archive.rs:321-336`), which
+  takes the content hash from the live triage session and then calls
+  `lookup_any_by_content_hash` (newest summary under any key). After a restart with no run the
+  live session holds no hashes, so no summary bodies are exported.
+- Batch API collection writes the collected record to `.batch_manifest.ron` before the cache
+  effects are applied, and keeps it there until the caches confirm it
+  (`runner/batch_runtime.rs:351-395`, `remove_collected_with_persisted_cache_confirmation`;
+  test `collected_snapshot_replays_after_restart_until_cache_confirmation` in
+  `batch_coordinator.rs:1769`). A batch in state `Collected` can therefore still hold the only
+  copy of a paid result.
+- "22 jobs are hidden because their fetch time is missing": the count covers every job without
+  a fetch time, regardless of the list scope (`view_builder.rs:392-402`), and a persisted job's
+  `fetched_utc` is optional with a serde default (`persistence.rs:16-17`). Likely cause: jobs
+  persisted before fetch times were recorded. To verify in Phase 1; fixed in Phase 7.
+
+**Inputs and contracts**
+
+- `.sources.ron` is parsed as one strict `SourceRegistry`; any parse or validation error yields
+  an empty registry with a warning (`crates/harvester_io/src/source_loader.rs:10-39`). An
+  unknown source type today therefore silently disables every source, which is worse than the
+  brief assumed. `SourceType::Script` is at `crates/harvester_engine/src/source_config.rs:84-90`
+  and is polled as a failure at `crates/harvester_io/src/effect_runner/poll.rs:115-126`.
+- The summary store maps persisted `AggregateBriefing` prompt ids (`summary_cache_store.rs:97-109`);
+  after the aggregate briefing is removed such entries must be skipped, not fail the load.
+- Launch policy: `scripts/lib/HarvesterLaunch.psm1:12` passes `--single-shot --batch-api`;
+  pinned by `scripts/tests/HarvesterLaunch.Tests.ps1:149`, `266`, `352`.
+- IPC: `IPC_SCHEMA_VERSION = 12` (`crates/harvester_ui_bridge/src/ipc.rs:4`) and
+  `frontend/src/ipc/schemaVersion.ts`. The probe gates synthetic snapshots pushed at
+  `PROBE_RATE_HZ = 20` (`crates/harvester_ui_bridge/src/probe.rs:18-24`, `385-393`); it does
+  not depend on the 75 ms tick. `crates/harvester_ui_bridge/tests/host_drain_cost.rs` holds
+  view-cost timing tests that track state shape.
+- Batch API manifest states: `Created`, `Submitted`, `Collected`, `Failed`
+  (`crates/harvester_batch/src/batch_manifest.rs:47-53`).
+- `MockLlmProvider` (`crates/openai_provider_kit/src/test_support.rs:14-80`) answers from a
+  FIFO queue regardless of the request. With concurrent triage, summary and scoring calls the
+  order is nondeterministic, so the benchmark needs a small routing provider that answers by
+  prompt (Phase 1).
+- LLM output is validated in the worker and again in the reducer
+  (`crates/harvester_engine/src/llm/handle.rs:1025-1033`; `update/llm_completed.rs:164`,
+  `297`; `update/signal_candidate.rs:70`) and a third time for Batch API collection
+  (`runner/batch_runtime.rs:244-251`).
+- Frontend checks: `npm run check` runs `tsc`, `biome check` and `vitest`
+  (`frontend/package.json:7-9`).
+
+## Target design
+
+### One saved-results store per result kind, one implementation (Phase 2)
+
+- The three result caches share one generic in-memory store and one I/O store. On disk each
+  becomes an append-only JSON Lines file: `.triage_cache.jsonl`, `.summary_cache.jsonl`,
+  `.signal_candidate_cache.jsonl`. Each line is one `(key, entry)` record in today's persisted
+  DTO shape, so cache keys and entry meanings are unchanged. On load, later lines win for equal
+  keys; an unparseable earlier line is skipped and counted in the log.
+- Tail recovery before any append: when the store is opened, a final line without a
+  terminating newline (a torn write) is copied to a sidecar such as
+  `.summary_cache.torn-<timestamp>.jsonl` for forensics (covered by the marker's `.*.jsonl`
+  internal-state pattern) and the file is truncated back to the last complete line. Only then does the sink
+  append. This keeps the next record from joining the fragment and becoming unreadable.
+- Migration with atomic publication: when a `.jsonl` file is absent and the `.ron` file
+  exists, the RON file is read once and the complete result is written to a temporary file in
+  the output folder, flushed to disk, verified by re-reading (same key count as the RON load),
+  and only then renamed to `.jsonl`. A `.jsonl` file therefore exists only when it holds the
+  whole migration; an interrupted migration leaves at most a stale temporary file, which the
+  next start deletes before migrating again. The temporary file's name is pinned to the
+  marker's `internal_state` patterns, for example `.summary_cache.migrating-<timestamp>.jsonl`,
+  so a leftover never sits unclassified in the corpus root. The RON file is never modified and
+  stays as the backup.
+- Refusal, not an empty store: if the RON file exists but fails to parse (or has an unknown
+  format version), nothing is written, AI stages stay unavailable, and the owner is told which
+  file failed and why. Paid results are never replaced by an empty store. The desktop shows the
+  existing `ai_unavailable_message` on the Run surface. Today that field reaches the page only as
+  the tooltip of the disabled Process unfinished button (`view_builder.rs:165-177`); the page
+  never reads the field itself. The command line prints the file and reason at startup and in
+  its final summary, still polls and downloads, and exits non-zero. The owner recovers
+  deliberately: restore the file from a backup, or move it aside to start that store empty
+  (its results are then paid for again when needed).
+- After the switch only the `.jsonl` files are written; there is no dual-write period (owner
+  answer, see "Settled inputs").
+- No eviction: `DEFAULT_CACHE_CAPACITY` and the eviction paths in `summary_cache.rs` and
+  `triage_cache.rs` go.
+- Saving: on each completion the reducer inserts the result into state and emits
+  `Effect::SaveResults` carrying only the new records (never a clone of the whole store). The
+  effect runner's injected result sink appends them in coalesced batches: at most about two
+  seconds after the first unsaved record, at run end and Stop (the reducer emits a flush
+  request), on runner drop, and on desktop window close. A crash loses at most a few seconds.
+  This follows the 2026-09-18 pattern (reducer-emitted effect, runner-owned injected sink).
+- Why JSON Lines rather than coalesced RON rewrites: appends cost only the new records, while
+  a rewrite costs the whole store (9,345 summaries today and growing without eviction). JSON
+  Lines also makes a torn write local to one line.
+
+### Slim runtime state and a per-article link store (Phase 7)
+
+- `.harvester_state.ron` keeps, per completed job, the URL, tokens, bytes and fetch time, plus
+  the pending-intake list (Phase 3), the desktop window size and the remembered desktop list
+  tab and selected article URL (Phase 8). All new fields are optional with serde defaults, so
+  old files still load and older builds can still read new files.
+- Extracted links move to a per-article link store under `output/.article_links/`, one small
+  JSON file per article named by a hash of the canonical archive URL key. Records keep the URL,
+  anchor text and link kind, which Archive contract step 3c needs. Paths are derived from the
+  hash only and confined to the output folder.
+- "Open a link found in the article" loads the selected article's links through a
+  reducer-emitted effect when the selection changes; the snapshot shape for the selected job's
+  links is unchanged.
+- One-time migration on startup (I/O side), ordered so the original bytes are never lost:
+  1. Preserve: copy `.harvester_state.ron` to a temporary file, flush, verify it is
+     byte-identical to the original (length and hash), then rename it to
+     `.harvester_state.pre-slim.ron`. An existing verified backup is never overwritten.
+  2. Write the link files from the original (idempotent; each file written atomically).
+  3. Replace: write the slim state to a temporary file, verify it loads, then atomically
+     replace `.harvester_state.ron`.
+
+  Both temporary files have pinned names that match the marker's `.*.ron` pattern, for example
+  `.harvester_state.pre-slim-partial-<timestamp>.ron` and
+  `.harvester_state.slim-partial-<timestamp>.ron`, so recovery can recognise them and a
+  leftover is never unclassified. Link-file temporaries stay inside `.article_links/`.
+
+  Recovery at each interruption point: a leftover temporary backup is deleted and step 1
+  restarts; a verified backup with an old-shape active state resumes at step 2; a verified
+  backup with a slim active state means the migration is complete. The active state is never
+  replaced before a verified backup exists.
+
+### Saved-results index: one mechanism for view, archive and export (Phase 8)
+
+- The reducer keeps, per article in the display scope, its content hash and the saved triage,
+  summary and signal-candidate result under the current keys, with the stored triage key's
+  model for provenance. The display scope is the union of the two time-bounded list modes:
+  articles fetched since the archive checkpoint (the window) and articles fetched in the last
+  24 hours, which DecisionLog 2026-09-16 makes independent of the checkpoint. Each entry records
+  whether it is in the window: processing, unfinished work and archive selection stay
+  restricted to the window, while the view uses the whole scope so an archived article that is
+  still in Last 24h keeps its priority, ordering and summary. "Current keys" means the keys a run under the current
+  configuration would compute, including dated-alias compatibility and the scoring key that
+  embeds the upstream summary digest. It is built at startup from the stores, the corpus scan's
+  content hashes and the loaded prompt metadata and contexts; it is rebuilt when a run freezes
+  its configuration and updated on each saved completion.
+- The desktop view (priority badges, ordering, Results rows, reading pane summary, archive
+  meter and readiness) and the archive dialog, selection, annotations, coverage counters and
+  priority snapshot all read this index under current keys. Stale-key results stay in the
+  stores but are invisible there, exactly as a run would treat them. The reading pane shows
+  only current-key summaries.
+- Archive-predicting summary lookups keep today's any-key rule, settled with the owner (see
+  "Settled inputs"). The exported summary body, the dialog's summary-mode token estimate, the
+  header meter's summary-token estimate and any surviving caller of `summary_result_for_url`
+  resolve the summary as today: the newest saved summary for the content hash under any key,
+  with `summary_result_for_url` still preferring a live session summary first. The index only
+  supplies the content hash, which removes today's dependence on the live triage and
+  pre-triage sessions, so these work after a restart with no run and export output is
+  unchanged.
+- In the pipeline stage this index becomes the "done" side of the per-article stage table.
+
+### Per-article pipeline (Phases 10 to 13)
+
+- Policy lives in a new pure module, `crates/harvester_core/src/pipeline/`: a per-article
+  stage-status table (triage, summary, score: not needed, needed, pending, in flight, done,
+  failed), eligibility (pre-triage verdict first, then priority cutoffs; scoring requires
+  priority at least 2 and current-key upstream results), the cache hit or miss decision under
+  the run's frozen configuration, one shared cap on in-flight model calls, cross-stage priority
+  (scoring, then summary, then triage, as today, so articles finish sooner and Stop leaves fewer
+  half-done ones), the 1,000-call session quota, halts (out of credits; three consecutive rate
+  limits), Stop semantics, and one definition of "run done" used by every host.
+- Effects are single units of I/O: load and prepare one article, make one validated model call
+  (the message carries the validated result and the replay record is written in one place),
+  save a batch of results, plus the existing poll, download, import and export effects. No
+  worker owns policy or a second copy of results.
+- One shared host loop in `crates/harvester_io/src/host_loop.rs` (Tauri-free, Node-free) drives
+  the reducer for the command-line run, import and the desktop driver. It moves state rather
+  than cloning it and needs no periodic tick for pipeline pacing; the desktop adds only a
+  coarse (about one minute) tick for the Last 24h window.
+
+## Conventions for every phase
+
+**Where to run checks.** All Cargo and Pester commands run from the repository root
+`C:\Users\larsp\src\web_page_filet_mignon`; frontend commands run from `frontend/`.
+
+**Standard Rust checks** (every phase that touches Rust):
+
+1. `cargo build` (while a batch run is active: `cargo build --workspace --exclude harvester_batch`)
+2. `cargo test` for the crates the phase touches, then the full root `cargo test`
+3. `cargo clippy --all-targets -- -D warnings`
+4. `cargo fmt` (Codex reports `cargo fmt --check`)
+5. When `harvester_ui` changes: `cargo clippy -p harvester_ui --all-targets -- -D warnings`
+
+Codex runs these with `--offline` against pre-warmed caches.
+
+**Frontend checks** (phases that touch `frontend/` or IPC), from `frontend/`: `npm run check`,
+`npm run build`, `npm run fmt`.
+
+**Owner or Claude only** (Codex cannot run them): Pester
+(`Invoke-Pester -Path scripts/tests/HarvesterLaunch.Tests.ps1`), the IPC probe
+(`cargo run -p harvester_ui -- --probe-ipc`, needs a display and the output-folder lock, about
+150 s, writes `.local/probe/ipc-report.json`), `scripts/project-stats.ps1`, and any git
+operation.
+
+**Benchmark** (from Phase 1 on): run before and after each phase and record the numbers in
+"Benchmark and size log" below:
+`cargo run -p harvester_batch --example replay_bench -- --host batch` and
+`cargo run -p harvester_batch --example replay_bench -- --host desktop`.
+
+**Test-count protocol.** Before a phase, record each crate's `cargo test` totals (the
+`test result:` lines), the frontend `vitest` total, and the Rust test-attribute count
+(the regex in `scripts/project-stats.ps1`, `Count-RustTests`; 1,509 attributes on
+2026-09-28). After the phase:
+
+- Only files on the phase's "may be deleted wholesale" list may disappear. Every other test file
+  is edited, not deleted.
+- The change in counts must equal the named removals plus the added regression tests. The phase
+  report lists every removed test by name with the feature it covered.
+- Tests that pin preserved behaviour (quota, halts, Stop, cutoffs, cache keys, export bytes,
+  ordering, job-list modes, IPC decoding) are rewritten when their harness goes, never dropped.
+
+**Regression tests.** Every bug fix gets a test at the reducer, emitted-effect or
+public-contract level. The archive fixtures under
+`crates/harvester_engine/tests/fixtures/archive_export/` must pass byte for byte in every phase.
+
+**Carry-over fixture** (from Phase 1 on, run in every later phase): a checked-in pre-change
+output folder in today's formats, containing an old-shape `.harvester_state.ron` (with links,
+`downloaded_path` values and both window-size pairs), RSS and Brave seen-sets, and all three
+paid-result stores in RON with current-key and stale-key entries. The test copies it to a
+temporary folder, runs one unchanged command-line cycle through the benchmark harness (canned
+polls return only already-seen entries and URLs of restored jobs), and asserts:
+
+- no `EnqueueUrl` for already-downloaded or seen work;
+- no model call for any article whose completed work exists under the current keys;
+- every paid result still loadable afterwards;
+- the three paid-result RON stores (`.triage_cache.ron`, `.summary_cache.ron`,
+  `.signal_candidate_cache.ron`) byte-identical to the fixture's copies;
+- the RSS and Brave seen-sets lose no entry (content, not bytes: they are rewritten whole
+  whenever a poll saves them);
+- the runtime state still holds every restored job with its URL and fetch time (content, not
+  bytes: the runtime state is rewritten by design).
+
+Later phases may extend the assertions (the Phase 7 backup and migration checks, restored view
+state in Phase 8) but never weaken them.
+
+**IPC changes** bump `IPC_SCHEMA_VERSION` in `crates/harvester_ui_bridge/src/ipc.rs` and
+`frontend/src/ipc/schemaVersion.ts` together and regenerate fixtures with
+`UPDATE_UI_FIXTURES=1 cargo test -p harvester_ui_bridge`.
+
+**IPC probe baselines.** The probe's gates stay as they are: they measure delivery of synthetic
+snapshots at 20 Hz, which is independent of the tick and of pipeline pacing. The probe is run
+at the Phase 1 baseline, after each phase that changes the snapshot shape or its pacing
+(Phases 6, 8 and 12), and at close-out. Each report is kept as
+`.local/probe/ipc-report.<label>.json`. When the view shape changes, the synthetic cases in
+`crates/harvester_ui_bridge/src/probe.rs` are updated to the new shape and the new numbers
+become the baseline. A failing gate is fixed in delivery, following the 2026-09-08 precedent.
+Loosening a gate needs its own decision-log entry.
+
+**Engineering diary.** Every bug fix gets a `docs/EngineeringDiary.md` entry with lessons and
+prevention; noteworthy implementations get one too (appended at the end of the file).
+
+## Cleanup stage
+
+### Phase 1: Baseline, replay benchmark and pre-flight checks
+
+No product behaviour changes. Everything later is measured against this phase.
+
+Work:
+
+1. Split `harvester_batch` into a library plus a thin `main.rs` (argument parsing and exit code
+   only), so examples and tests can drive the real runner. Add an effect-sink seam to the
+   dispatch loop (today it calls `effect_runner.enqueue` directly, `dispatch_loop.rs:310-320`)
+   so the benchmark can intercept network effects.
+2. Add `crates/harvester_batch/examples/replay_bench.rs`:
+   - Copies a real output folder (default `output`) into a work folder (default
+     `.local/bench/<timestamp>`). It refuses any work path inside the source and never writes to
+     the source. `--reuse-copy` skips the copy.
+   - Holds back the newest N articles (default 40, like this morning's run) from the copy's
+     article files, runtime state and result stores so the run discovers them.
+   - Answers `PollAllSources` with canned `SourcePollCompleted` messages carrying the held-back
+     URLs spread over 29 sources (24 Brave-like, 5 RSS-like), and answers each `EnqueueUrl` by
+     writing the held-back article file into place and sending the job messages with its links
+     and a fetch time. No network, no keys, no launcher.
+   - Serves model calls from a routing canned provider built on
+     `openai_provider_kit`'s `LlmProvider` trait. It returns valid triage, summary and
+     signal-candidate JSON by prompt, spreads priorities deterministically by URL hash so the
+     cutoffs are exercised, and applies `--llm-latency-ms` (default 0; the log also records a
+     1500 ms run to approximate provider latency).
+   - Hosts: `--host batch` runs the real batch cycle; `--host desktop` runs
+     `harvester_ui_bridge::driver::run_driver` with a 75 ms synthetic tick and a counting
+     snapshot sink (`harvester_ui_bridge` is Tauri-free, so it can be a dev-dependency).
+   - Reports to `report.json` and stdout: wall time to run completion; reducer time per message
+     kind (count, p50, p95, max, total); effects by kind; bytes written and write latency per
+     private file; view builds and their cost (desktop host); snapshots emitted.
+   - A smoke test in `cargo test -p harvester_batch` runs the harness on a generated
+     five-article folder and asserts the run completes and results are saved.
+3. Add the carry-over fixture and its test (see "Conventions for every phase") under
+   `crates/harvester_batch/tests/`. The fixture is small and synthetic but uses the real
+   on-disk shapes; it never contains the owner's data.
+4. Add `/.local/bench/` to `.gitignore`.
+5. Record baselines: benchmark (both hosts, both latencies), the IPC probe, per-crate test
+   totals, and `scripts/project-stats.ps1` output, in the log below.
+6. Pre-flight checks, each reported in the phase report:
+   - Read `output/.batch_manifest.ron` (keyless, read-only) and list every batch not in
+     `Collected` or `Failed`, every entry without a collected record, and every successful
+     collected record that is still in the manifest. A remaining collected record means its
+     cache confirmation has not happened yet (see Verified facts), so `Collected` alone is not
+     treated as safe. For each such record, report whether its key is present in the current
+     result stores. As of 2026-09-28 the only batch is `Collected`; if anything is outstanding
+     at the provider, the owner runs one `--drain` before Phase 4; unconfirmed records are
+     reconciled at the start of Phase 4.
+   - Investigate the 22 hidden jobs: count restored jobs without a fetch time in
+     `output/.harvester_state.ron`, and check whether each has an article file whose
+     frontmatter carries `fetched_utc`. Record the finding for Phase 7.
+   - Confirm the benchmark reproduces the known costs (state save of about 10 s per download
+     on the copied 78 MB state; the per-message clone).
+
+Verification: standard Rust checks; `cargo test -p harvester_batch` count unchanged apart from
+the new smoke test and carry-over test (plus 2). Benchmark runs complete on a copy of
+`output/`. Pester and the IPC probe run once to confirm the baseline is green.
+
+Expected test counts: +2 (smoke test, carry-over test). Nothing deleted.
+
+Docs: none required beyond this plan's log. Diary: implementation entry for the replay
+benchmark (what it measures and how to run it). Decision log: none.
+
+### Phase 2: Keep every paid result
+
+Fixes bug 4 and the eviction risk (brief 9.3) before anything else changes behaviour.
+
+Work:
+
+1. Refusal instead of an empty store for all three stores (the hazard is verified for each; see
+   Verified facts), with the owner-facing behaviour in "Target design": the desktop shows
+   `ai_unavailable_message` on the Run surface, following `docs/visual_design/VisualDesignSpec.md`.
+   The page starts reading an existing field, so the IPC shape does not change. The command line
+   reports the file and exits non-zero.
+2. Introduce the generic result store (in-memory in `harvester_core`, I/O in `harvester_io`)
+   and move the three caches onto it without changing `TriageCacheKey`, `SummaryCacheKey`,
+   the signal-candidate key or their entry types. The triage alias index for current-metadata
+   lookups stays and is rebuilt on load.
+3. JSON Lines persistence, tail recovery before appending, atomic migration publication with
+   the RON file kept, and the refuse-to-overwrite rule, as in "Target design". Every reader of
+   the caches moves to the new store in this phase, including the Batch API cache confirmation
+   (`runner/batch_runtime.rs:351-395`), which would otherwise keep reading the frozen RON files
+   and never confirm newly collected records.
+4. Remove `DEFAULT_CACHE_CAPACITY` and the eviction paths, including the code that refreshes
+   derived indexes after eviction.
+5. Replace `PersistTriageCache`, `PersistSummaryCache` and `PersistSignalCandidateCache` (and
+   their full clones) with `SaveResults { records }` emitted on each completion and cache-hit
+   provenance change, plus a flush request at run end and Stop. Add the coalescing result sink
+   to `EffectRunner` next to the runtime-persistence sink; flush on drop and on desktop close.
+6. Summary entries with the retired `AggregateBriefing` prompt id keep loading for now (removed
+   with the briefing in Phase 5, where they are skipped with a warning).
+
+Regression tests:
+
+- Reducer: a triage, a summary and a signal completion each emit `SaveResults` with exactly
+  that record, before the session settles.
+- Result sink: records are written within the coalescing window, on flush and on drop; a
+  simulated crash after the window loses nothing earlier.
+- Store: more than 10,000 entries are all kept; for each of the three stores, a corrupt RON
+  file (and, for the signal store, an unknown format version) is not overwritten and AI stages
+  report unavailable with the file named; RON-to-JSONL migration preserves every key and entry
+  and leaves the RON file byte-identical; the real-shape fixtures in `summary_cache_store.rs`
+  (V3 without entities) still load.
+- Refusal is visible: the view carries the store failure in `ai_unavailable_message`, and the
+  frontend renders it on the Run surface (a `vitest` case against the existing
+  `ai_unavailable.json` fixture); the command-line bootstrap reports the file and ends with a
+  non-zero exit code.
+- Marker: the pinned migration temporary name and the torn-tail sidecar name each match a
+  declared `internal_state` pattern (`corpus_manifest.rs` tests).
+- Crash sequences: (a) migration interrupted before publication (temporary file present, no
+  `.jsonl`), restart, append, restart: every RON record and the appended record load, no
+  temporary file remains; (b) torn final line, restart, append, restart: the fragment is in the
+  sidecar, every complete record and the new record load, and the file ends with a newline;
+  (c) interrupted append of a multi-record batch: the complete records survive and the next
+  append is readable.
+- The Batch API cache confirmation finds records saved in the new store.
+- Keys: existing key-construction tests unchanged (cache keys must not move).
+
+Expected test counts: removed: `capacity_enforcement_evicts_oldest`,
+`evict_to_limit_removes_oldest`, `evict_to_limit_does_nothing_when_below_limit`
+(`summary_cache.rs`), `capacity_guard_evicts_oldest_entry` (`triage_cache.rs`); TTL and
+older-than eviction tests go only if their functions have no remaining caller. Rewritten to the
+new rule, not removed: `load_corrupt_file_returns_empty_cache` (`summary_cache_store.rs:230`)
+and `corrupt_file_returns_empty_and_warns` (`triage_cache_store.rs:227`), which pin the hazard
+being removed and now assert refusal; effect assertions on the old persist effects. Added: the
+regression tests above (about 19, including a new signal-store refusal test). No file deleted
+wholesale.
+
+Verification: standard Rust checks; frontend checks (the Run surface now renders
+`ai_unavailable_message`); benchmark (expect far fewer bytes written per completion). Human
+testing recommended: the owner's next run after this phase; afterwards the `.jsonl` files
+exist, the `.ron` files are unchanged, and the run's results are present after closing and
+reopening. What the owner would see if a store ever refuses: the desktop Run surface names the
+file and says AI is off; the command line prints the same and exits with an error. The AI
+steps stay off until the owner restores that file from a backup, or moves it aside to start
+that store empty.
+
+Docs: `docs/Architecture.md` (persistence rules under "Key rules"); `docs/CorpusFormat.md` and
+the marker: `internal_state` gains `.*.jsonl` (a compatible addition, no schema bump; update
+`build_corpus_manifest` and its tests in `crates/harvester_engine/src/corpus_manifest.rs`,
+including the pinned temporary and sidecar names). `docs/visual_design/VisualDesignSpec.md` if
+the Run surface message needs a new element.
+Decision log: "Paid model results are kept and saved incrementally" (see list), including the
+owner's no-dual-write rule and the emergency-only rollback. Diary: bug-fix entry (results saved
+only at settlement; empty-store overwrite hazard).
+
+### Phase 3: Intake and host fixes
+
+Fixes bugs 2, 3, 5 and 7, the per-message clone in the command-line loops, and brief 9.6.
+
+Work:
+
+1. Bug 2: `poll_rss_source` marks seen only the entries it emits plus entries without a URL
+   (the latter as today); `handle_brave_source_poll` marks seen only emitted URLs. Drop the
+   stale `#[allow(dead_code)]`.
+2. Bug 3: when a poll completes after Stop, the reducer records its URLs in a persisted
+   pending-intake list instead of dropping them. The list is a new optional field with a serde
+   default on the persisted runtime state (`.harvester_state.ron`), carried in the existing
+   `PersistRuntimeState` snapshot, so both hosts write it through the same effect and old state
+   files still load. Any Full run, from the command line or the desktop Run button, ingests
+   the list before polling and clears ingested entries. Process unfinished (Resume) does not
+   fetch them. First verify cancelled-before-start downloads (see Verified facts); if they are
+   lost too, they join the same list. Phase 7's slim state keeps the field.
+3. Bug 5: one lock per output folder, `.harvester.lock`, for both hosts (and the IPC probe). The
+   lock metadata records which host holds it; a second start refuses and names the holder
+   ("the Harvester window" or "a command-line run", with PID and start time). The desktop still
+   refuses through the pre-window rfd dialog; the command line prints the message and exits
+   non-zero; `--force-unlock` keeps its meaning.
+4. Bug 7: one helper in `crates/harvester_io/src/host_bootstrap.rs` decides AI availability
+   from the environment (missing or empty means unavailable, with the existing messages), used
+   by every host; `OpenAiProvider::from_env` also rejects an empty key.
+5. Replace `update(state.clone(), msg)` with a move in `dispatch_loop.rs` and `import_mode.rs`.
+6. `.sources.ron` (brief 9.6): remove `SourceType::Script`, `SourceKind::Script` and
+   `--allow-unsupported-sources`. Load the registry entry by entry: an entry whose type is
+   unknown or removed is skipped with an `engine_logging` warning naming its position and, where
+   readable, its id; valid entries load as today; File and CuratedList stay parseable; other
+   existing validation errors behave as today. First step: verify the chosen parsing approach
+   (per-entry `ron::Value`, an untagged fallback, or span splitting) against a copy of the real
+   file (24 BraveNews and 5 Rss entries) plus a Script entry and a misspelt type, because RON's
+   enum handling in untyped values is the known risk.
+
+Regression tests:
+
+- RSS and Brave: with a limit of 1 and three unseen entries, the first poll emits one and the
+  next poll emits the next one (replaces the loose assertion in
+  `poll_rss_source_applies_max_after_dedup`).
+- Reducer: `SourcePollCompleted` after Stop stores the URLs and the next `PersistRuntimeState`
+  carries them; after a simulated restart the next Full run emits `EnqueueUrl` for them before
+  polling and the list is empty afterwards; Resume does not fetch them. A state file without the
+  field loads with an empty list.
+- Lock: command-line identity held, desktop acquisition refused with the holder named, and the
+  reverse; release on drop.
+- AI availability: empty and missing key both unavailable on both hosts' bootstrap paths.
+- Sources: real-shape registry loads all 29 entries; a Script entry and an unknown type are
+  skipped with a warning and the rest load; File and CuratedList entries still parse.
+
+Expected test counts: `source_config.rs` and `cli.rs` tests that construct Script sources or
+`--allow-unsupported-sources` are removed and named; about 11 added. No file deleted wholesale.
+
+Verification: standard Rust checks, plus `cargo clippy -p harvester_ui --all-targets -- -D warnings`
+(the desktop host changes). Benchmark (command-line reducer time per message should fall).
+Human testing recommended: start the desktop, then the command-line launcher, and confirm the
+second refuses and names the first; then the reverse.
+
+Docs: `docs/Architecture.md` (crates section: one lock); `docs/FutureIdeas.md`: close
+FI-Architecture-HostConcurrency-0001; `README.md` if it mentions separate locks (it does not
+today). Decision log: "One lock per output folder for both hosts"; "Source registry entries of
+unknown type are skipped". Diary: bug-fix entries for bugs 2, 3, 5 and 7.
+
+### Phase 4: Remove the Batch API and the batch-only modes
+
+Removes the Batch API, `--drain`, `--dry-run` (bug 1), `--single-shot`, the recurring mode and
+`--poll-interval`, and fixes bug 8.
+
+Entry condition: the Phase 1 manifest check is repeated at the start of this phase and shows
+nothing outstanding at the provider, every successful collected record is confirmed in the
+durable result stores (step 1 below), and the owner confirms before the code is removed.
+
+Work:
+
+1. Reconcile collected results before anything is removed. `Collected` does not prove a result
+   reached the caches (see Verified facts). While the batch code still exists, add a keyless
+   one-shot reconciliation (a `harvester_batch` example, run by the owner or by Claude with the
+   owner's consent because it writes to `output/`): it loads the manifest and the migrated
+   result stores, validates every successful collected record with the same validators the
+   collection path uses, appends each record whose key is missing through the result store,
+   flushes, and re-checks. The key is the entry's frozen key from the manifest
+   (`PendingEntry.key: FrozenBatchKey`, `batch_manifest.rs`), never recomputed under the current
+   configuration, since dated-alias keys may differ. It makes no provider call and needs no key. It reports confirmed,
+   appended and invalid counts; invalid records are listed for the owner and are not appended.
+   The removal proceeds only when the re-check finds every successful record in the stores. The
+   reconciliation example is deleted together with the batch code later in this phase.
+2. Delete `crates/harvester_batch/src/batch_coordinator.rs`, `batch_manifest.rs`,
+   `runner/batch_runtime.rs`, `runner/drain_control.rs`, `runner/dry_run.rs`,
+   `crates/openai_provider_kit/src/batch.rs`, `crates/harvester_core/src/update/batch_results.rs`,
+   and the reconciliation example from step 1.
+3. Remove from core: `LlmResultKind::DeferredToBatch`, `Msg::RearmDeferredBatchStages`, frozen
+   batch keys, `llm_deferred_allowance`, the `AfterDownloadsSettle` and `Disabled` wave
+   policies, Continue scope if it has no remaining caller, `AwaitingBatch` phases, deferred
+   counters in observations and progress, and the `[model-budget]` deferred line.
+4. The command-line host always runs one cycle: poll, download, process, exit. Remove
+   `--batch-api`, `--drain`, `--dry-run`, `--single-shot` and `--poll-interval`.
+5. Launch policy: `RuntimeArguments` for Batch becomes empty in
+   `scripts/lib/HarvesterLaunch.psm1`; update the three assertions in
+   `scripts/tests/HarvesterLaunch.Tests.ps1`.
+6. Bug 8: the command-line and import loops stop counting idle timeouts toward an iteration
+   cap; a wall-clock no-progress watchdog (no message and no in-flight work for a named
+   duration) replaces it and logs the stuck operation.
+7. Replay records are now written in one place (the synchronous path); `persist_replay_record`
+   stays.
+
+Regression tests: the reconciliation (before its deletion) confirms records already in the
+stores, appends a missing successful record so a second check confirms it, and refuses an
+invalid record; a command-line cycle with no flags polls, processes and exits; a loop idle for
+longer than the old cap does not fail while downloads are in flight; the watchdog fires only
+without progress; the carry-over fixture test still passes. Pester: the Batch policy has no
+runtime arguments.
+
+Expected test counts. May be deleted wholesale (test attributes): `batch_coordinator.rs` (13),
+`batch_manifest.rs` (4), `runner/batch_runtime.rs` (2), `openai_provider_kit/src/batch.rs` (4),
+`update/tests/batch_api_tests.rs` (5), the reconciliation example's tests, plus
+`drain_control.rs`, `dry_run.rs` and `batch_results.rs` (no tests). About 28 in total, plus
+the reconciliation tests added and removed within the phase. Edited, not deleted: `runner/tests.rs`
+(50 today; about 17 tests named for batch, drain, dry-run, deferral or recurring behaviour go),
+`cli.rs` (21; removed-flag tests go), `update/pipeline_run/wave_tests.rs` (12),
+`update/pipeline_run/tests.rs` (28), `update/model_dispatch_tests.rs` (12). Expected total
+removal: roughly 45 to 65 attributes, every one named in the report.
+
+Verification: the reconciliation report (every successful collected record confirmed in the
+stores) is attached to the phase report before step 2 starts; standard Rust checks; Pester
+(owner or Claude); benchmark with `--host batch` (the Batch API wait cycles disappear). Human testing recommended: the first morning run
+without the Batch API; the progress lines should reach the end without "awaiting batch".
+
+Docs: `docs/Architecture.md` (remove the Batch API and drain paths, the deferred allowance
+paragraph and `AfterDownloadsSettle`/`Disabled`); `README.md` (launch description);
+`docs/ThreatModel.md` (confirm no Batch API collection path remains; replay records stay as
+forensics); `docs/FutureIdeas.md` (retire Batch API items). Decision log: "The Batch API and the
+batch-only modes are removed". Diary: bug-fix entries for bug 1 (by removal) and bug 8.
+
+### Phase 5: Remove the aggregate briefing, stale-summary refresh and the concatenated export
+
+No IPC change in this phase: view-model fields that fed removed features stay and read
+`false` or empty until Phase 6 removes them with the single IPC bump.
+
+Work:
+
+1. Aggregate briefing and stream: remove `crates/harvester_core/src/briefing_snapshot.rs`,
+   `state/briefing_snapshot_access.rs`, `state/briefing_orchestration.rs`, the aggregate parts
+   of `briefing.rs`, `update/briefing.rs` and `update/llm_completed.rs`, engine
+   `llm/prompts/briefing.rs` and `llm/prompts/briefing_stream.rs`, briefing validation, briefing
+   history persistence and `contexts/aggregate_briefing.toml`. `PromptId::AggregateBriefing`
+   goes; persisted summary entries with that id are skipped with a warning.
+   - Trap: `BriefingSession` is also the live summary stage. `settle_summaries` must never
+     issue an aggregate call; remove the `skip_aggregate_briefing` switch rather than defaulting
+     it, and keep `briefing_metadata_state` only as far as live summary dispatch needs it.
+   - Keep (live, misnamed): `.briefing_checkpoint.ron`, `briefing_since_utc`,
+     `SaveBriefingCheckpoint`, `TriageSelectionPolicy`, and the engine corpus loader
+     (`CorpusScanIndex`, `TriageArticleDelta`, `summary_preparation_budget`).
+   - Rewrite the roughly 40 live-summary tests that drive through `Msg::ArticlesLoaded` or
+     `request_briefing_orchestration()` to drive the triage-to-summary path through
+     `update/test_support.rs`. Their count stays the same.
+2. Engine loaders used only by briefing, refresh or tests in
+   `crates/harvester_engine/src/briefing.rs`, and `LoadArticlesForBriefing`.
+3. Stale-summary refresh: `crates/harvester_batch/src/summary_refresh.rs`,
+   `progress/stale_reporter.rs` (move `format_elapsed` to `import_reporter.rs` first), the
+   refresh CLI flag, and writing `summary_refresh_reports/` and `.summary_refresh_last.json`.
+4. Concatenated export (`export.txt`, `manifest.json`) in `crates/harvester_engine/src/export.rs`,
+   separating `ExportOptions` from the archive exporter without changing archive output.
+5. Replay provider lookup (`replay_cache` is always `None`); keep `persist_replay_record`.
+6. Prompt Lab remnants (`Msg::RequestLlmCompletion`, template and model overrides,
+   `max_input_chars`); keep prompt overlay loading (2026-09-18).
+7. Test-only production code: `CurrentWorkingCorpus::select`, `summaries_follow_triage`,
+   `PipelineRunPhase::AwaitingSettle`, and Msg variants with no production sender that are not
+   reachable from `UiIntent`. The manual pre-triage decisions API moves to test support because
+   15 or more tests use it as a fixture tool.
+8. Corpus marker: drop `export.txt`, `manifest.json`, `summary_refresh_reports/` and
+   `.summary_refresh_last.json` from `generated_artifacts`. Not a schema bump: none of those
+   patterns can match an article record (`*.md` in the root or `linked/*.md`), so no reader's
+   classification of articles changes (`docs/CorpusFormat.md`, "Versioning Rules").
+
+Regression tests: summaries complete and are saved with no aggregate request emitted, whatever
+the settle path; a summary store containing `AggregateBriefing` entries loads the rest; the
+marker lists exactly the remaining artifacts; the archive fixtures pass byte for byte.
+
+Expected test counts. May be deleted wholesale: `briefing_snapshot.rs` (9),
+`state/briefing_snapshot_access.rs` (1), `update/tests/briefing_stream_tests.rs` (9),
+`update/tests/briefing_history_tests.rs` (7), `llm/prompts/briefing.rs` (6),
+`llm/prompts/briefing_stream.rs` (4), `summary_refresh.rs` (4), `progress/stale_reporter.rs`
+(27, less any `format_elapsed` tests moved with it), `state/briefing_orchestration.rs` (0).
+About 67 in total. Edited, not deleted: `briefing.rs` (24), `update/tests/mod.rs`,
+`state/tests/mod.rs`, `tests/triage_orchestration.rs`,
+`crates/harvester_engine/tests/briefing_loader_integration.rs` (23; loader tests for removed
+loaders go, scan-exclusion tests stay), `tests/output.rs` (26; concatenated-export tests go),
+`tests/llm_replay.rs` (10; lookup tests go, record tests stay), `working_corpus.rs` (15;
+`select` tests go), `llm/validation.rs` (briefing validation tests go).
+
+Verification: standard Rust checks; benchmark. No human testing needed beyond the next normal
+run.
+
+Docs: `docs/Architecture.md` (remove "Executive briefing" from planned evolution and the
+`LoadArticlesForBriefing` sentence); `docs/CorpusFormat.md` marker example and text;
+`docs/ThreatModel.md` (replay records are write-only forensics); `docs/FutureIdeas.md` (retire
+briefing and Prompt Lab items); `docs/PromptContextFiles.md` if it lists
+`aggregate_briefing.toml`. Decision log: "The aggregate briefing is removed" (supersedes
+2026-09-18 "Prompt Lab is deleted while briefing domain state remains" for the briefing part);
+"Retired generated artifacts leave the corpus marker without a schema bump". Diary:
+implementation entry.
+
+### Phase 6: Slim the desktop surface (IPC 13)
+
+Work:
+
+1. Trends and the entity index: `crates/harvester_core/src/trends.rs`, `entity_index.rs`,
+   `crates/harvester_io/src/entity_index_store.rs`, the worker upsert path (so
+   `.entity_index.ron` is no longer rewritten on every result), 6 Msg, 3 Effect and 2 UiIntent
+   variants (`SetTrendCategory`, `TrendsViewOpened`).
+2. `WorkspaceView` and `UiIntent::SetWorkspaceView` if the page does not use it (verify against
+   `frontend/src`), unread `AppViewModel` fields (the page reads 22 of 48; verify the list
+   against `frontend/src` and the bridge projection before removing;
+   `ai_unavailable_message` is read by the page from Phase 2 on and stays), the preview pipeline
+   (`content_preview` up to 40 KB per job, `crates/harvester_engine/src/preview.rs`), keeping
+   `format_summary_for_preview` and `format_triage_for_preview` used by the reading pane,
+   `crates/harvester_core/src/url_age.rs`, and unused body keys (Preview, TriageMarkdown,
+   PollStatsMarkdown).
+3. Linked-page download and delete (`Effect::DownloadLinkedPage`, `Effect::DeleteLinkedPage`,
+   `LinkDownloadState`), the indirect-link pool (`state/indirect_links.rs`,
+   `UiIntent::PollIndirectLinks`, `JobOrigin::Indirect`). The per-link `downloaded_path` field
+   stays readable in old state files and is ignored.
+4. Legacy window size (`PersistWindowSize`, `load_window_size`); the desktop geometry fields stay
+   (2026-09-04 entry).
+5. Bump IPC to 13 in Rust and TypeScript, regenerate fixtures, update the frontend and its
+   tests.
+
+Regression tests: IPC decoding rejects the removed intents; the desktop snapshot fixture pins
+the reduced field set; the selected job still carries its extracted links; old state files with
+`downloaded_path` values load.
+
+Expected test counts. May be deleted wholesale: `trends.rs` (24), `entity_index_store.rs` (7),
+`update/tests/entity_index_tests.rs` (3), `url_age.rs` (7), engine `preview.rs` (6) if nothing
+else uses it, `state/indirect_links.rs` (0). About 47 in total. Edited: core `preview.rs` (8),
+`update/mod.rs` (the trends contract test), `crates/harvester_ui_bridge/src/probe.rs` synthetic
+views, `frontend/src/App.test.tsx` and component tests for removed fields.
+
+Verification: standard Rust checks; `cargo clippy -p harvester_ui --all-targets -- -D warnings`;
+frontend checks; IPC probe (owner or Claude; new baseline recorded); benchmark `--host desktop`.
+Human testing recommended: open the desktop app and walk the actions in brief section 3 (Run,
+Process unfinished, Stop, Add URLs, archive dialog, list modes, search, reading pane, open in
+browser, open extracted link, exclusion toggle, meters, activity feed).
+
+Docs: `docs/Architecture.md` (crates section, view projection); `README.md` (drop
+`.entity_index.ron` from the output list); `docs/visual_design/VisualDesignSpec.md` only if it
+names a removed surface. Decision log: "Trends, the entity index, linked-page download and the
+indirect-link pool are removed". Diary: implementation entry.
+
+### Phase 7: Slim the runtime state and move links to a link store
+
+Work:
+
+1. Link store and slim state as in "Target design", with the one-time startup migration in its
+   stated order: preserve and verify `.harvester_state.pre-slim.ron` first, then write link
+   files, then atomically replace the active state. The active state is never replaced before a
+   verified byte-identical backup exists, an existing verified backup is never overwritten, and
+   each interruption point has the recovery rule given there.
+2. The persistence snapshot captures only slim job records, so a finished download no longer
+   copies every job's links.
+3. Selecting an article emits a load for its links; the reply fills the selected job's links
+   in state. "Open extracted link" keeps resolving through the core index
+   (`update/mod.rs:733-775` test stays green).
+4. Hidden-jobs fix, per the Phase 1 finding: recover missing fetch times from article
+   frontmatter through the corpus scan index at startup. Jobs that still lack a fetch time
+   (no article file) stay hidden from the desktop list, keep blocking re-download of their URL
+   and are never deleted; the existing "N jobs are hidden because their fetch time is missing"
+   note stays and shows the remaining count (owner answer). The phase report states how many
+   remain.
+5. New link records keep anchor text and link kind for Archive contract step 3c.
+
+Regression tests: an old-shape state file (links, `downloaded_path`, both window-size pairs)
+loads, migrates, produces link files and a slim state, and leaves a backup byte-identical to the
+original; a second start does not migrate again; interruption at each point (during the backup
+copy, after the backup but before or during link writing, during the slim-state write) followed
+by a restart completes the migration with the backup still byte-identical and all links present;
+an existing verified backup is not overwritten; the link-store path cannot escape the output
+folder; a restored job's links open after selection; recovery fills fetch times from
+frontmatter and the hidden count drops accordingly; a job without an article file stays hidden,
+is counted in the note, is kept after a restart, and still blocks re-download of its URL; the
+pinned temporary names match the marker's `.*.ron` pattern and a leftover of each is recognised
+and handled by recovery; the pending-intake list survives the migration. The carry-over fixture
+test gains the Phase 7 assertions: `.harvester_state.pre-slim.ron` is byte-identical to the
+fixture's original state file, the active state is slim and loads, every restored job keeps its
+URL and fetch time, and a second run does not migrate again.
+
+Expected test counts: `crates/harvester_io/src/persistence.rs` (19) edited; about 14 added; no
+file deleted wholesale.
+
+Verification: standard Rust checks; benchmark on a fresh copy of `output/` (expect the per-
+download state save to drop from about 10 s to well under a second, and a much smaller state
+file). Human testing recommended: first desktop start after this phase (migration runs once),
+then open an extracted link on an old article and a new one.
+
+Docs: `docs/CorpusFormat.md` and the marker (`internal_state` gains `.article_links/`; no schema
+bump); `docs/Architecture.md` (persistence and link handling); `docs/ThreatModel.md` (path
+confinement for the link store). Decision log: "Extracted links live in a per-article link
+store". Diary: implementation entry for the slimming, bug-fix entry for missing fetch times if
+the investigation confirms a data gap. No decision-log entry is needed for the hidden-jobs rule:
+it keeps today's visible behaviour (the note and exclusion from time-scoped lists, per
+2026-09-16).
+
+### Phase 8: Same state after restart; export from saved results
+
+Fixes bug 6 and delivers the restart-state requirement with one mechanism.
+
+Work:
+
+1. First step: confirm that startup hydration provides content hashes for the whole window and
+   loads prompt metadata and contexts without a run (the archive meter working at startup
+   indicates it does), and that the signal-candidate key can be built from saved current-key
+   upstream results without a live session. Also establish how content hashes are obtained for
+   Last 24h articles fetched before the checkpoint, which the window-bound pre-triage hydration
+   does not cover (the corpus scan index already holds a hash per article file). And confirm
+   how the summary-token callback that `archive_token_estimates_from_parts`
+   (`state/batch.rs:385-414`) receives counts a summary's tokens. The composition itself is
+   known: per selected article it adds the resolved summary's token count, or the article's full
+   token count when no summary resolves. The estimate test below asserts that rule, not a raw
+   sum over exported bodies.
+2. Build the saved-results index (see "Target design") over the display scope (window plus
+   Last 24h), marking window membership, and keep it current on saved completions, when a run
+   freezes its configuration, when the checkpoint moves, and when the coarse clock moves an
+   article out of Last 24h.
+3. Point the view at it: row priority and ordering, Results rows, reading-pane summary
+   (current-key only, as today), archive meter and readiness. The meter's summary-token
+   estimate keeps today's any-key rule (step 5). The view uses the whole display scope, so
+   Since checkpoint and Last 24h both show saved results. This replaces the per-build walk of
+   the whole summary cache (`view_builder.rs:323-356`) and the separate cache-derived archive
+   index: each index entry also records the summary today's any-key rule resolves for its
+   content hash, kept current as summaries are saved, so no view build walks the cache. The
+   live sessions still drive run progress and the "triage running" ordering rule (2026-09-09)
+   until the pipeline stage.
+4. Point the archive at it, restricted to window entries: dialog counts and defaults (no longer
+   gated on the live triage phase, `update/archive.rs:35-45`), the pinned corpus selection by
+   the same policy, annotations with `triage_model` from the stored key, and the priority
+   snapshot for coverage counters (every window article with a current-key triage result). Field
+   meanings in `docs/ArchiveExportFormat.md` do not change; `export_schema` stays 2.
+5. Keep every archive-predicting summary lookup on today's any-key rule, taking content hashes
+   from the index instead of the live sessions (owner answer; see "Settled inputs"):
+   - `build_summary_map` (`update/archive.rs:321-336`): the exported body is the newest saved
+     summary for the content hash under any key, via `lookup_any_by_content_hash`, so
+     `archive.md` stays byte-identical to a post-run export today;
+   - `archive_token_estimates` (`state/batch.rs:273-283`), the dialog's summary-mode estimate,
+     and the header meter's summary-token estimate: same any-key resolution;
+   - `summary_result_for_url` (`state/signal_candidate_access.rs:154-167`): live summary session
+     first, then the any-key cache, for whichever of its callers survive Phases 5 and 6
+     (`job_access.rs:230`).
+
+   All of these work after a restart with no run.
+6. Remember the job-list tab and the selected article URL in the runtime state; restore them at
+   startup (selection only if that article is in the restored tab, otherwise none). Search text
+   and scroll position are not remembered. Cadence: a tab or selection change emits the existing
+   `PersistRuntimeState`. The persistence worker already coalesces bursts (350 ms debounce, 2 s
+   maximum flush interval, `crates/harvester_io/src/persistence_worker.rs:11-12`), and the state
+   is slim since Phase 7, so rapid clicking produces a few small writes, not one per click.
+   Window close flushes. A crash mid-session loses at most about two seconds of view state,
+   which reverts to the previous tab and selection.
+7. The reading-pane placeholder distinguishes "not summarised under the current settings" from
+   AI being unavailable, using existing wording where it exists.
+
+Regression tests:
+
+- Reducer (the brief's required test): hydrate saved stores and completed jobs as at startup,
+  with no run, and assert priority, priority ordering, reading-pane summary, Results rows and
+  the archive meter for current-key results, and nothing for stale-key results.
+- Last 24h across the checkpoint: with the checkpoint newer than an article fetched within the
+  last 24 hours, a simulated restart shows that article in Last 24h with its priority, ordering
+  and current-key summary, while it is absent from Since checkpoint, from unfinished work and
+  from archive selection.
+- Snapshot builder: after hydration only, `ArchiveRequested` carries annotations and a priority
+  snapshot from current-key results only, including a compatible-alias hit that exports the
+  stored model; a stale-key triage result is absent and counts as `unavailable`.
+- Summary bodies: after hydration only, the summary map contains bodies for selected articles
+  (content hash taken from the index, not the live session). An article whose only saved
+  summary is under a stale key still exports that summary, exactly as today, while the reading
+  pane shows no summary for it; when both exist, the export uses the newest by today's rule and
+  the reading pane uses the current-key one.
+- Estimate predicts export: after a restart with no run, the dialog's summary-mode token
+  estimate equals the estimate a post-run dialog shows over the same saved results and
+  selection. For every selected article the estimate counts the same summary the exporter
+  exports (including an article whose only summary is under a stale key), or the article's full
+  token count when none resolves, per the estimator's own rule (`state/batch.rs:385-414`). The
+  header meter's summary-token estimate agrees with the dialog's.
+- Any-key lookup: after hydration only, `summary_result_for_url` returns the any-key cached
+  summary for a stale-key-only article, as today, and prefers a live session summary when one
+  exists.
+- Equivalence: an export after a run and an export after a restart over the same saved results
+  produce identical `ArchiveRequested` effects and byte-identical `archive.md` output (checked
+  through the exporter, not only the effect).
+- Tab and selection survive a simulated restart; an out-of-tab selection is dropped; a tab or
+  selection change emits `PersistRuntimeState` carrying the new values.
+- The carry-over fixture test additionally asserts restored priorities and summaries with no
+  run.
+- Archive fixtures pass byte for byte.
+
+Expected test counts: `update/tests/archive_tests.rs` (71) edited, not deleted; tests that
+asserted export was unavailable without a completed session are rewritten to the new rule and
+named; about 19 added.
+
+Verification: standard Rust checks; `cargo clippy -p harvester_ui --all-targets -- -D warnings`;
+frontend checks if any wording changes; IPC probe (view changes); benchmark `--host desktop`
+(view build cost should drop). Human testing recommended: close and reopen the desktop app and
+check priorities, summaries, Results, the meter, the remembered tab and article; export straight
+after a restart and compare with a post-run export.
+
+Docs: `docs/Architecture.md` (archive availability and the saved-results index);
+`docs/ArchiveExportFormat.md` (state that annotations and the priority snapshot come from saved
+current-key results and that summary bodies are the newest saved summary for the content hash;
+no field change). Decision log: refinement of 2026-09-20 (the priority snapshot and annotations
+come from saved current-key results, not only the live session); "The desktop view and export
+read one saved-results index" (current keys for triage and priority, selection, annotations,
+coverage counters and the reading pane; the exported summary body and every estimate or lookup
+that predicts it keep the newest-summary-for-content-hash rule). Diary: bug-fix entry for bug 6 and the
+restart symptom.
+
+### Phase 9: Compact command-line progress
+
+Work:
+
+1. Replace the console dashboard (`crates/harvester_batch/src/progress/dashboard.rs`,
+   `progress/projection.rs`, `runner/live_progress.rs` and the dashboard parts of
+   `runner/reporting.rs` and `progress.rs`) with a compact per-stage block that reads the
+   reducer-owned `RunProgress`: one line each for poll, download, triage, summary and score with
+   done and total counts and "Waiting for articles" while intake is open. It redraws in place on
+   a terminal and prints periodic plain lines otherwise.
+2. Remove `--verbose-progress` and `--ascii-progress`. Keep `--import-saved-web-dir`,
+   `--llm-concurrency`, `--signal-candidate-threshold`, `--force-unlock`, `--sources`,
+   `--output-dir`, `--contexts-dir`, `--prompts-dir`.
+3. Rename the checkpoint flags to `--set-checkpoint`, `--set-checkpoint-now`,
+   `--clear-checkpoint` and `--show-checkpoint`, keeping the old `--*-briefing-since` spellings
+   as hidden aliases. The file stays `.briefing_checkpoint.ron`.
+
+Regression tests: the block's text for a representative `RunProgress` (golden strings); old and
+new checkpoint flag spellings parse to the same command.
+
+Expected test counts. May be deleted wholesale: `progress/dashboard.rs` (6),
+`progress/projection.rs` (16), `runner/live_progress.rs` (8). Edited: `runner/reporting.rs`
+(20), `progress.rs` (3), `cli.rs`. About 30 to 40 removed, about 6 added.
+
+Verification: standard Rust checks; benchmark `--host batch`. The launch policy does not change
+(the launcher passes no flags since Phase 4), so Pester is not needed. Human testing
+recommended: one morning run to judge the block's readability.
+
+Docs: `README.md` (command-line description). Decision log: "The command-line host is kept with
+a compact progress block". Diary: implementation entry.
+
+### Checkpoint: go/no-go (owner decision)
+
+The plan stops here. The checkpoint report, written in plain language, contains:
+
+- production and test line counts per crate (`scripts/project-stats.ps1`) against the Phase 1
+  baseline, plus test totals;
+- the benchmark table (both hosts, both latencies) for every phase so far;
+- IPC probe results against the Phase 1 baseline;
+- what the remaining orchestration still costs in code (the wave, admission and session
+  machinery with its tests, about 13k production and 10-12k test lines per the brief) and what
+  the pipeline stage would remove;
+- the list of files the owner may delete or archive (see "Files on disk");
+- any regressions or open issues found by the owner's use since Phase 2.
+
+The owner decides whether to continue. Stopping here leaves a complete, documented product:
+every decision-log entry written so far describes the code as it stands.
+
+## Pipeline replacement stage
+
+### Phase 10: Per-article pipeline core (not yet wired)
+
+Work:
+
+1. First step: inventory the three quota mechanisms and the double validation, and list which
+   are live, so the new module owns exactly one session quota and one validation point.
+2. Add `crates/harvester_core/src/pipeline/` as in "Target design", seeded from the
+   saved-results index. It is not yet used by any host.
+3. Define the effect vocabulary: `LoadArticle` (one article: read, prepare with the frozen
+   budget, content hash; text kept only while the article has pending model steps),
+   `CallModel` (one request; the reply carries the validated result or a classified failure
+   and writes the replay record once), `SaveResults` (from Phase 2). Implement them in
+   `EffectRunner` alongside the existing effects, with bounded concurrency for article loads.
+4. Port behaviour tests from the legacy reducer to the new module, by behaviour rather than
+   harness: pre-triage before any call; cutoffs; scoring needs priority at least 2 and
+   current-key upstream results; configuration frozen per run; one shared cap and cross-stage
+   priority; the 1,000-call quota; out-of-credits and three rate limits halt the run and the next
+   run clears them; Stop issues no new call, in-flight calls finish and are saved, never-started
+   work stays unfinished; unfinished count and reprocess notice (more than 150 articles, or an
+   estimate above 50 percent of remaining quota; equality does not trigger); model calls only
+   inside a run; one "run done" definition.
+
+Expected test counts: additions only (the ported behaviour tests, roughly 60 to 90). No
+deletions.
+
+Verification: standard Rust checks. No human testing.
+
+Docs: none yet (not wired). Decision log: none yet. Diary: none.
+
+### Phase 11: Shared host loop; the command line runs on the new pipeline
+
+Work:
+
+1. Add `crates/harvester_io/src/host_loop.rs`: receive, reduce by move, dispatch effects,
+   optional per-iteration hook for the host, no iteration cap, no pacing tick.
+2. The command-line run and import use the loop and the new pipeline. Import becomes an input:
+   imported pages are written as article files and enter the stage table like downloads.
+3. The compact progress block reads `RunProgress` fed by pipeline messages.
+4. The desktop still runs the legacy orchestration; both write the same stores.
+
+Regression tests: a full command-line cycle through the shared loop with the routing provider
+(poll, download, triage, summary, score, saved, exit); import adds articles and processes them
+without polling; Stop through the loop drains in-flight calls.
+
+Expected test counts: additions for the loop and host paths; command-line tests that drove the
+old loop are rewritten, not deleted.
+
+Verification: standard Rust checks; benchmark `--host batch` on the new path compared with the
+checkpoint numbers. Human testing recommended: at least three morning runs on the command line
+before Phase 12, checking counts and results in the desktop afterwards.
+
+Docs: `docs/Architecture.md` (host loop, noting the desktop still uses its own driver). Decision
+log: none in this phase; the shared-host-loop entry is written in Phase 12, once the desktop also
+uses the loop. Diary: implementation entry.
+
+### Phase 12: The desktop runs on the new pipeline
+
+Work:
+
+1. The desktop driver in `crates/harvester_ui_bridge/src/driver.rs` uses the shared loop; Run,
+   Process unfinished and Stop go through the new pipeline.
+2. Screen behaviours restated per article (brief 9.5), looking the same:
+   - Job-list ordering: arrival order while the current run still has triage work; priority
+     order once it has none.
+   - Last 24h slides on a coarse refresh (about once a minute); an article leaves the view
+     within about a minute of turning 24 hours old. The 75 ms tick goes; the view is rebuilt
+     only when state changed or the minute tick fires.
+   - Run progress: same stage lines and wording; totals grow as articles arrive; "Waiting for
+     articles" while intake is open; model stages show Done when the run ends.
+   - Reprocess notice computed at run start with the same thresholds.
+3. IPC: the snapshot shape should not change; if it does, bump to 14 and regenerate fixtures.
+
+Regression tests: ordering switches exactly when the run has no triage work left; Last 24h
+removes an article after the minute refresh that follows its 24-hour mark; progress wording and
+Done-at-end; reprocess notice at run start; the desktop concurrency default of 3 and maximum of
+10; the UI never navigates during a run.
+
+Expected test counts: desktop driver and view tests edited; `host_drain_cost.rs` timing tests
+updated to the new state shape, not deleted.
+
+Verification: standard Rust checks; `cargo clippy -p harvester_ui --all-targets -- -D warnings`;
+frontend checks; IPC probe (pacing changed; new baseline); benchmark `--host desktop`. Human
+testing recommended: a desktop Run, a Stop mid-run followed by Process unfinished, a restart,
+and an export.
+
+Docs: `docs/Architecture.md` (run surface, progress, list behaviour). Decision log: "All hosts
+drive the reducer through one shared host loop"; supersede 2026-09-27 "Pipeline stages overlap in waves under one request budget"; refine 2026-09-07 "One
+completion query serves both hosts"; refine 2026-09-09 ordering; refine 2026-09-16 Last 24h;
+refine 2026-09-27 run surface for progress and the notice (see list). Diary: implementation
+entry.
+
+### Phase 13: Delete the legacy orchestration
+
+Work: remove `PipelineWaves` (`pipeline_waves.rs`, `update/waves.rs`), `PipelineAdmission`, run
+phases and scopes, wave policies, `PreTriageRefreshCoordinator` and quiet-tick scheduling
+(`pre_triage_coordinator.rs`), delta corpus loading, `TriageSession`, `BriefingSession` and
+`SignalCandidateSession` as orchestration, the unfinished-work aggregate and its revision
+counters, the derived indexes that only served them, `BatchObservation` and
+`pipeline_activity()`, frozen key snapshots, re-admission bookkeeping, the remaining duplicate
+validation and quota mechanisms, and Msg and Effect variants left without a sender. Rewrite
+`docs/Architecture.md` around the per-article pipeline.
+
+Expected test counts. May be deleted wholesale (after Phase 10 ported their behaviours):
+`update/pipeline_run/wave_tests.rs`, `update/pipeline_run/tests.rs`,
+`update/model_dispatch_tests.rs`, `pre_triage_coordinator.rs`,
+`update/tests/pre_triage_refresh_tests.rs`, `update/tests/delta_tests.rs`,
+`update/tests/unfinished_work_tests.rs`, `crates/harvester_core/tests/triage_orchestration.rs`,
+and session-internal tests in `triage.rs`, `briefing.rs` and `signal_candidate.rs`. The report
+maps each deleted file to the Phase 10 tests that cover its behaviours. The brief estimates
+10-12k test lines here.
+
+Verification: standard Rust checks; `cargo clippy -p harvester_ui --all-targets -- -D warnings`;
+frontend checks; IPC probe; benchmark on both hosts. Human testing recommended: one desktop day
+and one morning run.
+
+Docs: `docs/Architecture.md` rewritten. Decision log: none new if Phase 12's entries hold;
+otherwise a refinement. Diary: implementation entry.
+
+### Phase 14: Close-out
+
+Final line counts and benchmark table against the Phase 1 baseline; reassess the IPC probe
+(keep or retire, with a decision-log entry if retired); sweep `README.md`, `docs/ThreatModel.md`,
+`docs/FutureIdeas.md` (stale Win32, Prompt Lab, briefing and Batch API items) and
+`docs/ApplicationDescription.md`; present the final "Files on disk" list to the owner.
+
+## Decision-log entries
+
+All appended, never edited. Titles are suggestions; each follows the log's template.
+
+| When | Entry | Relation |
+|---|---|---|
+| Phase 2 | Paid model results are kept and saved incrementally: no eviction; append-only result stores; results saved through reducer-emitted incremental effects that the runner's result sink coalesces; after the switch only the new format is written (no dual-write), the old RON files stay untouched as a backup, and returning to a pre-switch build is an emergency-only step via git (any conversion back is manual or a separate tool) | New; states how 2026-09-18 "Host persistence is a reducer-emitted effect" applies to result stores (under brief 9.1 there is no pipeline worker that saves results) |
+| Phase 3 | One lock per output folder for both hosts; a second start refuses and names the holder | New; resolves FI-Architecture-HostConcurrency-0001 |
+| Phase 3 | Source registry entries of unknown or removed type are skipped with a warning; the rest load | New (external input also edited by the portfolio) |
+| Phase 4 | The Batch API and the batch-only modes (drain, dry-run, recurring, single-shot) are removed; all model calls are synchronous | New; retires the "Batch API buffering has its own allowance" clause of 2026-09-27 |
+| Phase 5 | The aggregate briefing is removed | Supersedes the briefing half of 2026-09-18 "Prompt Lab is deleted while briefing domain state remains" |
+| Phase 5 | Retired generated artifacts leave the corpus marker without a schema bump | New (corpus contract) |
+| Phase 6 | Trends, the entity index, linked-page download and the indirect-link pool are removed | New |
+| Phase 7 | Extracted links live in a per-article link store, not in runtime state | New |
+| Phase 8 | The archive priority snapshot and annotations come from saved current-key results | Refines 2026-09-20 "Archive coverage counters measure the exporter's window" |
+| Phase 8 | The desktop view and export read one saved-results index covering the Since checkpoint and Last 24h scopes; current keys for triage and priority, selection, annotations, coverage counters and the reading pane; the exported summary body, the summary-mode token estimates and `summary_result_for_url` keep today's newest-summary-for-content-hash rule so `archive.md` and its predictions are unchanged; processing and archive selection stay window-bound | New |
+| Phase 9 | The command-line host is kept with a compact progress block | New |
+| Phase 12 | All hosts drive the reducer through one shared host loop | New (written once the desktop uses the loop) |
+| Phase 12 | Articles move through the pipeline individually under one shared request budget; the wave ledger, process-lifetime stage sessions and replay waves are gone | Supersedes 2026-09-27 "Pipeline stages overlap in waves under one request budget" (overlap, one budget, scoring-first priority, per-run frozen configuration and current-key completeness remain) |
+| Phase 12 | One definition of run completion, owned by the shared pipeline, serves both hosts | Refines 2026-09-07 "One completion query serves both hosts" |
+| Phase 12 | Job-list ordering per article | Refines 2026-09-09 "Desktop job list triage ordering" |
+| Phase 12 | Last 24h slides on a coarse refresh | Refines 2026-09-16 "Desktop job list adds a Last 24h mode" |
+| Phase 12 | Run progress and the reprocess notice per article | Refines 2026-09-27 "The desktop Run is one primary action" (progress and notice parts) |
+| Phase 14 | Only if the IPC probe is retired | New |
+
+2026-09-27 "Stop halts new work and drains; export waits only for the run" and "The desktop Run
+is one primary action" stay as behaviour. No purity-rule refinement is needed (brief 9.1).
+
+## Documents to update (summary)
+
+- `docs/Architecture.md`: Phases 2, 3, 4, 5, 6, 7, 8, 11, 12; rewritten in Phase 13.
+- `docs/CorpusFormat.md`, marker generation and tests: Phases 2, 5, 7 (no schema bump).
+- `docs/ArchiveExportFormat.md`: Phase 8 (source of annotations and summary bodies; no field
+  change).
+- `docs/ThreatModel.md`: Phases 4, 5, 7, 14.
+- `README.md`: Phases 4, 6, 9, 14.
+- `docs/FutureIdeas.md`: Phases 3, 4, 5, 14.
+- `docs/PromptContextFiles.md`: Phase 5 if it lists the briefing context.
+- `docs/visual_design/VisualDesignSpec.md`: only if a removed surface is named (Phase 6).
+- `docs/EngineeringDiary.md`: every bug fix and noteworthy implementation, as listed per phase.
+- `scripts/lib/HarvesterLaunch.psm1` and `scripts/tests/HarvesterLaunch.Tests.ps1`: Phase 4.
+- `.gitignore`: Phase 1 (`/.local/bench/`).
+
+## Files on disk for the owner
+
+Harvester stops using these; the plan never deletes them. The owner deletes or archives them
+after the phase named:
+
+- After Phase 4, once the reconciliation has confirmed every successful collected record in
+  the result stores: `output/.batch_manifest.ron`.
+- After Phase 5: `output/.briefing_history.ron`, `output/summary_refresh_reports/`,
+  `output/.summary_refresh_last.json`, `output/export.txt`, `output/manifest.json`.
+- After Phase 6: `output/.entity_index.ron`.
+- Anytime: `output/knowledge_base/` (empty), `output/logs/mcp.log*`, the empty root `src/`.
+- Backups created by migrations, once the owner is satisfied: `output/.triage_cache.ron`,
+  `output/.summary_cache.ron`, `output/.signal_candidate_cache.ron` (after Phase 2),
+  `output/.harvester_state.pre-slim.ron` (after Phase 7), old `.harvester_batch.lock` or
+  `.harvester_gui.lock` files if any remain (after Phase 3). Returning to a pre-switch build
+  after Phase 2 is an emergency-only step via git (owner answer), so keep the RON backups until
+  the owner no longer wants that option.
+- Any `*.torn-<timestamp>.jsonl` sidecars written by tail recovery, after the owner has seen the
+  warning that created them.
+- `.local/bench/` copies of the output folder made by the benchmark.
+
+## Sequencing with the archive contract
+
+- 3b (code-only event clustering inside the exporter) is independent and can land at any time;
+  if it lands during Phase 8, rebase on whichever lands first, since both touch the archive
+  path but not the same code.
+- 3c waits for the pipeline stage. Phase 7 keeps extracted links with anchor text in the link
+  store, which gives 3c its frozen candidate list without the runtime-state file. The lead
+  excerpt comes from the article file.
+- 3d is not decided by removing the dormant linked-page download; it designs its own harvest.
+- 3e (a fourth per-article call) becomes one more stage in the per-article table after Phase 13.
+
+## Risks
+
+- **Codex deleting whole test files** during removals: mitigated by the per-phase wholesale lists
+  and the test-count protocol; Claude or the owner audits removed test names.
+- **Result-store migration** is the first touch of paid data: the RON files are never modified,
+  migration refuses on parse failure, the migrated file is published atomically only when
+  complete, torn tails are recovered before any append, crash sequences are tested, and the
+  owner's first run after Phase 2 is a human check.
+- **Batch API results held only in the manifest**: removal waits until the reconciliation
+  confirms every successful collected record in the result stores.
+- **Runtime-state migration**: the active state is replaced only after a verified byte-identical
+  backup exists; each interruption point has a tested recovery.
+- **Carry-over drift**: the carry-over fixture test runs in every phase, so a change that would
+  re-download seen work or re-pay completed current-key work fails a test before it reaches the
+  owner's folder.
+- **Sources loader leniency** depends on RON's handling of enums in untyped values; Phase 3
+  verifies the approach on the real file first.
+- **Two orchestrations coexist** between Phases 11 and 13: both write the same stores through the
+  same result sink, and the single lock prevents concurrent runs.
+- **Timing tests** in `host_drain_cost.rs` may flake as state changes; they are updated with the
+  state shape, and the benchmark is the primary cost measure.
+
+## Benchmark and size log
+
+Filled in as phases land (debug build, copy of `output/`, 40 held-back articles).
+
+| Phase | Host | LLM latency | Wall time | Reducer time total | Slowest message kind (p95) | Bytes written per download | Prod lines | Test lines | Tests |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 (baseline) | batch | 0 ms | | | | | | | |
+| 1 (baseline) | batch | 1500 ms | | | | | | | |
+| 1 (baseline) | desktop | 0 ms | | | | | | | |
+| 1 (baseline) | desktop | 1500 ms | | | | | | | |
+
+## Open questions
+
+None open. The two questions from the first draft (going back to an older build after the
+result-store switch, and jobs with no article file) and the exported-summary-text question
+raised by the plan review were answered by the owner on 2026-09-28; the answers are recorded
+under "Settled inputs this plan follows" and applied in Phases 2, 7 and 8.
