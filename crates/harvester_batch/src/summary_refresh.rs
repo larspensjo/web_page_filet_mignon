@@ -16,9 +16,10 @@ use harvester_engine::{
     ensure_output_dir, load_and_prepare_articles_filtered, scan_archive_article_metadata,
     AtomicFileWriter,
 };
+use harvester_io::result_sink::{CoalescingResultSink, ResultSink};
 use harvester_io::{
-    load_entity_index, load_prompt_templates, load_summary_cache, persist_summary_cache,
-    save_entity_index, upsert_entry, EntityIndexPatch, RuntimePaths,
+    load_entity_index, load_prompt_templates, load_summary_cache, save_entity_index, upsert_entry,
+    EntityIndexPatch, RuntimePaths,
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -355,11 +356,22 @@ pub(crate) fn run_refresh_stale_summaries_mode(
     let progress_enabled = std::io::stdout().is_terminal() && std::io::stderr().is_terminal();
     let mut progress: Option<ProgressReporter> = None;
 
+    let (preflight_state, _) =
+        harvester_io::host_bootstrap::hydrate_result_stores(harvester_core::AppState::new(), paths);
+    if let Some(reason) = preflight_state.result_store_failure() {
+        return Err(format!("AI features unavailable: {reason}"));
+    }
+
+    drop(preflight_state);
     let (llm_handle, registry, prompt_version, summary_model, summary_context) =
         build_summary_refresh_runtime(paths, args.llm_concurrency)?;
 
     let result = (|| -> Result<(SummaryRefreshReport, i32), String> {
-        let mut summary_cache = load_summary_cache(&paths.summary_cache_path);
+        let mut summary_cache =
+            load_summary_cache(&paths.summary_cache_path).map_err(|e| e.to_string())?;
+        let mut result_state = harvester_core::AppState::new();
+        let (save_tx, save_rx) = mpsc::channel();
+        let result_sink = CoalescingResultSink::new(paths.clone(), save_tx, None);
         let summary_cache_entries_before = summary_cache.len();
         let article_metas = scan_archive_article_metadata(&paths.output_dir)?;
         let selection = select_stale_summary_targets(
@@ -514,6 +526,11 @@ pub(crate) fn run_refresh_stale_summaries_mode(
         let mut entity_index = load_entity_index(&paths.entity_index_path);
 
         while !pending.is_empty() && !shutdown_flag.load(Ordering::Relaxed) {
+            if let Ok(harvester_core::Msg::ResultStoreUnavailable { reason }) = save_rx.try_recv() {
+                return Err(format!(
+                    "summary refresh result store unavailable: {reason}"
+                ));
+            }
             let event = {
                 let receiver = event_rx.lock().unwrap();
                 receiver.recv_timeout(Duration::from_millis(100))
@@ -548,13 +565,32 @@ pub(crate) fn run_refresh_stale_summaries_mode(
                             output_tokens: completion.metadata.output_tokens,
                             entities: summary.entities,
                         };
-                        summary_cache.insert(
-                            target.cache_key,
-                            SummaryCacheEntry {
-                                result: summary_result.clone(),
-                                created_at_utc: completion.metadata.timestamp_utc.clone(),
+                        let entry = SummaryCacheEntry {
+                            result: summary_result.clone(),
+                            created_at_utc: completion.metadata.timestamp_utc.clone(),
+                        };
+                        let (next, effects) = harvester_core::update(
+                            result_state,
+                            harvester_core::Msg::ValidatedResultReceived {
+                                record: Box::new(harvester_core::SavedResult::Summary(
+                                    target.cache_key.clone(),
+                                    entry.clone(),
+                                )),
                             },
                         );
+                        result_state = next;
+                        for effect in effects {
+                            match effect {
+                                harvester_core::Effect::SaveResults { records } => {
+                                    result_sink.enqueue(records)
+                                }
+                                harvester_core::Effect::FlushResults => {
+                                    result_sink.flush().map_err(|e| e.to_string())?
+                                }
+                                _ => {}
+                            }
+                        }
+                        summary_cache.insert(target.cache_key, entry);
 
                         let mut seen_urls = HashSet::new();
                         for (url, fetched_utc) in target.related_urls {
@@ -636,8 +672,7 @@ pub(crate) fn run_refresh_stale_summaries_mode(
         }
 
         if report.succeeded > 0 {
-            persist_summary_cache(&summary_cache, &paths.summary_cache_path)
-                .map_err(|err| format!("failed to persist summary cache: {err}"))?;
+            result_sink.flush().map_err(|e| e.to_string())?;
             save_entity_index(&paths.entity_index_path, &entity_index)
                 .map_err(|err| format!("failed to persist entity index: {err}"))?;
         }

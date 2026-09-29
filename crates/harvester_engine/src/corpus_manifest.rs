@@ -36,6 +36,7 @@ pub fn build_corpus_manifest(written_at_utc: &str) -> Value {
             ],
             "internal_state": [
                 ".*.ron",
+                ".*.jsonl",
                 "llm_results/",
                 "logs/"
             ]
@@ -82,5 +83,36 @@ mod tests {
             parsed["schema_version"].as_u64(),
             Some(CORPUS_SCHEMA_VERSION as u64)
         );
+    }
+
+    fn internal_state_matches(name: &str) -> bool {
+        build_corpus_manifest("2026-09-28T00:00:00Z")["layout"]["internal_state"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .any(|pattern| {
+                pattern.split_once('*').is_some_and(|(prefix, suffix)| {
+                    name.starts_with(prefix) && name.ends_with(suffix)
+                })
+            })
+    }
+
+    #[test]
+    fn migration_temp_names_match_declared_internal_state_pattern() {
+        for kind in ["triage", "summary", "signal_candidate"] {
+            assert!(internal_state_matches(&format!(
+                ".{kind}_cache.migrating-20260928T120000.000000001.jsonl"
+            )));
+        }
+    }
+
+    #[test]
+    fn torn_tail_sidecar_names_match_declared_internal_state_pattern() {
+        for kind in ["triage", "summary", "signal_candidate"] {
+            assert!(internal_state_matches(&format!(
+                ".{kind}_cache.torn-20260928T120000.000000001.jsonl"
+            )));
+        }
     }
 }

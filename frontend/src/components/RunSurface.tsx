@@ -266,6 +266,14 @@ export function RunSurface({ view }: { view: RunView }) {
 					</button>
 				</div>
 			</div>
+			{view.ai_unavailable_message && (
+				<p
+					className={`run-reprocess-notice${view.ai_unavailable_message.startsWith("AI features unavailable: saved results could not be opened:") ? " run-reprocess-notice--warning" : ""}`}
+					role="status"
+				>
+					{view.ai_unavailable_message}
+				</p>
+			)}
 			{view.reprocess_notice && (
 				<p className="run-reprocess-notice" role="status">
 					{`This run is reprocessing ${view.reprocess_notice.articles} unfinished article${

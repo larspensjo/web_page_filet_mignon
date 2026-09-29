@@ -381,14 +381,14 @@ fn summary_completion_advances_and_generates_briefing() {
         },
     );
 
-    // effects[0] = UpsertEntityIndexEntry for Article A
-    // effects[1] = RequestLlmCompletion for Article B
-    assert_eq!(effects.len(), 2);
+    // effects[0] = SaveResults; effects[1] = UpsertEntityIndexEntry for Article A
+    // effects[2] = RequestLlmCompletion for Article B
+    assert_eq!(effects.len(), 3);
     let req_b = request_id_for_prompt(&effects, PromptId::ArticleSummary)
         .expect("Article B summary request");
     assert_ne!(req_b, req_a, "each summary request must have a distinct id");
     assert!(matches!(
-        &effects[1],
+        &effects[2],
         Effect::RequestLlmCompletion {
             prompt_id: PromptId::ArticleSummary,
             prompt_version: None,
@@ -415,16 +415,16 @@ fn summary_completion_advances_and_generates_briefing() {
         },
     );
 
-    // effects[0] = UpsertEntityIndexEntry for Article B
-    // effects[1] = RequestLlmCompletion for AggregateBriefing
-    assert_eq!(effects.len(), 2);
+    // effects[0] = SaveResults; effects[1] = UpsertEntityIndexEntry for Article B
+    // effects[2] = RequestLlmCompletion for AggregateBriefing
+    assert_eq!(effects.len(), 3);
     let req_c = request_id_for_prompt(&effects, PromptId::AggregateBriefing)
         .expect("aggregate briefing request");
     assert_ne!(
         req_c, req_b,
         "briefing request must have a distinct id from last summary"
     );
-    match &effects[1] {
+    match &effects[2] {
         Effect::RequestLlmCompletion {
             prompt_id,
             prompt_version,
@@ -466,9 +466,7 @@ fn summary_completion_advances_and_generates_briefing() {
         },
     );
 
-    assert!(effects
-        .iter()
-        .any(|e| matches!(e, Effect::PersistSummaryCache { .. })));
+    assert!(effects.iter().any(|e| matches!(e, Effect::FlushResults)));
     assert!(effects
         .iter()
         .any(|e| matches!(e, Effect::SaveBriefingHistory { .. })));
@@ -718,12 +716,12 @@ fn second_run_reuses_cached_summary_with_configured_model_key() {
             metadata: None,
         },
     );
-    // effects[0] = UpsertEntityIndexEntry for Article A
-    // effects[1] = RequestLlmCompletion for AggregateBriefing
-    assert_eq!(effects.len(), 2);
+    // effects[0] = SaveResults; effects[1] = UpsertEntityIndexEntry for Article A
+    // effects[2] = RequestLlmCompletion for AggregateBriefing
+    assert_eq!(effects.len(), 3);
     let aggregate_request_id =
         request_id_for_prompt(&effects, PromptId::AggregateBriefing).expect("aggregate request");
-    match &effects[1] {
+    match &effects[2] {
         Effect::RequestLlmCompletion {
             request_id,
             prompt_id,
@@ -835,3 +833,91 @@ mod provider_alert_tests;
 mod signal_candidate_tests;
 mod triage_tests;
 mod ui_state_tests;
+
+#[test]
+fn summary_completion_emits_exact_record_before_settlement() {
+    let (articles, collection_text) = loaded_articles();
+    let state = start_briefing_after_triage(AppState::new(), articles.clone());
+    let (state, effects) = update(
+        state,
+        Msg::ArticlesLoaded {
+            articles,
+            collection_text,
+        },
+    );
+    let request_id = request_id_for_prompt(&effects, PromptId::ArticleSummary).unwrap();
+    let (state, effects) = crate::update(
+        state,
+        Msg::LlmCompleted {
+            request_id,
+            result: LlmResultKind::Success {
+                output_json: summary_json("Article A"),
+                input_tokens: 10,
+                output_tokens: 5,
+                prompt_version: 1,
+                resolved_model: "test-model".into(),
+            },
+            metadata: None,
+        },
+    );
+    assert_eq!(state.briefing().completed_summary_count(), 1);
+    assert!(state.briefing().is_active());
+    let records: Vec<_> = effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::SaveResults { records } => Some(records),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert_eq!(records.len(), 1);
+    let crate::SavedResult::Summary(key, entry) = records[0] else {
+        panic!("summary record expected")
+    };
+    assert_eq!(state.summary_cache().lookup(key), Some(entry));
+}
+
+#[test]
+fn changed_result_provenance_emits_only_the_changed_record() {
+    let key = crate::SummaryCacheKey::try_new(
+        "paid-hash",
+        PromptId::ArticleSummary,
+        Some(1),
+        Some("model"),
+        &[],
+    )
+    .unwrap();
+    let entry = crate::SummaryCacheEntry {
+        result: crate::ArticleSummaryResult {
+            title: "title".into(),
+            summary: "paid summary".into(),
+            key_points: vec![],
+            input_tokens: 10,
+            output_tokens: 5,
+            entities: Default::default(),
+        },
+        created_at_utc: "2026-09-28T00:00:00Z".into(),
+    };
+    let mut cache = crate::SummaryCache::new();
+    cache.insert(key.clone(), entry.clone());
+    let (state, hydration) = crate::update(AppState::new(), Msg::SummaryCacheHydrated { cache });
+    assert!(!hydration
+        .iter()
+        .any(|e| matches!(e, Effect::SaveResults { .. })));
+    let mut changed = entry;
+    changed.created_at_utc = "2026-09-28T01:00:00Z".into();
+    let record = crate::SavedResult::Summary(key.clone(), changed.clone());
+    let (state, effects) = crate::update(
+        state,
+        Msg::ValidatedResultReceived {
+            record: Box::new(record.clone()),
+        },
+    );
+    assert_eq!(
+        effects,
+        vec![Effect::SaveResults {
+            records: vec![record]
+        }]
+    );
+    assert_eq!(state.summary_cache().lookup(&key), Some(&changed));
+}

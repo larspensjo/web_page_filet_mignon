@@ -1,9 +1,8 @@
 use crate::cache_utils::model_ids_compatible;
 use crate::context_hash;
-use crate::summary_cache::DEFAULT_CACHE_CAPACITY;
 use crate::triage::ArticleTriageResult;
+use crate::ResultStore;
 use chrono::Utc;
-use engine_logging::engine_info;
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -80,7 +79,7 @@ pub struct TriageCacheEntry {
 /// In-memory cache for article triage results.
 #[derive(Debug, Clone, Serialize)]
 pub struct TriageCache {
-    entries: HashMap<TriageCacheKey, TriageCacheEntry>,
+    entries: ResultStore<TriageCacheKey, TriageCacheEntry>,
     #[serde(skip)]
     aliases: HashMap<String, Vec<TriageCacheAlias>>,
 }
@@ -103,7 +102,7 @@ impl<'de> Deserialize<'de> for TriageCache {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
         struct Wire {
-            entries: HashMap<TriageCacheKey, TriageCacheEntry>,
+            entries: ResultStore<TriageCacheKey, TriageCacheEntry>,
         }
         let mut cache = Self {
             entries: Wire::deserialize(deserializer)?.entries,
@@ -117,7 +116,7 @@ impl<'de> Deserialize<'de> for TriageCache {
 impl TriageCache {
     pub fn new() -> Self {
         Self {
-            entries: HashMap::new(),
+            entries: ResultStore::new(),
             aliases: HashMap::new(),
         }
     }
@@ -210,7 +209,7 @@ impl TriageCache {
         Some(candidate)
     }
 
-    pub fn insert(&mut self, key: TriageCacheKey, result: ArticleTriageResult) -> Vec<String> {
+    pub fn insert(&mut self, key: TriageCacheKey, result: ArticleTriageResult) {
         let entry = TriageCacheEntry {
             result,
             created_at_utc: Utc::now().to_rfc3339(),
@@ -218,7 +217,7 @@ impl TriageCache {
         self.insert_entry(key, entry)
     }
 
-    pub fn insert_entry(&mut self, key: TriageCacheKey, entry: TriageCacheEntry) -> Vec<String> {
+    pub fn insert_entry(&mut self, key: TriageCacheKey, entry: TriageCacheEntry) {
         let priority = entry.result.priority;
         if self.entries.contains_key(&key) {
             if let Some(alias) = self
@@ -238,7 +237,6 @@ impl TriageCache {
                 });
         }
         self.entries.insert(key, entry);
-        self.enforce_capacity()
     }
 
     pub(crate) fn rebuild_alias_index(&mut self) {
@@ -254,21 +252,6 @@ impl TriageCache {
         }
     }
 
-    fn enforce_capacity(&mut self) -> Vec<String> {
-        if self.entries.len() <= DEFAULT_CACHE_CAPACITY {
-            return Vec::new();
-        }
-        let evicted = self.evict_to_limit(DEFAULT_CACHE_CAPACITY);
-        if !evicted.is_empty() {
-            engine_info!(
-                "[triage-cache] Evicted {} oldest entries (capacity: {})",
-                evicted.len(),
-                DEFAULT_CACHE_CAPACITY
-            );
-        }
-        evicted
-    }
-
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -279,26 +262,6 @@ impl TriageCache {
 
     pub fn iter(&self) -> impl Iterator<Item = (&TriageCacheKey, &TriageCacheEntry)> {
         self.entries.iter()
-    }
-
-    fn evict_to_limit(&mut self, limit: usize) -> Vec<String> {
-        if self.entries.len() <= limit {
-            return Vec::new();
-        }
-        let mut entries: Vec<_> = self
-            .entries
-            .iter()
-            .map(|(k, v)| (k.clone(), v.created_at_utc.clone()))
-            .collect();
-        entries.sort_by(|a, b| a.1.cmp(&b.1));
-        let to_remove = self.entries.len() - limit;
-        let mut evicted = Vec::with_capacity(to_remove);
-        for (key, _) in entries.iter().take(to_remove) {
-            self.entries.remove(key);
-            evicted.push(key.content_hash.clone());
-        }
-        self.rebuild_alias_index();
-        evicted
     }
 }
 
@@ -517,26 +480,5 @@ mod tests {
         )
         .unwrap();
         assert!(cache.lookup(&miss_key).is_none());
-    }
-
-    #[test]
-    fn capacity_guard_evicts_oldest_entry() {
-        let mut cache = TriageCache::new();
-        let context = vec![("k".to_string(), "v".to_string())];
-        for i in 0..=DEFAULT_CACHE_CAPACITY {
-            let key = TriageCacheKey::try_new(
-                &format!("hash-{i}"),
-                PromptId::ArticleTriage,
-                Some(1),
-                Some("model"),
-                &context,
-            )
-            .unwrap();
-            cache.insert(key.clone(), sample_result());
-            if i == DEFAULT_CACHE_CAPACITY {
-                assert_eq!(cache.len(), DEFAULT_CACHE_CAPACITY);
-            }
-        }
-        assert_eq!(cache.len(), DEFAULT_CACHE_CAPACITY);
     }
 }

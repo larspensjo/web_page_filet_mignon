@@ -50,7 +50,8 @@ pub(super) fn run_dry_run(
         msg_tx.clone(),
         platform_handler,
         Box::new(NoOpRuntimePersistenceSink),
-    );
+    )
+    .with_result_sink(Box::new(harvester_io::result_sink::NoOpResultSink));
 
     // Dispatch poll
     engine_info!("[dry-run] Dispatching poll");

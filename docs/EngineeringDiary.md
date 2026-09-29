@@ -2550,3 +2550,30 @@ Context: Later simplification phases need a repeatable measure of reducer, persi
 Change: Split the batch host into a library and thin CLI entry point and added a provider and effect-sink seam for the keyless replay benchmark. The batch harness shares the production single-shot cycle dispatch, progress boundary, and final state writes; the desktop harness uses desktop startup and real 75 ms ticks. The report covers completion time, reducer time by cheap message kind, state-clone time as its own bucket, effect counts, successful private-file writes including per-call model replay records, desktop driver iterations and phase times, view builds, snapshots, synchronous canned effect handling, and persisted RSS sources skipped when more than five have entries. The clone remains in the batch inbox path so its planned removal can be measured. Formatting full messages in the batch loop would have hidden that cost, so both hosts use a cheap message kind. Held article URLs are removed from seen sets only in the benchmark copy so the real poll filters can rediscover them. The synthetic carry-over fixture checks rewritten restored jobs and links, both window-size pairs, current and stale paid results, and product-filtered RSS and Brave seen sets. The three paid-result RON stores now serialize in sorted-key order; this owner-approved byte-order change makes cache-hit rewrites byte-identical and stabilizes fixture comparisons.
 How to run: `cargo run --offline -p harvester_batch --example replay_bench -- --host batch` or `cargo run --offline -p harvester_batch --example replay_bench -- --host desktop`. Pass `--source-dir` to select a copyable output folder, `--work-dir` to choose the private copy location, `--reuse-copy` to reuse a marked benchmark copy, and `--llm-latency-ms 1500` to model provider delay. The default work folder is `.local/bench/<timestamp>`. The benchmark measures synchronous model calls, while the launcher normally uses `--batch-api`; it does not measure provider batch submission and collection.
 Refs: crates/harvester_batch/examples/replay_bench.rs, crates/harvester_batch/examples/replay_support/mod.rs, crates/harvester_batch/tests/replay_bench.rs, crates/harvester_batch/tests/fixtures/carry_over, crates/harvester_io/src/triage_cache_store.rs, crates/harvester_io/src/summary_cache_store.rs, crates/harvester_io/src/signal_candidate_cache_store.rs
+
+
+## 2026-09-28 - Save paid results as they arrive and refuse unsafe stores
+Type: Bug Fix
+Context: Triage and summaries were saved only at settlement. Corrupt RON loads
+could become empty stores, and concurrent full-clone rewrites could finish in
+reverse order and replace newer paid results. Capacity eviction discarded old
+paid work.
+Change: Shared unlimited result storage, reducer-emitted incremental saves and
+one ordered coalescing sink replace these paths. JSONL migration preserves the
+RON backup, verifies before publication, and recovers torn tails to sidecars.
+Store failures disable AI with a visible filename and reason; CLI intake continues
+and returns non-zero. Every cache reader, including Batch API confirmation and
+summary refresh, reads the new store.
+Lessons Learned: Persistence must follow each accepted paid result rather than
+session settlement. An unreadable legacy store is an error, never an empty
+success. Concurrent full snapshots can lose data even when each write is atomic.
+Prevention: Regression tests cover early reducer effects, coalescing deadlines,
+explicit and shutdown flushes, crash recovery, migration byte preservation,
+retention beyond 10,000 entries, visible refusal and new-store confirmation.
+Store readers share an in-process append lock so tail recovery in the same host
+cannot truncate a live write. Import now loads saved triage results too; it can
+reuse them and refuses an unreadable triage store instead of overwriting its RON
+with only that import's results.
+Refs: crates/harvester_io/src/result_store/tests.rs,
+crates/harvester_io/src/result_sink.rs,
+crates/harvester_batch/tests/result_store_refusal.rs

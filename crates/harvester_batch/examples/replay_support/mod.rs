@@ -21,8 +21,7 @@ use harvester_io::{
     host_bootstrap::{build_effect_runner_with_provider, prepare_desktop_startup_state},
     load_brave_seen_set, load_completed_jobs, load_seen_set, load_signal_candidate_cache,
     load_sources, load_summary_cache, load_triage_cache, persist_brave_seen_set,
-    persist_completed_jobs, persist_seen_set, persist_summary_cache, persist_triage_cache,
-    save_signal_candidate_cache, EffectRunner, FileWriteObserver, NoOpPlatformHandler,
+    persist_completed_jobs, persist_seen_set, EffectRunner, FileWriteObserver, NoOpPlatformHandler,
     PersistenceWorker, RuntimePaths,
 };
 use harvester_ui_bridge::driver::{
@@ -378,6 +377,7 @@ pub fn run_benchmark(options: HarnessOptions) -> Result<BenchmarkReport, String>
                 &mut reducer_observer,
                 &make_file_observer(Arc::clone(&measurements)),
             )?;
+            effect_runner.flush_results().map_err(|e| e.to_string())?;
             drop(effect_runner);
             runner::persist_final_cycle_state(
                 &paths,
@@ -462,6 +462,7 @@ pub fn run_benchmark(options: HarnessOptions) -> Result<BenchmarkReport, String>
             tick_thread
                 .join()
                 .map_err(|_| "desktop tick thread panicked")?;
+            effect_runner.flush_results().map_err(|e| e.to_string())?;
             drop(effect_runner);
             (
                 termination == harvester_ui_bridge::DriverTermination::Clean,
@@ -675,36 +676,20 @@ fn wait_for_cache_writes(
     let mut last_write_count = 0;
     let mut quiet_since = Instant::now();
     loop {
-        let (required_files_present, write_count) = {
-            let values = measurements.lock().expect("benchmark measurements");
-            let required = [
-                ("PersistTriageCache", ".triage_cache.ron"),
-                ("PersistSummaryCache", ".summary_cache.ron"),
-                ("PersistSignalCandidateCache", ".signal_candidate_cache.ron"),
-            ];
-            (
-                required.iter().all(|(effect, filename)| {
-                    values.effects.get(*effect).copied().unwrap_or(0) == 0
-                        || values
-                            .private_writes
-                            .get(*filename)
-                            .is_some_and(|item| item.0 > 0)
-                }),
-                values
-                    .private_writes
-                    .values()
-                    .map(|item| item.0)
-                    .sum::<u64>(),
-            )
-        };
+        let write_count = measurements
+            .lock()
+            .expect("benchmark measurements")
+            .private_writes
+            .values()
+            .map(|item| item.0)
+            .sum::<u64>();
         if write_count != last_write_count {
             last_write_count = write_count;
             quiet_since = Instant::now();
         }
-        // Cache effects launch independent writer threads. Concurrent writes
-        // can coalesce or fail on the same atomic target, so effect count is
-        // not a reliable count of successful file writes.
-        if required_files_present && quiet_since.elapsed() >= Duration::from_millis(250) {
+        // The result sink flushes synchronously on runner drop. Entity-index
+        // writes still finish on their own worker, so await its quiet period.
+        if quiet_since.elapsed() >= Duration::from_millis(250) {
             return Ok(());
         }
         if started.elapsed() >= timeout {
@@ -1011,10 +996,9 @@ fn effect_kind(effect: &Effect) -> &'static str {
         Effect::ShowArchiveDialog { .. } => "ShowArchiveDialog",
         Effect::DownloadLinkedPage { .. } => "DownloadLinkedPage",
         Effect::DeleteLinkedPage { .. } => "DeleteLinkedPage",
-        Effect::PersistSummaryCache { .. } => "PersistSummaryCache",
-        Effect::PersistSignalCandidateCache { .. } => "PersistSignalCandidateCache",
+        Effect::SaveResults { .. } => "SaveResults",
+        Effect::FlushResults => "FlushResults",
         Effect::PersistSignalCandidateOverrides { .. } => "PersistSignalCandidateOverrides",
-        Effect::PersistTriageCache { .. } => "PersistTriageCache",
         Effect::LoadBriefingHistory => "LoadBriefingHistory",
         Effect::SaveBriefingHistory { .. } => "SaveBriefingHistory",
         Effect::LoadBriefingCheckpoint => "LoadBriefingCheckpoint",
@@ -1104,8 +1088,8 @@ fn remove_held_back_cache_entries(
         .iter()
         .map(|article| article.content_hash.as_str())
         .collect();
-    let triage = load_triage_cache(&paths.triage_cache_path);
-    let summary = load_summary_cache(&paths.summary_cache_path);
+    let triage = load_triage_cache(&paths.triage_cache_path).expect("load result store");
+    let summary = load_summary_cache(&paths.summary_cache_path).expect("load result store");
     let mut removed_signal_inputs = HashSet::new();
     for article in articles {
         let triage_results: Vec<_> = triage
@@ -1152,7 +1136,7 @@ fn remove_held_back_cache_entries(
             new_triage.insert_entry(key.clone(), entry.clone());
         }
     }
-    persist_triage_cache(&new_triage, &paths.triage_cache_path)
+    write_filtered_result_copy(&paths.triage_cache_path, new_triage.iter())
         .map_err(|error| format!("filter triage cache: {error}"))?;
 
     let mut new_summary = harvester_core::SummaryCache::new();
@@ -1161,17 +1145,35 @@ fn remove_held_back_cache_entries(
             new_summary.insert(key.clone(), entry.clone());
         }
     }
-    persist_summary_cache(&new_summary, &paths.summary_cache_path)
+    write_filtered_result_copy(&paths.summary_cache_path, new_summary.iter())
         .map_err(|error| format!("filter summary cache: {error}"))?;
 
-    let mut signal = load_signal_candidate_cache(&paths.signal_candidate_cache_path)
+    let signal = load_signal_candidate_cache(&paths.signal_candidate_cache_path)
         .map_err(|error| format!("load signal-candidate cache: {error}"))?;
-    signal
-        .entries
-        .retain(|key, _| !removed_signal_inputs.contains(&key.signal_input_hash));
-    save_signal_candidate_cache(&paths.signal_candidate_cache_path, &signal)
-        .map_err(|error| format!("filter signal-candidate cache: {error}"))?;
+    write_filtered_result_copy(
+        &paths.signal_candidate_cache_path,
+        signal
+            .entries
+            .iter()
+            .filter(|(key, _)| !removed_signal_inputs.contains(&key.signal_input_hash)),
+    )
+    .map_err(|error| format!("filter signal-candidate cache: {error}"))?;
     Ok(())
+}
+
+// This prepares synthetic input in the harness's disposable copy, before the
+// runner starts. Production stores never rewrite records, and RON backups in
+// both the source and the copy remain untouched.
+fn write_filtered_result_copy<'a, K: serde::Serialize + 'a, E: serde::Serialize + 'a>(
+    path: &Path,
+    records: impl Iterator<Item = (&'a K, &'a E)>,
+) -> std::io::Result<()> {
+    let mut bytes = Vec::new();
+    for record in records {
+        serde_json::to_writer(&mut bytes, &record)?;
+        bytes.push(b'\n');
+    }
+    fs::write(path, bytes)
 }
 
 fn read_article_files(output_dir: &Path) -> Result<Vec<ArticleFile>, String> {

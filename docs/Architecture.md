@@ -112,6 +112,21 @@ flowchart LR
 ```
 
 Key rules:
+- Paid model results use one generic in-memory store and one append-only JSON Lines
+  implementation for triage, summaries and signal candidates, without size or age
+  eviction. The reducer emits only newly inserted or updated records in `SaveResults`;
+  hydration emits no save. `EffectRunner` owns an injected, ordered result sink next to
+  the runtime-persistence sink. It coalesces for at most about two seconds from the first
+  unsaved record and flushes at reducer requests on run end and Stop, runner drop, and
+  desktop close.
+- The I/O layer migrates RON through a flushed, re-read temporary file before renaming
+  it to JSONL. RON backups stay byte-identical and are never dual-written. Invalid or
+  unknown-version RON sources and unreadable stores refuse AI with a filename and reason;
+  metadata refresh cannot clear this refusal. Intake remains available. Complete malformed
+  JSONL lines are logged with line numbers and errors and skipped without rewriting;
+  later records for a key win. Unterminated tails are saved to sidecars before truncation.
+  Store reads, recovery and appends share an in-process lock so a reader in the same
+  host cannot truncate a live write. Separate hosts need a folder-level lock.
 - The update step is deterministic and free of side effects.
 - Effects are isolated and the only place where I/O happens.
 - Runtime-state persistence is a reducer-emitted `PersistRuntimeState` effect:

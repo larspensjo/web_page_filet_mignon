@@ -10,9 +10,8 @@ use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{update, AppState, BatchObservation, CompletedJobSnapshot, ImportPhase, Msg};
 use harvester_io::{
     host_bootstrap::{build_effect_runner, pump_pre_triage_refresh},
-    load_completed_jobs, load_signal_candidate_cache, load_signal_candidate_overrides,
-    load_summary_cache, persist_completed_jobs, EffectRunner, NoOpPlatformHandler,
-    PersistenceWorker, RuntimePaths,
+    load_completed_jobs, load_signal_candidate_overrides, persist_completed_jobs, EffectRunner,
+    NoOpPlatformHandler, PersistenceWorker, RuntimePaths,
 };
 use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -86,39 +85,11 @@ pub(crate) fn run_import_mode(
         effect_runner.enqueue(startup_effects);
     }
 
-    // Hydrate summary cache for cache-hit reuse during summaries.
-    let summary_cache = load_summary_cache(&paths.summary_cache_path);
-    if !summary_cache.is_empty() {
-        let (new_state, effects) = update(
-            state,
-            Msg::SummaryCacheHydrated {
-                cache: summary_cache,
-            },
-        );
-        state = new_state;
-        if !effects.is_empty() {
-            effect_runner.enqueue(effects);
-        }
-    }
-    match load_signal_candidate_cache(&paths.signal_candidate_cache_path) {
-        Ok(signal_candidate_cache) if !signal_candidate_cache.is_empty() => {
-            let (new_state, effects) = update(
-                state,
-                Msg::SignalCandidateCacheLoaded {
-                    cache: signal_candidate_cache,
-                },
-            );
-            state = new_state;
-            if !effects.is_empty() {
-                effect_runner.enqueue(effects);
-            }
-        }
-        Ok(_) => {}
-        Err(err) => engine_warn!(
-            "[signal-cache] failed to hydrate {}: {}",
-            paths.signal_candidate_cache_path.display(),
-            err
-        ),
+    let (next, effects) = harvester_io::host_bootstrap::hydrate_result_stores(state, paths);
+    state = next;
+    effect_runner.enqueue(effects);
+    if let Some(reason) = state.result_store_failure() {
+        eprintln!("AI features unavailable: {reason}");
     }
     match load_signal_candidate_overrides(&paths.signal_candidate_overrides_path) {
         Ok(signal_candidate_overrides) if !signal_candidate_overrides.is_empty() => {
@@ -178,6 +149,7 @@ pub(crate) fn run_import_mode(
 
     // Ordering contract: flush and stop the runner's persistence sink before
     // this import-only path writes its authoritative merged job snapshot.
+    let result_save_error = effect_runner.flush_results().err();
     drop(effect_runner);
     let imported_completed_jobs = state.completed_jobs_snapshot();
     let merged_completed_jobs =
@@ -193,10 +165,19 @@ pub(crate) fn run_import_mode(
     persist_completed_jobs(&paths.state_path, &merged_completed_jobs);
 
     Ok(exit_code_with_shutdown(
-        match outcome {
-            CycleOutcome::Success => 0,
-            CycleOutcome::PartialFailure => 1,
-            CycleOutcome::TotalFailure => 1,
+        if let Some(reason) = state
+            .result_store_failure()
+            .map(str::to_owned)
+            .or_else(|| result_save_error.map(|e| e.to_string()))
+        {
+            eprintln!("Final summary: AI features unavailable: {reason}");
+            1
+        } else {
+            match outcome {
+                CycleOutcome::Success => 0,
+                CycleOutcome::PartialFailure => 1,
+                CycleOutcome::TotalFailure => 1,
+            }
         },
         shutdown_flag.load(Ordering::Relaxed),
     ))

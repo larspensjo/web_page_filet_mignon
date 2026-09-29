@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use crate::ResultStore;
 
 use harvester_engine::llm::dto::SignalCandidateResult;
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
@@ -110,7 +110,7 @@ pub struct SignalCandidateCacheEntry {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignalCandidateCache {
-    pub entries: HashMap<SignalCandidateCacheKey, SignalCandidateCacheEntry>,
+    pub entries: ResultStore<SignalCandidateCacheKey, SignalCandidateCacheEntry>,
 }
 
 impl SignalCandidateCache {

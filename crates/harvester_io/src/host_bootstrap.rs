@@ -283,43 +283,9 @@ pub fn hydrate_state_from_disk(
         (state, _) = update(state, Msg::RestoreCompletedJobs(completed_jobs));
     }
 
-    let summary_cache = load_summary_cache(&paths.summary_cache_path);
-    if !summary_cache.is_empty() {
-        let (next_state, effects) = update(
-            state,
-            Msg::SummaryCacheHydrated {
-                cache: summary_cache,
-            },
-        );
-        state = next_state;
-        startup_effects.extend(effects);
-    }
-
-    let triage_cache = load_triage_cache(&paths.triage_cache_path);
-    if !triage_cache.is_empty() {
-        let (next_state, effects) = update(
-            state,
-            Msg::TriageCacheHydrated {
-                cache: triage_cache,
-            },
-        );
-        state = next_state;
-        startup_effects.extend(effects);
-    }
-
-    match load_signal_candidate_cache(&paths.signal_candidate_cache_path) {
-        Ok(cache) if !cache.is_empty() => {
-            let (next_state, effects) = update(state, Msg::SignalCandidateCacheLoaded { cache });
-            state = next_state;
-            startup_effects.extend(effects);
-        }
-        Ok(_) => {}
-        Err(err) => engine_warn!(
-            "[signal-cache] failed to hydrate {}: {}",
-            paths.signal_candidate_cache_path.display(),
-            err
-        ),
-    }
+    let (next, effects) = hydrate_result_stores(state, paths);
+    state = next;
+    startup_effects.extend(effects);
 
     match load_signal_candidate_overrides(&paths.signal_candidate_overrides_path) {
         Ok(overrides) if !overrides.is_empty() => {
@@ -346,6 +312,32 @@ pub fn hydrate_state_from_disk(
         completed_job_count,
         paths.output_dir.display()
     );
+
+    (state, startup_effects)
+}
+
+/// Hydrate every paid-result kind and report unreadable stores through actions.
+pub fn hydrate_result_stores(mut state: AppState, paths: &RuntimePaths) -> (AppState, Vec<Effect>) {
+    let mut startup_effects = Vec::new();
+    for result in [
+        load_summary_cache(&paths.summary_cache_path)
+            .map(|cache| Msg::SummaryCacheHydrated { cache }),
+        load_triage_cache(&paths.triage_cache_path).map(|cache| Msg::TriageCacheHydrated { cache }),
+        load_signal_candidate_cache(&paths.signal_candidate_cache_path)
+            .map(|cache| Msg::SignalCandidateCacheLoaded { cache }),
+    ] {
+        let message = match result {
+            Ok(message) => message,
+            Err(error) => {
+                let reason = error.to_string();
+                engine_warn!("[host-bootstrap] AI unavailable: {}", reason);
+                Msg::ResultStoreUnavailable { reason }
+            }
+        };
+        let (next, effects) = update(state, message);
+        state = next;
+        startup_effects.extend(effects);
+    }
 
     (state, startup_effects)
 }

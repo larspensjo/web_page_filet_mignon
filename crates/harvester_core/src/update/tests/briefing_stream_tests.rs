@@ -160,7 +160,7 @@ fn exec_completion_enters_streaming_and_writes_no_history() {
         .any(|effect| matches!(effect, Effect::SaveBriefingHistory { .. })));
     assert!(!effects
         .iter()
-        .any(|effect| matches!(effect, Effect::PersistSummaryCache { .. })));
+        .any(|effect| matches!(effect, Effect::SaveResults { .. })));
 }
 
 #[test]

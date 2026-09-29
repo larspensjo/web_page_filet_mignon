@@ -168,10 +168,6 @@ impl AppState {
         )
     }
 
-    pub(crate) fn note_unfinished_evictions(&mut self, hashes: Vec<String>) {
-        self.unfinished_evicted_content_hashes.extend(hashes);
-    }
-
     /// The last reducer-computed completeness summary. Views only read this value.
     pub fn unfinished_work(&self) -> &UnfinishedWork {
         &self.unfinished_work
@@ -181,22 +177,6 @@ impl AppState {
         let (work, classes) = self.classify_unfinished_work();
         self.unfinished_work = work;
         self.unfinished_classes = classes;
-        self.unfinished_evicted_content_hashes.clear();
-    }
-
-    pub(crate) fn refresh_unfinished_evictions(&mut self) {
-        let hashes = std::mem::take(&mut self.unfinished_evicted_content_hashes);
-        for hash in hashes {
-            let identities = self
-                .pre_triage
-                .window_articles()
-                .filter(|(_, article)| article.content_hash == hash)
-                .map(|(_, article)| (article.url.clone(), article.content_hash.clone()))
-                .collect::<Vec<_>>();
-            for (url, content_hash) in identities {
-                self.refresh_unfinished_identity(&url, &content_hash);
-            }
-        }
     }
 
     fn classify_unfinished_work(

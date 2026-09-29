@@ -103,6 +103,7 @@ pub enum AiAvailability {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AiUnavailableReason {
+    ResultStoreUnavailable,
     MissingApiKey,
     NoTriageModel,
 }
@@ -328,6 +329,7 @@ pub struct AppState {
     active_prompt_versions: HashMap<PromptId, PromptVersion>,
     effective_models: HashMap<PromptId, String>,
     ai_availability: AiAvailability,
+    result_store_failure: Option<String>,
     provider_alert: Option<provider_alert::ProviderAlert>,
     consecutive_rate_limit_failures: u32,
     summary_cache: SummaryCache,
@@ -400,7 +402,7 @@ pub struct AppState {
     unfinished_classes: HashMap<(String, String), UnfinishedWorkClass>,
     unfinished_inputs_revision: u64,
     unfinished_global_revision: u64,
-    unfinished_evicted_content_hashes: Vec<String>,
+    pub(crate) pending_results: Vec<crate::SavedResult>,
 }
 
 pub struct IngestResult {
@@ -447,6 +449,7 @@ impl Default for AppState {
             active_prompt_versions: HashMap::new(),
             effective_models: HashMap::new(),
             ai_availability: AiAvailability::Available,
+            result_store_failure: None,
             provider_alert: None,
             consecutive_rate_limit_failures: 0,
             summary_cache: SummaryCache::new(),
@@ -500,7 +503,7 @@ impl Default for AppState {
             unfinished_classes: HashMap::new(),
             unfinished_inputs_revision: 0,
             unfinished_global_revision: 0,
-            unfinished_evicted_content_hashes: Vec::new(),
+            pending_results: Vec::new(),
         }
     }
 }

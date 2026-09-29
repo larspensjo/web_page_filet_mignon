@@ -262,3 +262,25 @@ Consequences: The desktop intent vocabulary loses `PollSources` and gains
 `ResumeUnfinishedWork`.
 Refs: docs/Architecture.md, crates/harvester_core/src/ui_intent.rs,
 frontend/src/components/RunSurface.tsx
+
+
+## 2026-09-28 - Paid model results are kept and saved incrementally
+Decision: Paid triage, summary and signal-candidate results have no size or age
+eviction. Each kind uses the shared append-only JSON Lines store. The reducer
+emits incremental SaveResults effects on insertion or provenance change, and
+the runner owns an injected result sink that coalesces for about two seconds,
+flushing at run end, Stop, runner drop and desktop close. There is no dual-write;
+RON files remain untouched backups after verified atomic migration.
+Context: Settlement-only saving lost a run's paid results on a crash. Corrupt RON
+loads could silently become empty stores, and unordered concurrent full-clone
+rewrites could replace newer results with older snapshots.
+Consequences: Invalid or unknown-version RON sources and unreadable stores refuse
+AI stages with a named file and reason; intake continues and the CLI exits
+non-zero. Malformed complete JSONL lines are logged and skipped without rewriting;
+torn tails are preserved in sidecars before appending. Returning to a pre-switch
+build is emergency-only via git. Conversion back is manual or a separate tool,
+outside this commitment. This extends the 2026-09-18 reducer-emitted host
+persistence boundary to paid results.
+Refs: docs/Architecture.md, docs/CorpusFormat.md,
+crates/harvester_core/src/result_store.rs,
+crates/harvester_io/src/result_store.rs, crates/harvester_io/src/result_sink.rs

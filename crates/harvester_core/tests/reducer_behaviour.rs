@@ -74,9 +74,12 @@ fn stop_finish_emits_effect() {
 
     assert_eq!(
         effects,
-        vec![Effect::StopFinish {
-            policy: StopPolicy::Finish
-        }]
+        vec![
+            Effect::StopFinish {
+                policy: StopPolicy::Finish
+            },
+            Effect::FlushResults
+        ]
     );
 }
 

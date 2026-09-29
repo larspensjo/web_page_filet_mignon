@@ -352,8 +352,16 @@ pub(super) fn remove_collected_with_persisted_cache_confirmation(
     batch: &mut BatchRuntime,
     paths: &RuntimePaths,
 ) -> Result<(), String> {
-    let triage_cache = load_triage_cache(&paths.triage_cache_path);
-    let summary_cache = load_summary_cache(&paths.summary_cache_path);
+    batch
+        .coordinator
+        .remove_collected_if(persisted_cache_confirmation(paths)?)
+}
+
+fn persisted_cache_confirmation(
+    paths: &RuntimePaths,
+) -> Result<impl Fn(&PendingEntry) -> bool, String> {
+    let triage_cache = load_triage_cache(&paths.triage_cache_path).map_err(|e| e.to_string())?;
+    let summary_cache = load_summary_cache(&paths.summary_cache_path).map_err(|e| e.to_string())?;
     let signal_cache =
         load_signal_candidate_cache(&paths.signal_candidate_cache_path).map_err(|err| {
             format!(
@@ -361,37 +369,137 @@ pub(super) fn remove_collected_with_persisted_cache_confirmation(
                 paths.signal_candidate_cache_path.display()
             )
         })?;
-    batch
-        .coordinator
-        .remove_collected_if(|entry| match entry.stage {
-            StageKind::Triage => TriageCacheKey::try_new_with_context_hash(
-                &entry.key.content_hash,
-                entry.key.prompt_id,
-                Some(entry.key.prompt_version),
-                Some(&entry.key.model_id),
-                &entry.key.context_hash,
-            )
-            .ok()
-            .is_some_and(|key| triage_cache.lookup(&key).is_some()),
-            StageKind::Summary => summary_cache
-                .lookup(&SummaryCacheKey {
-                    content_hash: entry.key.content_hash.clone(),
-                    prompt_id: entry.key.prompt_id,
-                    prompt_version: entry.key.prompt_version,
-                    model_id: entry.key.model_id.clone(),
-                    context_hash: entry.key.context_hash.clone(),
-                })
-                .is_some(),
-            StageKind::SignalCandidate => signal_cache
-                .get(&SignalCandidateCacheKey {
-                    signal_input_hash: entry.key.content_hash.clone(),
-                    prompt_id: entry.key.prompt_id,
-                    prompt_version: entry.key.prompt_version,
-                    model_id: entry.key.model_id.clone(),
-                    context_hash: entry.key.context_hash.clone(),
-                })
-                .is_some(),
-        })
+    Ok(move |entry: &PendingEntry| match entry.stage {
+        StageKind::Triage => TriageCacheKey::try_new_with_context_hash(
+            &entry.key.content_hash,
+            entry.key.prompt_id,
+            Some(entry.key.prompt_version),
+            Some(&entry.key.model_id),
+            &entry.key.context_hash,
+        )
+        .ok()
+        .is_some_and(|key| triage_cache.lookup(&key).is_some()),
+        StageKind::Summary => summary_cache
+            .lookup(&SummaryCacheKey {
+                content_hash: entry.key.content_hash.clone(),
+                prompt_id: entry.key.prompt_id,
+                prompt_version: entry.key.prompt_version,
+                model_id: entry.key.model_id.clone(),
+                context_hash: entry.key.context_hash.clone(),
+            })
+            .is_some(),
+        StageKind::SignalCandidate => signal_cache
+            .get(&SignalCandidateCacheKey {
+                signal_input_hash: entry.key.content_hash.clone(),
+                prompt_id: entry.key.prompt_id,
+                prompt_version: entry.key.prompt_version,
+                model_id: entry.key.model_id.clone(),
+                context_hash: entry.key.context_hash.clone(),
+            })
+            .is_some(),
+    })
+}
+
+#[cfg(test)]
+mod result_confirmation_tests {
+    use super::*;
+    use harvester_core::SavedResult;
+    use harvester_io::result_sink::{CoalescingResultSink, ResultSink};
+    use std::{fs, path::Path};
+
+    #[test]
+    fn batch_confirmation_reads_new_jsonl_records_for_all_three_kinds() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = RuntimePaths::with_defaults(dir.path().to_owned());
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/carry_over");
+        let names = [
+            ".triage_cache.ron",
+            ".summary_cache.ron",
+            ".signal_candidate_cache.ron",
+        ];
+        for name in names {
+            fs::copy(fixture.join(name), dir.path().join(name)).unwrap();
+        }
+        let triage = load_triage_cache(&paths.triage_cache_path).unwrap();
+        let summary = load_summary_cache(&paths.summary_cache_path).unwrap();
+        let signal = load_signal_candidate_cache(&paths.signal_candidate_cache_path).unwrap();
+        let (tk, te) = triage.iter().next().unwrap();
+        let (sk, se) = summary.iter().next().unwrap();
+        let (ck, ce) = signal.entries.iter().next().unwrap();
+        let mut tk = tk.clone();
+        tk.content_hash = "new-paid-triage".into();
+        let mut sk = sk.clone();
+        sk.content_hash = "new-paid-summary".into();
+        let mut ck = ck.clone();
+        ck.signal_input_hash = "new-paid-signal".into();
+        let records = vec![
+            SavedResult::Triage(tk, te.clone()),
+            SavedResult::Summary(sk, se.clone()),
+            SavedResult::SignalCandidate(ck, ce.clone()),
+        ];
+        let pending: Vec<_> = records
+            .iter()
+            .map(|record| {
+                let (hash, prompt, version, model, context, stage) = match record {
+                    SavedResult::Triage(k, _) => (
+                        &k.content_hash,
+                        k.prompt_id,
+                        k.prompt_version,
+                        &k.model_id,
+                        &k.context_hash,
+                        StageKind::Triage,
+                    ),
+                    SavedResult::Summary(k, _) => (
+                        &k.content_hash,
+                        k.prompt_id,
+                        k.prompt_version,
+                        &k.model_id,
+                        &k.context_hash,
+                        StageKind::Summary,
+                    ),
+                    SavedResult::SignalCandidate(k, _) => (
+                        &k.signal_input_hash,
+                        k.prompt_id,
+                        k.prompt_version,
+                        &k.model_id,
+                        &k.context_hash,
+                        StageKind::SignalCandidate,
+                    ),
+                };
+                PendingEntry {
+                    custom_id: hash.clone(),
+                    attempts: 1,
+                    collected: None,
+                    stage,
+                    key: FrozenBatchKey {
+                        content_hash: hash.clone(),
+                        prompt_id: prompt,
+                        prompt_version: version,
+                        model_id: model.clone(),
+                        context_hash: context.clone(),
+                        stage,
+                        url: "https://example.test/new".into(),
+                        rendered_system: String::new(),
+                        rendered_user: String::new(),
+                    },
+                }
+            })
+            .collect();
+        let before = persisted_cache_confirmation(&paths).unwrap();
+        assert!(pending.iter().all(|entry| !before(entry)));
+        let (messages, _) = mpsc::channel();
+        let sink = CoalescingResultSink::new(paths.clone(), messages, None);
+        sink.enqueue(records);
+        sink.flush().unwrap();
+        let after = persisted_cache_confirmation(&paths).unwrap();
+        assert!(pending.iter().all(after));
+        for name in names {
+            assert_eq!(
+                fs::read(fixture.join(name)).unwrap(),
+                fs::read(dir.path().join(name)).unwrap()
+            );
+        }
+    }
 }
 
 pub(super) fn collect_and_rearm_batch_cycle(

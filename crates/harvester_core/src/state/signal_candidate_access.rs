@@ -114,13 +114,16 @@ impl AppState {
         now_utc: String,
     ) {
         self.note_unfinished_inputs_changed();
-        self.signal_candidate_cache.insert(
-            key,
-            SignalCandidateCacheEntry {
-                result,
-                created_at_utc: now_utc,
-            },
-        );
+        let entry = SignalCandidateCacheEntry {
+            result,
+            created_at_utc: now_utc,
+        };
+        self.pending_results
+            .push(crate::SavedResult::SignalCandidate(
+                key.clone(),
+                entry.clone(),
+            ));
+        self.signal_candidate_cache.insert(key, entry);
     }
 
     pub(crate) fn signal_candidate_input_snapshot(

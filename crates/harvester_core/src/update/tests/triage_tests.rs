@@ -13,7 +13,7 @@ fn resume_run_without_loaded_articles_emits_no_model_effects() {
             scope: crate::PipelineRunScope::Resume,
         },
     );
-    assert!(effects.is_empty());
+    assert_eq!(effects, vec![Effect::FlushResults]);
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn triage_click_blocked_when_briefing_owns_triage() {
             scope: crate::PipelineRunScope::Resume,
         },
     );
-    assert!(effects.is_empty());
+    assert_eq!(effects, vec![Effect::FlushResults]);
 }
 
 #[test]
@@ -227,4 +227,31 @@ fn triage_quota_exhausted_fails_all_pending() {
         },
     );
     assert_eq!(state.triage().failed_count(), 3);
+}
+
+#[test]
+fn triage_completion_emits_exact_record_before_settlement() {
+    let (state, effects) = start_triage_for_test(AppState::new(), loaded_triage_articles(2));
+    let request = request_id_for_prompt(&effects, PromptId::ArticleTriage).unwrap();
+    let (state, effects) = crate::update(state, triage_success(request));
+    assert_eq!(state.triage().completed_count(), 1);
+    assert!(state.triage().is_active());
+    let records: Vec<_> = effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::SaveResults { records } => Some(records),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert_eq!(records.len(), 1);
+    let crate::SavedResult::Triage(key, entry) = records[0] else {
+        panic!("triage record expected")
+    };
+    assert!(state
+        .triage_cache()
+        .iter()
+        .any(|(k, e)| k == key && e == entry));
+    let (_, stopped) = crate::update(state, Msg::StopFinishClicked);
+    assert!(stopped.contains(&Effect::FlushResults));
 }

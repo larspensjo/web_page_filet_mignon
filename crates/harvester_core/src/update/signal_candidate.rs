@@ -43,7 +43,6 @@ pub(crate) fn handle_signal_candidate_completion(
     state: &mut AppState,
     request_id: u64,
     result: &LlmResultKind,
-    effects: &mut Vec<Effect>,
 ) {
     let url = match state.signal_candidate().url_for_request(request_id) {
         Some(url) => url.to_string(),
@@ -74,13 +73,7 @@ pub(crate) fn handle_signal_candidate_completion(
 
                 if let Some(snapshot) = state.signal_candidate_input_snapshot(&url).cloned() {
                     log_completion_metadata_drift(&url, &snapshot, *prompt_version, resolved_model);
-                    persist_signal_candidate_result(
-                        state,
-                        &url,
-                        &snapshot,
-                        parsed.clone(),
-                        effects,
-                    );
+                    persist_signal_candidate_result(state, &url, &snapshot, parsed.clone());
                 } else {
                     engine_warn!(
                         "[signal-cache] url={} no input snapshot present; skipping cache write",
@@ -504,7 +497,6 @@ fn persist_signal_candidate_result(
     url: &str,
     snapshot: &SignalCandidateInputSnapshot,
     result: SignalCandidateResult,
-    effects: &mut Vec<Effect>,
 ) {
     let bundle = build_input_bundle(url, snapshot);
     match SignalCandidateCacheKey::try_new(
@@ -516,9 +508,6 @@ fn persist_signal_candidate_result(
         Ok(key) => {
             let now = chrono::Utc::now().to_rfc3339();
             state.store_signal_candidate_result(key.clone(), result, now);
-            effects.push(Effect::PersistSignalCandidateCache {
-                cache: state.signal_candidate_cache().clone(),
-            });
             engine_info!(
                 "[signal-cache] url={} decision=store prompt_version={} model_id={} key_digest={}",
                 url,

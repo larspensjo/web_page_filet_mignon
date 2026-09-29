@@ -721,7 +721,7 @@ fn deferred_scoring_is_in_progress_under_its_current_key() {
 }
 
 #[test]
-fn cache_eviction_refreshes_the_other_affected_identity() {
+fn cache_growth_keeps_the_other_identity_complete() {
     let old = article("https://example.com/old-cache", "old-cache-hash");
     let new = article("https://example.com/new-cache", "new-cache-hash");
     let state = configured_state(AppState::new(), 1, "model-old", "old-context");
@@ -752,15 +752,15 @@ fn cache_eviction_refreshes_the_other_affected_identity() {
     assert_eq!(known(&state).needs_triage, 1);
     state.store_triage_result_with_model(&new.content_hash, triage_result(3));
     state.refresh_unfinished_identity(&new.url, &new.content_hash);
-    state.refresh_unfinished_evictions();
-    assert_eq!(known(&state).needs_summary, 1);
-    assert_eq!(known(&state).needs_triage, 1);
+    assert_eq!(state.triage_cache().len(), 10_001);
+    assert_eq!(known(&state).needs_summary, 2);
+    assert_eq!(known(&state).needs_triage, 0);
     assert_eq!(
         state
             .unfinished_stage_verdicts(&old.url, &old.content_hash)
             .unwrap()
             .triage,
-        UnfinishedStageVerdict::NeedsWork
+        UnfinishedStageVerdict::Complete
     );
     assert_eq!(
         state

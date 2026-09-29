@@ -39,12 +39,17 @@ pub use seen_set_store::{
     load_brave_seen_set, load_seen_set, persist_brave_metadata, persist_brave_seen_set,
     persist_seen_set, BraveMetadataEntry,
 };
-pub use signal_candidate_cache_store::{
-    load as load_signal_candidate_cache, save as save_signal_candidate_cache,
-};
+pub use signal_candidate_cache_store::load as load_signal_candidate_cache;
 pub use signal_candidate_overrides_store::{
     load as load_signal_candidate_overrides, save as save_signal_candidate_overrides,
 };
 pub use source_loader::load_sources;
-pub use summary_cache_store::{load_summary_cache, persist_summary_cache};
-pub use triage_cache_store::{load_triage_cache, persist_triage_cache};
+pub use summary_cache_store::load_summary_cache;
+#[cfg(test)]
+pub(crate) use summary_cache_store::persist_summary_cache;
+pub use triage_cache_store::load_triage_cache;
+#[cfg(test)]
+pub(crate) use triage_cache_store::persist_triage_cache;
+
+pub mod result_sink;
+pub mod result_store;

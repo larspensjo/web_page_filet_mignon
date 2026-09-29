@@ -97,8 +97,9 @@ impl AppState {
             created_at_utc,
         };
         self.note_unfinished_inputs_changed();
-        let evicted = self.summary_cache.insert(key, entry);
-        self.note_unfinished_evictions(evicted);
+        self.pending_results
+            .push(crate::SavedResult::Summary(key.clone(), entry.clone()));
+        self.summary_cache.insert(key, entry);
     }
 
     /// Replace the entire summary cache (used for hydration).
@@ -359,13 +360,7 @@ impl AppState {
         let key = self.current_triage_cache_key(content_hash)?;
 
         let stored_model_id = key.model_id.clone();
-        self.note_unfinished_inputs_changed();
-        let evicted = self.triage_cache.insert(key, result);
-        self.refresh_cache_derived_archive_hash(content_hash);
-        for hash in &evicted {
-            self.refresh_cache_derived_archive_hash(hash);
-        }
-        self.note_unfinished_evictions(evicted);
+        self.store_frozen_triage_result(key, result, chrono::Utc::now().to_rfc3339());
         Some(stored_model_id)
     }
 
@@ -377,18 +372,14 @@ impl AppState {
     ) {
         self.note_unfinished_inputs_changed();
         let content_hash = key.content_hash.clone();
-        let evicted = self.triage_cache.insert_entry(
-            key,
-            crate::triage_cache::TriageCacheEntry {
-                result,
-                created_at_utc,
-            },
-        );
+        let entry = crate::TriageCacheEntry {
+            result,
+            created_at_utc,
+        };
+        self.pending_results
+            .push(crate::SavedResult::Triage(key.clone(), entry.clone()));
+        self.triage_cache.insert_entry(key, entry);
         self.refresh_cache_derived_archive_hash(&content_hash);
-        for hash in &evicted {
-            self.refresh_cache_derived_archive_hash(hash);
-        }
-        self.note_unfinished_evictions(evicted);
     }
 
     pub(crate) fn record_triage_cache_hit(&mut self) {

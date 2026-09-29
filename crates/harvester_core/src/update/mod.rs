@@ -24,6 +24,9 @@ mod tests;
 
 /// Pure update function: applies a message to state and returns any effects.
 pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
+    let run_was_active = state.run_progress_is_active();
+    let stop_requested = matches!(&msg, Msg::StopFinishClicked)
+        && state.stop_finish_button_state().policy().is_some();
     let progress_before = pipeline_run::progress_before(&state, &msg);
     let unfinished_revisions = state.unfinished_revisions();
     let completed_identity = match &msg {
@@ -64,6 +67,24 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
     );
     let mut effects = match msg {
+        Msg::ValidatedResultReceived { record } => {
+            match *record {
+                crate::SavedResult::Summary(key, entry) => {
+                    state.store_summary_result(key, entry.result, entry.created_at_utc)
+                }
+                crate::SavedResult::Triage(key, entry) => {
+                    state.store_frozen_triage_result(key, entry.result, entry.created_at_utc)
+                }
+                crate::SavedResult::SignalCandidate(key, entry) => {
+                    state.store_signal_candidate_result(key, entry.result, entry.created_at_utc)
+                }
+            }
+            Vec::new()
+        }
+        Msg::ResultStoreUnavailable { reason } => {
+            state.refuse_result_store(reason);
+            Vec::new()
+        }
         Msg::InputChanged(text) => {
             state.set_input_buffer(text);
             Vec::new()
@@ -643,7 +664,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         if after_revisions.1 == unfinished_revisions.1 {
             if let Some((url, content_hash)) = completed_identity {
                 state.refresh_unfinished_identity(&url, &content_hash);
-                state.refresh_unfinished_evictions();
             } else {
                 state.recompute_unfinished_work();
             }
@@ -656,6 +676,14 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
     }
     pipeline_run::record_progress_after(&mut state, progress_before);
     pipeline_run::finish_if_settled(&mut state);
+    let records = std::mem::take(&mut state.pending_results);
+    if !records.is_empty() {
+        // Save before any flush emitted by settlement, so it includes this completion.
+        effects.insert(0, Effect::SaveResults { records });
+    }
+    if stop_requested || (run_was_active && !state.run_progress_is_active()) {
+        effects.push(Effect::FlushResults);
+    }
     if persist_runtime_state {
         effects.push(Effect::PersistRuntimeState {
             snapshot: crate::PersistenceSnapshot::capture(&state),

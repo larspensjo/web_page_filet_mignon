@@ -233,9 +233,7 @@ pub(super) fn settle_triage(state: &mut AppState, effects: &mut Vec<Effect>) {
             state.triage_mut().complete();
         }
         log_triage_cache_run_summary(state);
-        effects.push(Effect::PersistTriageCache {
-            cache: state.triage_cache().clone(),
-        });
+        effects.push(Effect::FlushResults);
         state.mark_dirty();
     }
 }

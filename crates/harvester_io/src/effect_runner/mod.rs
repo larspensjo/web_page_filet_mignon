@@ -108,6 +108,7 @@ pub struct EffectRunner {
     /// Host-selected sink for reducer-emitted runtime persistence snapshots.
     persistence_sink: Box<dyn RuntimePersistenceSink>,
     file_write_observer: Option<FileWriteObserver>,
+    result_sink: Box<dyn crate::result_sink::ResultSink>,
 }
 
 impl EffectRunner {
@@ -214,6 +215,11 @@ impl EffectRunner {
             );
         });
 
+        let result_sink = Box::new(crate::result_sink::CoalescingResultSink::new(
+            paths.clone(),
+            msg_tx.clone(),
+            file_write_observer.clone(),
+        ));
         let runner = Self {
             corpus_scan_index: Arc::new(Mutex::new(harvester_engine::CorpusScanIndex::default())),
             corpus_scan_reset_requested: Arc::new(AtomicBool::new(false)),
@@ -228,6 +234,7 @@ impl EffectRunner {
             llm_metadata_models,
             platform_handler,
             entity_index_worker_tx: worker_tx,
+            result_sink,
             persistence_sink,
             file_write_observer,
         };
@@ -256,6 +263,11 @@ impl EffectRunner {
             run_entity_index_worker(worker_rx, entity_index_path);
         });
 
+        let result_sink = Box::new(crate::result_sink::CoalescingResultSink::new(
+            paths.clone(),
+            msg_tx.clone(),
+            None,
+        ));
         let runner = Self {
             corpus_scan_index: Arc::new(Mutex::new(harvester_engine::CorpusScanIndex::default())),
             corpus_scan_reset_requested: Arc::new(AtomicBool::new(false)),
@@ -270,6 +282,7 @@ impl EffectRunner {
             llm_metadata_models: HashMap::new(),
             platform_handler,
             entity_index_worker_tx: worker_tx,
+            result_sink,
             persistence_sink,
             file_write_observer: None,
         };
@@ -286,6 +299,14 @@ impl EffectRunner {
             .entity_index_worker_tx
             .send(EntityIndexWorkerMsg::Flush { done: done_tx });
         let _ = done_rx.recv();
+    }
+
+    pub fn with_result_sink(mut self, sink: Box<dyn crate::result_sink::ResultSink>) -> Self {
+        self.result_sink = sink;
+        self
+    }
+    pub fn flush_results(&self) -> std::io::Result<()> {
+        self.result_sink.flush()
     }
 
     pub fn enqueue(&self, effects: Vec<Effect>) {
@@ -476,6 +497,9 @@ pub(super) fn observe_file_write(
 
 impl Drop for EffectRunner {
     fn drop(&mut self) {
+        if let Err(error) = self.flush_results() {
+            engine_error!("[results] runner drop flush failed: {}", error);
+        }
         engine_info!("[effect] EffectRunner dropped, stopping engine");
         self.engine.stop(true);
         // `entity_index_worker_tx` is dropped here, closing the channel.

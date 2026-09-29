@@ -37,6 +37,12 @@ pub(crate) fn ordered_context_pairs(ctx_file: &PromptContextFile) -> Vec<(String
 impl EffectRunner {
     pub(super) fn execute_effect(&self, effect: Effect) {
         match effect {
+            Effect::SaveResults { records } => self.result_sink.enqueue(records),
+            Effect::FlushResults => {
+                if let Err(error) = self.flush_results() {
+                    engine_error!("[results] flush failed: {}", error);
+                }
+            }
             Effect::EnqueueUrl { job_id, url } => {
                 engine_info!(
                     "EnqueueUrl job_id={} url_len={} url={}",
@@ -489,51 +495,7 @@ impl EffectRunner {
                     });
                 });
             }
-            Effect::PersistSummaryCache { cache } => {
-                let msg_tx = self.msg_tx.clone();
-                let path = self.paths.summary_cache_path.clone();
-                let observer = self.file_write_observer.clone();
-                thread::spawn(move || {
-                    let started = Instant::now();
-                    match crate::persist_summary_cache(&cache, &path) {
-                        Ok(_) => {
-                            super::observe_file_write(&observer, &path, started.elapsed());
-                            engine_info!("[summary-cache] Persisted cache to {:?}", path);
-                        }
-                        Err(err) => {
-                            engine_warn!(
-                                "[summary-cache] Failed to persist cache to {:?}: {}",
-                                path,
-                                err
-                            );
-                        }
-                    }
-                    // Fire-and-forget, no message sent
-                    let _ = msg_tx;
-                });
-            }
-            Effect::PersistSignalCandidateCache { cache } => {
-                let msg_tx = self.msg_tx.clone();
-                let path = self.paths.output_dir.join(".signal_candidate_cache.ron");
-                let observer = self.file_write_observer.clone();
-                thread::spawn(move || {
-                    let started = Instant::now();
-                    match crate::signal_candidate_cache_store::save(&path, &cache) {
-                        Ok(_) => {
-                            super::observe_file_write(&observer, &path, started.elapsed());
-                            engine_info!("[signal-cache] Persisted cache to {:?}", path);
-                        }
-                        Err(err) => {
-                            engine_warn!(
-                                "[signal-cache] Failed to persist cache to {:?}: {}",
-                                path,
-                                err
-                            );
-                        }
-                    }
-                    let _ = msg_tx;
-                });
-            }
+
             Effect::PersistSignalCandidateOverrides { overrides } => {
                 let msg_tx = self.msg_tx.clone();
                 let path = self
@@ -559,29 +521,7 @@ impl EffectRunner {
                     let _ = msg_tx;
                 });
             }
-            Effect::PersistTriageCache { cache } => {
-                let msg_tx = self.msg_tx.clone();
-                let path = self.paths.triage_cache_path.clone();
-                let observer = self.file_write_observer.clone();
-                thread::spawn(move || {
-                    let started = Instant::now();
-                    match crate::persist_triage_cache(&cache, &path) {
-                        Ok(_) => {
-                            super::observe_file_write(&observer, &path, started.elapsed());
-                            engine_info!("[triage-cache] Persisted cache to {:?}", path);
-                        }
-                        Err(err) => {
-                            engine_warn!(
-                                "[triage-cache] Failed to persist cache to {:?}: {}",
-                                path,
-                                err
-                            );
-                        }
-                    }
-                    // Fire-and-forget, no message sent
-                    let _ = msg_tx;
-                });
-            }
+
             Effect::PollAllSources => {
                 self.execute_poll_all_sources();
             }
@@ -673,7 +613,17 @@ impl EffectRunner {
                     // Step 2: load triage cache and build content_hash → tags map.
                     // Use the first entry per content_hash (any version is fine for rebuild).
                     let triage_cache =
-                        crate::triage_cache_store::load_triage_cache(&triage_cache_path);
+                        match crate::triage_cache_store::load_triage_cache(&triage_cache_path) {
+                            Ok(cache) => cache,
+                            Err(error) => {
+                                let reason = error.to_string();
+                                let _ = msg_tx.send(Msg::ResultStoreUnavailable {
+                                    reason: reason.clone(),
+                                });
+                                let _ = msg_tx.send(Msg::EntityIndexRebuildFailed { reason });
+                                return;
+                            }
+                        };
                     let mut themes_map: std::collections::HashMap<String, Vec<String>> =
                         std::collections::HashMap::new();
                     for (key, entry) in triage_cache.iter() {
@@ -685,7 +635,17 @@ impl EffectRunner {
                     // Step 3: load summary cache and build content_hash → entities map.
                     // Only V4+ entries will have non-empty entities; older entries → empty.
                     let summary_cache =
-                        crate::summary_cache_store::load_summary_cache(&summary_cache_path);
+                        match crate::summary_cache_store::load_summary_cache(&summary_cache_path) {
+                            Ok(cache) => cache,
+                            Err(error) => {
+                                let reason = error.to_string();
+                                let _ = msg_tx.send(Msg::ResultStoreUnavailable {
+                                    reason: reason.clone(),
+                                });
+                                let _ = msg_tx.send(Msg::EntityIndexRebuildFailed { reason });
+                                return;
+                            }
+                        };
                     let mut entities_map: std::collections::HashMap<
                         String,
                         harvester_engine::llm::SummaryEntities,

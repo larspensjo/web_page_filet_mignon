@@ -175,6 +175,7 @@ Buttons should clearly express priority and intent.
 - Pipeline stages may be active together and remain separate rows. A stage with an open total has
   no ETA; when it has no admitted work it reads “Waiting for articles.”
 - A large reprocess notice is muted run-surface text, not a modal or confirmation step.
+- The existing `ai_unavailable_message` is visible below the Run controls. API-key and ordinary AI-unavailable notices use muted status text. A saved-result store refusal uses the reserved warning red, names its file, explains the reason and recovery action, and leaves intake available.
 
 ## Links
 

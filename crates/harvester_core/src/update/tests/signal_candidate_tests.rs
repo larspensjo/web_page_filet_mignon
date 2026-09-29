@@ -285,7 +285,7 @@ fn signal_candidate_completion_routes_to_session_and_persists_cache() {
     assert!(!state.signal_candidate_cache().is_empty());
     assert!(effects
         .iter()
-        .any(|effect| matches!(effect, Effect::PersistSignalCandidateCache { .. })));
+        .any(|effect| matches!(effect, Effect::SaveResults { .. })));
 }
 
 #[test]
@@ -666,7 +666,7 @@ fn deferred_signal_round_trip_rearms_directly_and_completes_from_collected_cache
     assert_eq!(
         effects
             .iter()
-            .filter(|effect| matches!(effect, Effect::PersistSignalCandidateCache { .. }))
+            .filter(|effect| matches!(effect, Effect::SaveResults { .. }))
             .count(),
         1
     );
@@ -935,4 +935,79 @@ fn start_cached_run(mut state: AppState) -> (AppState, Vec<Effect>) {
             scope: crate::PipelineRunScope::Resume,
         },
     )
+}
+
+#[test]
+fn signal_completion_emits_exact_record_before_other_work_settles() {
+    let mut state = AppState::new();
+    state.signal_candidate_mut().enqueue(
+        "https://example.com/article".to_string(),
+        "fixture-input".to_string(),
+    );
+    state
+        .signal_candidate_mut()
+        .mark_scoring("https://example.com/article", 9);
+    state.record_pending_llm_request(9, PromptId::ArticleSignalCandidate);
+    state.set_signal_candidate_input_snapshot(
+        "https://example.com/article",
+        crate::update::signal_candidate::SignalCandidateInputSnapshot {
+            outlet: "Example Outlet".to_string(),
+            title: "Example article".to_string(),
+            published_at: "2026-05-25T12:00:00Z".to_string(),
+            triage_priority: 3,
+            triage_tags_sorted: vec!["ai".to_string(), "chips".to_string()],
+            summary: "Example summary".to_string(),
+            key_points: vec!["Point one".to_string(), "Point two".to_string()],
+            upstream_summary_cache_digest: "digest".to_string(),
+            context: Vec::new(),
+            prompt_version: 1,
+            model_id: "test-signal-model".to_string(),
+        },
+    );
+
+    state.signal_candidate_mut().enqueue(
+        "https://example.com/still-scoring".into(),
+        "other-input".into(),
+    );
+    state
+        .signal_candidate_mut()
+        .mark_scoring("https://example.com/still-scoring", 10);
+    state.record_pending_llm_request(10, PromptId::ArticleSignalCandidate);
+    let (state, effects) = crate::update(
+        state,
+        Msg::LlmCompleted {
+            request_id: 9,
+            result: LlmResultKind::Success {
+                output_json: signal_result_json(),
+                input_tokens: 100,
+                output_tokens: 10,
+                prompt_version: 1,
+                resolved_model: "test-signal-model".to_string(),
+            },
+            metadata: None,
+        },
+    );
+
+    assert_eq!(state.signal_candidate().completed_count(), 1);
+    assert!(state
+        .signal_candidate_input_snapshot("https://example.com/article")
+        .is_none());
+    assert!(!state.signal_candidate_cache().is_empty());
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::SaveResults { .. })));
+    assert_eq!(state.signal_candidate().in_flight_count(), 1);
+    let records: Vec<_> = effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::SaveResults { records } => Some(records),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert_eq!(records.len(), 1);
+    let crate::SavedResult::SignalCandidate(key, entry) = records[0] else {
+        panic!("signal record expected")
+    };
+    assert_eq!(state.signal_candidate_cache().get(key), Some(entry));
 }

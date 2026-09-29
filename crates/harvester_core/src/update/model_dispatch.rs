@@ -25,7 +25,11 @@ fn has_slot(state: &AppState) -> bool {
 }
 
 pub(super) fn dispatch_model_work(state: &mut AppState, effects: &mut Vec<Effect>) {
-    if let Some(reason) = state.model_dispatch_halt_reason().map(str::to_owned) {
+    if let Some(reason) = state
+        .result_store_failure()
+        .or_else(|| state.model_dispatch_halt_reason())
+        .map(str::to_owned)
+    {
         state.triage_mut().fail_all_pending(&reason);
         state.briefing_mut().fail_all_pending(&reason);
         for url in state.signal_candidate_mut().fail_all_pending(&reason) {

@@ -159,13 +159,18 @@ fn request_id_for_prompt(effects: &[Effect], prompt_id: PromptId) -> Option<u64>
 }
 
 fn assert_persist_triage_cache_effect(effects: &[Effect], state: &AppState) {
-    let expected_cache = state.triage_cache().clone();
-    let expected = Effect::PersistTriageCache {
-        cache: expected_cache,
-    };
     assert!(
-        effects.contains(&expected),
-        "expected PersistTriageCache in effects, got: {effects:?}"
+        effects.iter().any(|effect| match effect {
+            Effect::SaveResults { records } => records.iter().any(|record| match record {
+                harvester_core::SavedResult::Triage(key, entry) => state
+                    .triage_cache()
+                    .iter()
+                    .any(|(k, e)| k == key && e == entry),
+                _ => false,
+            }),
+            _ => false,
+        }),
+        "expected incremental triage result, got: {effects:?}"
     );
 }
 
@@ -329,7 +334,10 @@ fn triage_all_failed_transitions_to_failed() {
             metadata: None,
         },
     );
-    assert_persist_triage_cache_effect(&effects, &state);
+    assert!(effects.contains(&Effect::FlushResults));
+    assert!(!effects
+        .iter()
+        .any(|e| matches!(e, Effect::SaveResults { .. })));
     // The run is terminal after every triage request fails, so the primary Run action is enabled.
     assert!(state.view().run_enabled);
     assert!(state.view().desktop_job_list.rows[0]
@@ -341,7 +349,7 @@ fn triage_all_failed_transitions_to_failed() {
 fn triage_partial_failure_still_completes() {
     init_logging();
     let (state, _articles) = triage_flow_with_two_articles();
-    let (state, _) = update(
+    let (state, completed_effects) = update(
         state,
         Msg::LlmCompleted {
             request_id: 1,
@@ -349,6 +357,7 @@ fn triage_partial_failure_still_completes() {
             metadata: None,
         },
     );
+    assert_persist_triage_cache_effect(&completed_effects, &state);
     let (state, effects) = update(
         state,
         Msg::LlmCompleted {
@@ -357,7 +366,10 @@ fn triage_partial_failure_still_completes() {
             metadata: None,
         },
     );
-    assert_persist_triage_cache_effect(&effects, &state);
+    assert!(effects.contains(&Effect::FlushResults));
+    assert!(!effects
+        .iter()
+        .any(|e| matches!(e, Effect::SaveResults { .. })));
     // The downstream stages are still part of the active run after partial triage failure.
     assert!(!state.view().run_enabled);
     assert!(state.view().desktop_job_list.rows[0]
@@ -377,7 +389,10 @@ fn triage_quota_exhaustion_fails_remaining() {
             metadata: None,
         },
     );
-    assert_persist_triage_cache_effect(&effects, &state);
+    assert!(effects.contains(&Effect::FlushResults));
+    assert!(!effects
+        .iter()
+        .any(|e| matches!(e, Effect::SaveResults { .. })));
     // Quota exhaustion terminalizes the run; Run stays available for a later retry.
     assert!(state.view().run_enabled);
 }

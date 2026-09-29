@@ -1,3 +1,4 @@
+import aiUnavailable from "@fixtures/snapshots/ai_unavailable.json";
 import exportUnavailable from "@fixtures/snapshots/export_unavailable_during_run.json";
 import overlappingActiveStages from "@fixtures/snapshots/overlapping_active_stages.json";
 import reprocessNotice from "@fixtures/snapshots/reprocess_notice.json";
@@ -31,6 +32,27 @@ const exportBusy = exportUnavailable as unknown as SnapshotEnvelope;
 const reprocess = reprocessNotice as unknown as SnapshotEnvelope;
 
 describe("RunSurface", () => {
+	it("renders the AI unavailable message on the Run surface", () => {
+		const snapshot = aiUnavailable as unknown as SnapshotEnvelope;
+		const { rerender } = render(<RunSurface view={snapshot.view} />);
+		expect(
+			screen.getByText(snapshot.view.ai_unavailable_message as string),
+		).toBeVisible();
+		expect(
+			screen.getByText(snapshot.view.ai_unavailable_message as string),
+		).not.toHaveClass("run-reprocess-notice--warning");
+		const refusal =
+			"AI features unavailable: saved results could not be opened: .summary_cache.ron: parse RON failed. Restore the file from backup or move it aside, then restart.";
+		rerender(
+			<RunSurface
+				view={{ ...snapshot.view, ai_unavailable_message: refusal }}
+			/>,
+		);
+		expect(screen.getByText(refusal)).toBeVisible();
+		expect(screen.getByText(refusal)).toHaveClass(
+			"run-reprocess-notice--warning",
+		);
+	});
 	afterEach(() => {
 		cleanup();
 		vi.clearAllMocks();

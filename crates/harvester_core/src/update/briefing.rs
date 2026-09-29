@@ -265,8 +265,7 @@ pub(super) fn handle_articles_loaded(
             .fail("no completed articles found".to_string());
         log_summary_cache_run_summary(state);
         state.mark_dirty();
-        let cache = state.summary_cache().clone();
-        return vec![Effect::PersistSummaryCache { cache }];
+        return vec![Effect::FlushResults];
     }
     state.briefing_mut().set_articles(articles, collection_text);
     state.briefing_mut().transition_to_summarizing();
@@ -278,8 +277,7 @@ pub(super) fn handle_articles_load_failed(state: &mut AppState, reason: String) 
     state.briefing_mut().fail(reason);
     log_summary_cache_run_summary(state);
     state.mark_dirty();
-    let cache = state.summary_cache().clone();
-    vec![Effect::PersistSummaryCache { cache }]
+    vec![Effect::FlushResults]
 }
 
 pub(super) fn settle_summaries(state: &mut AppState, effects: &mut Vec<Effect>) {
@@ -300,9 +298,7 @@ pub(super) fn settle_summaries(state: &mut AppState, effects: &mut Vec<Effect>) 
             .fail("all article summaries failed".to_string());
         state.mark_dirty();
         log_summary_cache_run_summary(state);
-        effects.push(Effect::PersistSummaryCache {
-            cache: state.summary_cache().clone(),
-        });
+        effects.push(Effect::FlushResults);
         return;
     }
 
@@ -312,9 +308,7 @@ pub(super) fn settle_summaries(state: &mut AppState, effects: &mut Vec<Effect>) 
         state.clear_briefing_orchestration();
         state.mark_dirty();
         log_summary_cache_run_summary(state);
-        effects.push(Effect::PersistSummaryCache {
-            cache: state.summary_cache().clone(),
-        });
+        effects.push(Effect::FlushResults);
         return;
     }
 
@@ -326,9 +320,7 @@ pub(super) fn settle_summaries(state: &mut AppState, effects: &mut Vec<Effect>) 
                 .fail("missing briefing collection".to_string());
             state.mark_dirty();
             log_summary_cache_run_summary(state);
-            effects.push(Effect::PersistSummaryCache {
-                cache: state.summary_cache().clone(),
-            });
+            effects.push(Effect::FlushResults);
             return;
         }
     };

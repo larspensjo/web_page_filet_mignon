@@ -63,6 +63,10 @@ pub enum Effect {
         /// NOT concatenated into the {{context}} block.
         extra_template_vars: Vec<(String, String)>,
     },
+    SaveResults {
+        records: Vec<crate::SavedResult>,
+    },
+    FlushResults,
     StartSession,
     StopFinish {
         policy: StopPolicy,
@@ -116,17 +120,8 @@ pub enum Effect {
         link_index: u32,
         path: PathBuf,
     },
-    PersistSummaryCache {
-        cache: crate::SummaryCache,
-    },
-    PersistSignalCandidateCache {
-        cache: crate::signal_candidate_cache::SignalCandidateCache,
-    },
     PersistSignalCandidateOverrides {
         overrides: std::collections::HashSet<crate::signal_candidate::OverrideKey>,
-    },
-    PersistTriageCache {
-        cache: crate::TriageCache,
     },
     /// Load briefing history from disk at startup.
     LoadBriefingHistory,

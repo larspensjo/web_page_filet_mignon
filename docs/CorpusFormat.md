@@ -30,7 +30,7 @@ Current marker shape:
       "summary_refresh_reports/",
       ".summary_refresh_last.json"
     ],
-    "internal_state": [".*.ron", "llm_results/", "logs/"]
+    "internal_state": [".*.ron", ".*.jsonl", "llm_results/", "logs/"]
   }
 }
 ```
@@ -63,10 +63,21 @@ signature `===== ARCHIVE INDEX =====`.
 
 ## Private Files
 
-Hidden `.ron` files, `llm_results/`, `logs/`, and refresh reports are outside the
+Hidden `.ron` and `.jsonl` files, `llm_results/`, `logs/`, and refresh reports are outside the
 public corpus contract. External readers must not depend on them. The
 `.sources.ron` file is the user-editable source registry; it lives in the output
 folder so corpus backups preserve ingestion configuration as well as state.
+
+Paid results live in `.triage_cache.jsonl`, `.summary_cache.jsonl`, and
+`.signal_candidate_cache.jsonl`. Their RON predecessors remain untouched backups.
+The internal-state pattern `.*.jsonl` also covers migration files such as
+`.summary_cache.migrating-20260928T120000.000000001.jsonl` and torn-tail sidecars such
+as `.summary_cache.torn-20260928T120000.000000001.jsonl`; triage and signal-candidate
+stores use the same suffixes. Migration publishes only a complete, verified file.
+On recovery, stale migration files are removed before migration is retried, and
+unterminated tails are preserved in sidecars before truncation. These are private
+state artifacts, never corpus articles. Adding their marker pattern is compatible
+and does not change `CORPUS_SCHEMA_VERSION`.
 
 ## Versioning Rules
 

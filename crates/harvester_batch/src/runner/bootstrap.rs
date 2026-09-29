@@ -64,6 +64,10 @@ pub(crate) fn prepare_runtime(
     engine_info!("[batch] Hydrating state from disk");
     let (mut state, startup_effects) = hydrate_batch_state(paths, args);
 
+    if let Some(reason) = state.result_store_failure() {
+        eprintln!("AI features unavailable: {reason}");
+    }
+
     // Build EffectRunner (with optional LLM support based on OPENAI_API_KEY)
     engine_info!("[batch] Building EffectRunner");
     let platform_handler = Box::new(NoOpPlatformHandler);
@@ -82,7 +86,7 @@ pub(crate) fn prepare_runtime(
         Some(BATCH_EMPTY_API_KEY_WARNING),
     )?;
     state = apply_llm_availability(state, runtime.is_some());
-    let batch_runtime = if args.batch_api_enabled() {
+    let batch_runtime = if args.batch_api_enabled() && state.result_store_failure().is_none() {
         match runtime {
             Some(runtime) => Some(BatchRuntime::new(runtime.provider, runtime.config, paths)?),
             None => None,

@@ -121,6 +121,10 @@
 	line-height: var(--metadata-line-height);
 }
 
+.run-reprocess-notice--warning {
+	color: var(--accent-warning);
+}
+
 .run-details {
 	margin-top: var(--space-pane);
 }

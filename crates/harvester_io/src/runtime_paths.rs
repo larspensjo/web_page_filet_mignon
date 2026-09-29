@@ -37,9 +37,9 @@ impl RuntimePaths {
         contexts_dir: PathBuf,
         prompts_dir: PathBuf,
     ) -> Self {
-        let summary_cache_path = output_dir.join(".summary_cache.ron");
-        let triage_cache_path = output_dir.join(".triage_cache.ron");
-        let signal_candidate_cache_path = output_dir.join(".signal_candidate_cache.ron");
+        let summary_cache_path = output_dir.join(".summary_cache.jsonl");
+        let triage_cache_path = output_dir.join(".triage_cache.jsonl");
+        let signal_candidate_cache_path = output_dir.join(".signal_candidate_cache.jsonl");
         let signal_candidate_overrides_path = output_dir.join(".signal_candidate_overrides.ron");
         let seen_set_path = output_dir.join(".seen_set.ron");
         let state_path = output_dir.join(".harvester_state.ron");
@@ -94,15 +94,15 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn default_paths_use_ron_extensions() {
+    fn default_paths_use_jsonl_for_paid_results() {
         let dir = tempdir().expect("tempdir");
         let paths = RuntimePaths::with_defaults(dir.path().to_path_buf());
 
-        assert!(paths.summary_cache_path.ends_with(".summary_cache.ron"));
-        assert!(paths.triage_cache_path.ends_with(".triage_cache.ron"));
+        assert!(paths.summary_cache_path.ends_with(".summary_cache.jsonl"));
+        assert!(paths.triage_cache_path.ends_with(".triage_cache.jsonl"));
         assert!(paths
             .signal_candidate_cache_path
-            .ends_with(".signal_candidate_cache.ron"));
+            .ends_with(".signal_candidate_cache.jsonl"));
         assert!(paths
             .signal_candidate_overrides_path
             .ends_with(".signal_candidate_overrides.ron"));
@@ -153,7 +153,7 @@ mod tests {
         cache.insert(key.clone(), entry);
 
         persist_summary_cache(&cache, &paths.summary_cache_path).expect("persist");
-        let reloaded = load_summary_cache(&paths.summary_cache_path);
+        let reloaded = load_summary_cache(&paths.summary_cache_path).unwrap();
 
         assert!(reloaded.lookup(&key).is_some());
     }

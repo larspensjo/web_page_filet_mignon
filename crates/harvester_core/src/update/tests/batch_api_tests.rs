@@ -21,7 +21,7 @@ fn deferred_triage_settles_and_rearm_redispatches() {
     let (state, effects) = start_triage_for_test(AppState::new(), loaded_triage_articles(1));
     let request_id = request_id_for_prompt(&effects, PromptId::ArticleTriage).unwrap();
     let (state, effects) = update(state, deferred(request_id));
-    assert!(effects.is_empty());
+    assert_eq!(effects, vec![Effect::FlushResults]);
     assert!(matches!(
         state.llm_request_state(request_id),
         Some(LlmRequestState::Deferred { .. })
@@ -142,7 +142,7 @@ fn collected_successes_insert_frozen_keys_coalesce_persistence_and_do_not_comple
     assert_eq!(
         effects
             .iter()
-            .filter(|effect| matches!(effect, Effect::PersistTriageCache { .. }))
+            .filter(|effect| matches!(effect, Effect::SaveResults { .. }))
             .count(),
         1
     );
@@ -208,7 +208,7 @@ fn collected_summary_rearm_cache_hits_and_runs_post_processing_once() {
     );
     assert!(effects
         .iter()
-        .any(|effect| matches!(effect, Effect::PersistSummaryCache { .. })));
+        .any(|effect| matches!(effect, Effect::SaveResults { .. })));
 
     let (state, _) = update(
         state,

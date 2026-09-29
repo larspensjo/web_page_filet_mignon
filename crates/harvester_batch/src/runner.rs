@@ -423,6 +423,12 @@ pub fn run(args: Args) -> Result<i32, String> {
         // state lives in memory rather than on disk. The manifest is the only
         // durable record of what is still outstanding.
         if args.drain {
+            if let Err(err) = effect_runner.flush_results() {
+                engine_warn!(
+                    "[batch-collect] result flush failed before cache confirmation: {}",
+                    err
+                );
+            }
             // A drain has no next cycle to run the confirmation, so snapshots
             // whose results already reached the caches are pruned here. Failure
             // only retains them for the next run, so it is not fatal.
@@ -488,6 +494,7 @@ pub fn run(args: Args) -> Result<i32, String> {
     engine_info!("[batch] Graceful shutdown: draining effects and persisting final state");
     // Ordering contract: flush and stop the runner's persistence sink before
     // the batch host performs its final synchronous writes below.
+    let result_save_error = effect_runner.flush_results().err();
     drop(effect_runner);
     drop(msg_rx);
 
@@ -532,7 +539,16 @@ pub fn run(args: Args) -> Result<i32, String> {
     engine_info!("[batch] Shutdown complete");
 
     Ok(exit_code_with_shutdown(
-        determine_exit_code(total_failure_cycles),
+        if let Some(reason) = state
+            .result_store_failure()
+            .map(str::to_owned)
+            .or_else(|| result_save_error.map(|e| e.to_string()))
+        {
+            eprintln!("Final summary: AI features unavailable: {reason}");
+            1
+        } else {
+            determine_exit_code(total_failure_cycles)
+        },
         shutdown_flag.load(Ordering::Relaxed),
     ))
 }

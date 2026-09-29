@@ -523,6 +523,7 @@ fn hydration_with_eligible_scoring_is_settled_and_unadmitted() {
         },
     );
     seed_cached_summary(&mut state, &article);
+    (state, _) = crate::update(state, Msg::NoOp); // Persist the fixture seeds before hydration.
     let id = state.alloc_triage_request_id();
     state.set_triage_in_flight(id);
     let (state, effects) = crate::update(

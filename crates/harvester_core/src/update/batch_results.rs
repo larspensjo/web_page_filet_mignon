@@ -7,9 +7,6 @@ use crate::{
 };
 
 pub(super) fn handle(state: &mut crate::AppState, entries: Vec<CollectedEntry>) -> Vec<Effect> {
-    let mut persist_triage = false;
-    let mut persist_summary = false;
-    let mut persist_signal = false;
     for entry in entries {
         let (raw_output_json, usage, resolved_model) = match entry.outcome {
             CollectedOutcome::Success {
@@ -60,7 +57,6 @@ pub(super) fn handle(state: &mut crate::AppState, entries: Vec<CollectedEntry>) 
                             },
                             entry.created_at_utc,
                         );
-                        persist_triage = true;
                     }
                 }
                 Err(err) => engine_warn!(
@@ -93,7 +89,6 @@ pub(super) fn handle(state: &mut crate::AppState, entries: Vec<CollectedEntry>) 
                         },
                         entry.created_at_utc,
                     );
-                    persist_summary = true;
                 }
                 Err(err) => engine_warn!(
                     "[batch-collect] batch_id={} custom_id={} cache_key={} invalid summary: {}",
@@ -116,7 +111,6 @@ pub(super) fn handle(state: &mut crate::AppState, entries: Vec<CollectedEntry>) 
                     };
                     state.record_batch_llm_usage(&resolved_model, &usage);
                     state.store_signal_candidate_result(key, value, entry.created_at_utc);
-                    persist_signal = true;
                 }
                 Err(err) => engine_warn!(
                     "[batch-collect] batch_id={} custom_id={} cache_key={} invalid signal: {}",
@@ -128,21 +122,5 @@ pub(super) fn handle(state: &mut crate::AppState, entries: Vec<CollectedEntry>) 
             },
         }
     }
-    let mut effects = Vec::new();
-    if persist_triage {
-        effects.push(Effect::PersistTriageCache {
-            cache: state.triage_cache().clone(),
-        });
-    }
-    if persist_summary {
-        effects.push(Effect::PersistSummaryCache {
-            cache: state.summary_cache().clone(),
-        });
-    }
-    if persist_signal {
-        effects.push(Effect::PersistSignalCandidateCache {
-            cache: state.signal_candidate_cache().clone(),
-        });
-    }
-    effects
+    Vec::new()
 }

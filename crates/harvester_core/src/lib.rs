@@ -112,3 +112,6 @@ pub use working_corpus::{CurrentWorkingCorpus, CurrentWorkingCorpusSource};
 
 mod pipeline_waves;
 pub use pipeline_waves::{PipelineRunScope, PipelineWave, PipelineWavePolicy, PipelineWaves};
+
+pub mod result_store;
+pub use result_store::{ResultStore, SavedResult};

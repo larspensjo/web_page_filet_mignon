@@ -809,6 +809,20 @@ fn start_driver(
         }
     });
     let runner = Arc::new(Mutex::new(effect_runner));
+    if let Some(window) = app.get_webview_window("main") {
+        let close_runner = Arc::clone(&runner);
+        window.on_window_event(move |event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                if let Err(error) = close_runner
+                    .lock()
+                    .expect("result sink close lock")
+                    .flush_results()
+                {
+                    engine_error!("[results] desktop close flush failed: {}", error);
+                }
+            }
+        });
+    }
     let driver_host = host.clone();
     let command_app = app.clone();
     let signal_app = app.clone();

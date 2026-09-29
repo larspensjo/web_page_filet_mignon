@@ -1288,6 +1288,10 @@ Filled in as phases land (debug build, copy of `output/`, 40 held-back articles)
 | 1 (baseline) | batch | 1500 ms | 339 s | 17.7 s + 158.1 s state clones | TriageArticlesLoaded 232 ms | 26.7 MB | | | |
 | 1 (baseline) | desktop | 0 ms | 36 s | 10.8 s | JobDone 149 ms | 16.0 MB | | | |
 | 1 (baseline) | desktop | 1500 ms | 46 s | 24.5 s | JobDone 135 ms | 16.4 MB | | | |
+| 2 (0 model calls, see notes) | batch | 0 ms | 276 s | 5.0 s + 130.4 s state clones | JobDone 99 ms | 10.1 MB | 91,841 (all Rust) | n/a | 1,527 passing (1,537 attributes) |
+| 2 (0 model calls) | batch | 1500 ms | 266 s | 5.0 s + 127.5 s state clones | JobDone 105 ms | 10.1 MB | | | |
+| 2 (0 model calls) | desktop | 0 ms | 28 s | 3.8 s | JobDone 129 ms | 4.1 MB | | | |
+| 2 (0 model calls) | desktop | 1500 ms | 28 s | 3.8 s | JobDone 147 ms | 4.1 MB | | | |
 
 Phase 1 notes (2026-09-28, 40 held-back articles, synchronous model-call path, not `--batch-api`):
 
@@ -1317,6 +1321,37 @@ and all 33 full keys already present in `.signal_candidate_cache.ron`. The Phase
 reconciliation should therefore confirm 33 and append 0. The 22 hidden jobs are all from
 February 2026: 9 have an article file whose frontmatter carries `fetched_utc` (recoverable in
 Phase 7), and 13 have no article file (they stay hidden, per the owner's answer).
+
+Phase 2 notes (2026-09-29):
+
+- The Phase 2 benchmark rows are not comparable with the baseline: every run made 0 model
+  calls. The owner's desktop run that morning had already processed the 40 newest articles
+  the harness holds back, and the runtime state records that work. The pre-phase code
+  (b293945) on the same source copy also made 0 model calls, so the cause is the data, not
+  this phase. The expected fall in bytes written per completion is therefore not yet shown
+  by the benchmark. The sink tests and the file-write report show it instead: no
+  `.*_cache.*` file is rewritten, and results are appended only as new records. Follow-up
+  before Phase 3's benchmark: make the harness independent of how current the source is.
+  For example, it could drop the held-back articles' saved results and completed-job
+  records from the work copy, or benchmark from a pinned snapshot.
+- The runs used a copy of `output/` without the new `.jsonl` files, so each run also migrated
+  the RON stores at startup. The RON files stayed byte-identical.
+- Migration of the owner's data (a scratch copy made during review, then the live desktop run
+  on 2026-09-29): all 2,999 triage, 9,411 summary and 7,022 signal entries migrated. The
+  `.ron` files were unchanged afterwards. The live run then appended about 60 results of each
+  kind. Reading the live `.jsonl` files back with the final code loaded 3,062, 9,470 and 7,081
+  entries, with no skipped or damaged lines.
+- Test counts: root `cargo test` 1,501 → 1,527 (32 added, 6 removed); `harvester_ui` 8 → 8;
+  Rust test attributes 1,511 → 1,537; vitest 95 → 96. The six removed tests all cover eviction,
+  which this phase removes: `capacity_enforcement_evicts_oldest`,
+  `evict_to_limit_removes_oldest`, `evict_to_limit_does_nothing_when_below_limit`,
+  `evict_older_than_removes_old_entries` and `evict_by_ttl_removes_expired_entries`
+  (`summary_cache.rs`; the TTL and older-than helpers had no other callers and went with
+  them), and `capacity_guard_evicts_oldest_entry` (`triage_cache.rs`). The two corrupt-file
+  tests were rewritten to assert refusal. No test file was deleted. The carry-over and archive
+  fixtures are unchanged.
+- The IPC probe and Pester were not run. The owner's desktop app held the GUI lock throughout,
+  and this phase changes no launch script.
 
 ## Open questions
 

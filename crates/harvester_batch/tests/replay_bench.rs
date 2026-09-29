@@ -101,9 +101,9 @@ fn replay_harness_completes_five_articles_and_saves_results() {
             >= 5
     );
     for filename in [
-        ".triage_cache.ron",
-        ".summary_cache.ron",
-        ".signal_candidate_cache.ron",
+        ".triage_cache.jsonl",
+        ".summary_cache.jsonl",
+        ".signal_candidate_cache.jsonl",
     ] {
         let path = work.join(filename);
         assert!(
@@ -113,7 +113,7 @@ fn replay_harness_completes_five_articles_and_saves_results() {
         );
         assert!(fs::metadata(path).unwrap().len() > 0);
     }
-    let triage = load_triage_cache(&work.join(".triage_cache.ron"));
+    let triage = load_triage_cache(&work.join(".triage_cache.jsonl")).expect("load result store");
     let priorities = triage
         .iter()
         .map(|(_, entry)| entry.result.priority)
@@ -155,7 +155,7 @@ fn replay_harness_completes_five_articles_and_saves_results() {
     assert!(desktop.view_builds.count > 0);
     assert!(desktop.snapshots_emitted > 0);
     assert!(desktop.reducer_time_by_message_kind.contains_key("Tick"));
-    assert!(desktop_work.join(".triage_cache.ron").is_file());
+    assert!(desktop_work.join(".triage_cache.jsonl").is_file());
     assert!(desktop
         .private_file_writes
         .contains_key("llm_results/*.json"));
@@ -206,9 +206,17 @@ fn carry_over_replay_preserves_restored_state_seen_sets_and_paid_results() {
     // 2. Current-key completed work avoids every paid model call.
     assert!(report.llm_calls_by_prompt.is_empty());
 
+    for name in [
+        ".triage_cache.jsonl",
+        ".summary_cache.jsonl",
+        ".signal_candidate_cache.jsonl",
+    ] {
+        assert!(work.join(name).is_file(), "migration publishes {name}");
+    }
+
     // 3. All three paid-result stores remain loadable with their fixture entries.
-    let triage = load_triage_cache(&work.join(".triage_cache.ron"));
-    let summary = load_summary_cache(&work.join(".summary_cache.ron"));
+    let triage = load_triage_cache(&work.join(".triage_cache.ron")).expect("load result store");
+    let summary = load_summary_cache(&work.join(".summary_cache.ron")).expect("load result store");
     let signal = load_signal_candidate_cache(&work.join(".signal_candidate_cache.ron"))
         .expect("load signal-candidate results");
     assert_eq!(triage.len(), 3, "two current and one stale triage result");

@@ -39,7 +39,7 @@ pub(super) fn handle(
         .is_some()
     {
         note_article_model_result(state, &result);
-        handle_signal_candidate_completion(state, request_id, &result, &mut effects);
+        handle_signal_candidate_completion(state, request_id, &result);
     } else if let Some(article_idx) = state.briefing().find_article_by_request_id(request_id) {
         note_article_model_result(state, &result);
         handle_summary_completion(state, article_idx, &result, &mut effects);
@@ -424,35 +424,27 @@ fn handle_aggregate_briefing_completion(
                         entries: state.briefing_history().to_vec(),
                     });
                 }
-                effects.push(Effect::PersistSummaryCache {
-                    cache: state.summary_cache().clone(),
-                });
+                effects.push(Effect::FlushResults);
             }
             Err(err) => {
                 engine_warn!("[briefing] briefing validation failed: {err}");
                 state
                     .briefing_mut()
                     .fail(format!("validation failed: {err}"));
-                effects.push(Effect::PersistSummaryCache {
-                    cache: state.summary_cache().clone(),
-                });
+                effects.push(Effect::FlushResults);
             }
         },
         LlmResultKind::QuotaExhausted { reason, .. }
         | LlmResultKind::RateLimited { reason }
         | LlmResultKind::Failed { reason } => {
             state.briefing_mut().fail(reason.clone());
-            effects.push(Effect::PersistSummaryCache {
-                cache: state.summary_cache().clone(),
-            });
+            effects.push(Effect::FlushResults);
         }
         LlmResultKind::ValidationFailed { reason, .. } => {
             state
                 .briefing_mut()
                 .fail(format!("validation failed: {reason}"));
-            effects.push(Effect::PersistSummaryCache {
-                cache: state.summary_cache().clone(),
-            });
+            effects.push(Effect::FlushResults);
         }
     }
 

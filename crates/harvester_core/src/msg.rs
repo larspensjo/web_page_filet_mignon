@@ -17,6 +17,8 @@ use crate::CollectedEntry;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[rustfmt::skip]
 pub enum Msg {
+    ValidatedResultReceived { record: Box<crate::SavedResult> },
+    ResultStoreUnavailable { reason: String },
     /// User edited the URL input box (debounced text).
     InputChanged(String),
     /// User typed in the Jobs search box.
@@ -324,6 +326,8 @@ impl Msg {
     /// Cheap message name for host measurements; never formats payloads.
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::ValidatedResultReceived { .. } => "ValidatedResultReceived",
+            Self::ResultStoreUnavailable { .. } => "ResultStoreUnavailable",
             Self::InputChanged(..) => "InputChanged",
             Self::JobsSearchQueryChanged(..) => "JobsSearchQueryChanged",
             Self::JobsSearchCleared => "JobsSearchCleared",
