@@ -2617,3 +2617,33 @@ Change: `harvester_io::host_bootstrap` now owns the shared missing, empty, and w
 Lessons Learned: Availability policy belongs at the shared host boundary so both executables disable AI in the same state before they can schedule model work.
 Prevention: Bootstrap regressions cover missing and blank values on the desktop and command-line paths; provider tests cover the empty-value error without reading an existing key.
 Refs: crates/harvester_io/src/host_bootstrap.rs, crates/harvester_batch/src/runner/bootstrap.rs, crates/harvester_ui/src/host.rs, crates/openai_provider_kit/src/openai.rs
+
+## 2026-09-30 - Keyless reconciliation of collected Batch API results
+Type: Implementation
+Context: A collected manifest snapshot can contain the only durable copy of a paid result. Batch API retirement required confirmation of every successful collected record in the append-only result stores.
+Change: A temporary keyless reconciliation tool matched manifest-frozen keys against result-store JSONL, with nine temporary-folder regressions for validation, provenance and read-only behavior. The owner confirmed all 33 successful signal-candidate records with no missing, invalid or outstanding records. The tool and its tests were removed in the same phase after that check authorized retirement.
+Refs: crates/harvester_io/src/result_store.rs, docs/plans/Plan.Simplification.md
+
+## 2026-09-30 - Removing dry-run eliminates seen-state side effects (bug 1)
+Type: Bug Fix
+Context: The former dry-run polled sources and marked returned entries seen despite not downloading them.
+Change: Removed dry-run and the other batch-only modes with the Batch API. Default command-line invocation now polls, downloads, processes synchronously and exits. The fixed launcher has no runtime arguments. The owner first confirmed every successful collected result through the temporary read-only reconciliation, then its example and support code were removed.
+Lessons Learned: A preview that invokes a stateful poller cannot promise a read-only run. Collected does not mean persisted: confirm paid results by exact frozen keys before removing their recovery path.
+Prevention: The real CLI regression runs with no flags in a temporary folder and verifies exactly one poll, terminal settlement, persistence and exit. The synchronous processing regression also verifies a successful triage result without a mode flag.
+Refs: crates/harvester_batch/src/cli.rs, crates/harvester_batch/src/runner.rs, cli_with_no_flags_polls_one_cycle_persists_and_exits, default_cycle_processes_unfinished_work_without_new_jobs
+
+## 2026-09-30 - Quiet downloads no longer exhaust an iteration cap (bug 8)
+Type: Bug Fix
+Context: Dispatch and browser-import loops counted 100 ms receive timeouts toward a 10,000-iteration cap, failing legitimate long-running work.
+Change: Both loops use the shared 60-second monotonic no-progress watchdog. A received message or in-flight operation resets the idle deadline. Only a full period with neither condition fails, and engine_logging records the stuck pipeline/import operation and phase. Startup hydration uses the same watchdog.
+Lessons Learned: Poll count measures loop scheduling, not progress; quiet active operations must be distinguished from pending work that cannot dispatch.
+Prevention: Dispatch and import regressions survive 10,010 quiet in-flight iterations. Deterministic watchdog tests cover quiet downloads beyond the former elapsed cap, deadline reset by messages and a full idle duration after in-flight work ends. Preserved Stop, wave-overlap, ordering and synchronous-priority tests remain.
+Refs: crates/harvester_batch/src/no_progress.rs, crates/harvester_batch/src/runner/dispatch_loop.rs, crates/harvester_batch/src/import_mode.rs, crates/harvester_core/src/state/run_progress.rs
+
+## 2026-09-30 - Phase 4 review preserves synchronous contracts
+Type: Bug Fix
+Context: Batch API removal dropped mixed tests protecting the synchronous quota clamp and summary-wave barrier, and progress paints still supplied zero cost.
+Change: Rewrote the mixed tests to pin the clamp and same-step release after every triage member settles. Progress paints and resumes now use the worker-reported synchronous session cost. Removed unused host runtime data, sender parameters and the single-variant wave policy; active-run admission still permits overlapping downloads. Restored released provider changelog history and recorded the breaking API removal in 0.4.0 without the unused multipart dependency feature.
+Lessons Learned: Removing an execution path requires separating its feature-specific assertions from the shared contracts in mixed tests. Session usage must reach every progress refresh, including resumes after diagnostics.
+Prevention: Regressions cover zero-budget dispatch, both clamp limits, a two-member triage barrier, dashboard and heartbeat costs, and quiet imports past the former iteration cap. The launch test keeps its executable-with-spaces assertion while expecting the fixed policy's empty argument list.
+Refs: crates/harvester_core/src/update/model_dispatch_tests.rs, crates/harvester_core/src/update/pipeline_run/wave_tests.rs, crates/harvester_batch/src/runner/live_progress.rs, crates/harvester_batch/src/import_mode.rs, scripts/tests/HarvesterLaunch.Tests.ps1

@@ -18,10 +18,7 @@ const STAGE_PRIORITY: &[PromptId] = &[
 ];
 
 fn has_slot(state: &AppState) -> bool {
-    state.article_model_requests_in_flight()
-        < state
-            .llm_deferred_allowance()
-            .unwrap_or(state.llm_max_in_flight())
+    state.article_model_requests_in_flight() < state.llm_max_in_flight()
 }
 
 pub(super) fn dispatch_model_work(state: &mut AppState, effects: &mut Vec<Effect>) {
@@ -209,12 +206,11 @@ fn dispatch_triage(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
     let context = state.context_for(PromptId::ArticleTriage).to_vec();
 
     engine_info!(
-        "[llm-concurrency] triage dispatch request_id={} article={} outstanding={} llm_max_in_flight={} llm_deferred_allowance={:?}",
+        "[llm-concurrency] triage dispatch request_id={} article={} outstanding={} llm_max_in_flight={}",
         request_id,
         next_idx,
         state.article_model_requests_in_flight(),
-        state.llm_max_in_flight(),
-        state.llm_deferred_allowance()
+        state.llm_max_in_flight()
     );
 
     effects.push(Effect::RequestLlmCompletion {
@@ -307,12 +303,11 @@ fn dispatch_summary(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
             state.record_pending_llm_request(request_id, PromptId::ArticleSummary);
             state.briefing_mut().start_article(next_idx, request_id);
             engine_info!(
-                "[llm-concurrency] summary dispatch request_id={} article={} outstanding={} llm_max_in_flight={} llm_deferred_allowance={:?}",
+                "[llm-concurrency] summary dispatch request_id={} article={} outstanding={} llm_max_in_flight={}",
                 request_id,
                 next_idx,
                 state.article_model_requests_in_flight(),
-                state.llm_max_in_flight(),
-                state.llm_deferred_allowance()
+                state.llm_max_in_flight()
             );
             effects.push(Effect::RequestLlmCompletion {
                 request_id,
@@ -347,12 +342,11 @@ fn dispatch_summary(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
             state.record_pending_llm_request(request_id, PromptId::ArticleSummary);
             state.briefing_mut().start_article(next_idx, request_id);
             engine_info!(
-                    "[llm-concurrency] summary dispatch (no-cache-key) request_id={} article={} outstanding={} llm_max_in_flight={} llm_deferred_allowance={:?}",
+                    "[llm-concurrency] summary dispatch (no-cache-key) request_id={} article={} outstanding={} llm_max_in_flight={}",
                     request_id,
                     next_idx,
                     state.article_model_requests_in_flight(),
-                    state.llm_max_in_flight(),
-                    state.llm_deferred_allowance()
+                    state.llm_max_in_flight()
                 );
             effects.push(Effect::RequestLlmCompletion {
                 request_id,

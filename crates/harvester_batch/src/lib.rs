@@ -1,9 +1,8 @@
 //! Headless batch host for scheduled Harvester runs.
 
-mod batch_coordinator;
-mod batch_manifest;
 mod cli;
 mod import_mode;
+mod no_progress;
 mod progress;
 pub mod runner;
 mod summary_refresh;

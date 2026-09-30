@@ -15,12 +15,12 @@ pub(crate) use dashboard::{format_dashboard, ProgressGlyphs, MIN_DASHBOARD_WIDTH
 mod import_reporter;
 pub use import_reporter::ImportProgressReporter;
 mod projection;
+#[cfg(test)]
+pub(crate) use projection::TestProgressClock;
 #[allow(unused_imports)]
 pub use projection::{
-    classify_display_phase, format_local_timestamp, BatchDisplayPhase, BatchProgressProjection,
-    BatchProgressSnapshot, BatchRunBaseline, IntakeProgress, PassCounts, ProgressClock,
-    ProjectionContext, ProviderLifecycle, ProviderProgress, ProviderStageProgress, StageProgress,
-    SystemProgressClock, WaitProgress,
+    BatchDisplayPhase, BatchProgressProjection, BatchProgressSnapshot, BatchRunBaseline,
+    IntakeProgress, ProgressClock, ProjectionContext, StageProgress, SystemProgressClock,
 };
 mod stale_reporter;
 #[allow(unused_imports)]
@@ -272,17 +272,8 @@ mod tests {
 
     #[test]
     fn terminal_surface_repaint_clears_the_prior_multiline_frame_before_repainting() {
-        let mut first = renderer_snapshot(BatchDisplayPhase::Signals);
-        first.wait = Some(WaitProgress {
-            last_provider_check: None,
-            next_provider_check: None,
-            checked_age: None,
-            countdown: None,
-            last_provider_check_local: None,
-            next_provider_check_local: None,
-            last_provider_check_display: None,
-            next_provider_check_display: None,
-        });
+        let first = renderer_snapshot(BatchDisplayPhase::Signals);
+
         let second = renderer_snapshot(BatchDisplayPhase::Complete);
         let shared = SharedOutput(std::sync::Arc::new(std::sync::Mutex::new(Vec::new())));
         let mut surface = TerminalProgressSurface::new(shared.clone(), ProgressGlyphs::Unicode);

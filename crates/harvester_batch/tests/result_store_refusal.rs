@@ -1,6 +1,29 @@
 use std::{fs, process::Command};
 
 #[test]
+fn cli_with_no_flags_polls_one_cycle_persists_and_exits() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("output");
+    fs::create_dir(&output).unwrap();
+    fs::write(output.join(".sources.ron"), "(sources: [])").unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_harvester_batch"))
+        .current_dir(dir.path())
+        .env_remove("OPENAI_API_KEY")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert_eq!(result.status.code(), Some(0), "{stdout}\n{stderr}");
+    assert!(stdout.contains("mode=one-cycle"), "{stdout}");
+    assert_eq!(stdout.matches("Batch complete: 1 cycles").count(), 1);
+    let log = fs::read_to_string(dir.path().join("engine.log")).unwrap();
+    assert_eq!(log.matches("[source-poll] polling requested").count(), 1);
+    assert!(log.contains("[run-terminal]"), "{log}");
+    assert!(output.join(".harvester_state.ron").is_file());
+    assert!(!output.join(".harvester.lock").exists());
+}
+
+#[test]
 fn cli_names_refused_store_at_start_and_finish_polls_and_exits_nonzero() {
     let dir = tempfile::tempdir().unwrap();
     let output = dir.path().join("output");
@@ -13,7 +36,7 @@ fn cli_names_refused_store_at_start_and_finish_polls_and_exits_nonzero() {
     let result = Command::new(env!("CARGO_BIN_EXE_harvester_batch"))
         .current_dir(dir.path())
         .env_remove("OPENAI_API_KEY")
-        .args(["--single-shot", "--output-dir"])
+        .arg("--output-dir")
         .arg(&output)
         .output()
         .unwrap();

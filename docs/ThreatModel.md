@@ -27,7 +27,8 @@ Structured threat model for the batch host and the Tauri desktop host, covering:
 4. **System invariants**:
    - Untrusted content is never interpolated into structured formats without sanitization
    - Persisted data is untrusted input for side effects
-   - LLM outputs and replay payloads are advisory only and must be treated as tainted (Phase 1+)
+   - All model calls are synchronous; no Batch API submission or collection path remains.
+   - LLM outputs are advisory and tainted until validated. Replay records are written by the synchronous model path and retained for forensic review.
    - LLM API keys are never checked into source and must be rotated/encrypted in production
    - Vault secrets are scoped per launched process; the rule applies to every vault secret, not only Harvester keys
    - Side effects require passing through `EffectRunner` policy checks; runtime

@@ -13,7 +13,6 @@ pub enum BriefingPhase {
     Idle,
     LoadingArticles,
     Summarizing,
-    AwaitingBatch,
     GeneratingBriefing,
     Streaming,
     Complete,
@@ -24,7 +23,6 @@ pub enum BriefingPhase {
 pub enum ArticleSummaryState {
     Pending,
     InProgress { request_id: u64 },
-    Deferred,
     Completed { result: ArticleSummaryResult },
     Failed { reason: String },
 }
@@ -508,12 +506,6 @@ impl BriefingSession {
         }
     }
 
-    pub fn defer_article(&mut self, article_id: BriefingArticleId) {
-        if let Some(article) = self.articles.get_mut(article_id) {
-            article.summary_state = ArticleSummaryState::Deferred;
-        }
-    }
-
     pub(crate) fn admit(&mut self, loaded: LoadedArticle, key: Option<SummaryCacheKey>) {
         if let Some(&index) = self
             .article_indices
@@ -523,9 +515,7 @@ impl BriefingSession {
             article.prepared_text = loaded.prepared_text;
             if matches!(
                 article.summary_state,
-                ArticleSummaryState::Pending
-                    | ArticleSummaryState::InProgress { .. }
-                    | ArticleSummaryState::Deferred
+                ArticleSummaryState::Pending | ArticleSummaryState::InProgress { .. }
             ) || (matches!(article.summary_state, ArticleSummaryState::Completed { .. })
                 && article.cache_key_snapshot == key)
             {
@@ -570,8 +560,6 @@ impl BriefingSession {
         if self.articles.len() != previous_len {
             self.phase = if self.pending_count() + self.in_progress_count() > 0 {
                 BriefingPhase::Summarizing
-            } else if self.deferred_count() > 0 {
-                BriefingPhase::AwaitingBatch
             } else if self.completed_summary_count() > 0 {
                 BriefingPhase::Complete
             } else {
@@ -594,24 +582,6 @@ impl BriefingSession {
             self.retain_members(&retained);
         }
         pending
-    }
-
-    pub fn deferred_count(&self) -> usize {
-        self.articles
-            .iter()
-            .filter(|article| matches!(article.summary_state, ArticleSummaryState::Deferred))
-            .count()
-    }
-
-    pub fn rearm_deferred(&mut self) {
-        for article in &mut self.articles {
-            if matches!(article.summary_state, ArticleSummaryState::Deferred) {
-                article.summary_state = ArticleSummaryState::Pending;
-            }
-        }
-        if matches!(self.phase, BriefingPhase::AwaitingBatch) {
-            self.phase = BriefingPhase::Summarizing;
-        }
     }
 
     pub fn total(&self) -> usize {
@@ -751,7 +721,6 @@ impl BriefingSession {
                 ArticleSummaryState::Completed { result } => Some((article.url.as_str(), result)),
                 ArticleSummaryState::Pending
                 | ArticleSummaryState::InProgress { .. }
-                | ArticleSummaryState::Deferred
                 | ArticleSummaryState::Failed { .. } => None,
             })
     }

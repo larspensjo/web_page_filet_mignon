@@ -3,7 +3,6 @@ use crate::view_model::LlmModelUsageView;
 use crate::{LlmQuotaLimits, LlmQuotaState, LlmQuotaUsage};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::run_metadata::{CacheStatus, LlmRunMetadata};
-use harvester_engine::llm::TokenUsage;
 
 impl AppState {
     /// Budget shared by triage, summaries and signal scoring.
@@ -11,23 +10,14 @@ impl AppState {
         self.llm_max_in_flight = limit.clamp(1, harvester_engine::llm::MAX_LLM_CONCURRENT_REQUESTS);
         self.log_model_budget();
     }
-    /// Outstanding requests allowed while buffering provider batches.
-    pub fn set_llm_deferred_allowance(&mut self, limit: usize) {
-        self.llm_deferred_allowance = Some(limit.max(1));
-        self.log_model_budget();
-    }
     fn log_model_budget(&self) {
         engine_logging::engine_info!(
-            "[model-budget] llm_max_in_flight={} llm_deferred_allowance={:?}",
-            self.llm_max_in_flight,
-            self.llm_deferred_allowance
+            "[model-budget] llm_max_in_flight={}",
+            self.llm_max_in_flight
         );
     }
     pub fn llm_max_in_flight(&self) -> usize {
         self.llm_max_in_flight
-    }
-    pub fn llm_deferred_allowance(&self) -> Option<usize> {
-        self.llm_deferred_allowance
     }
     pub(crate) fn model_dispatch_halt_reason(&self) -> Option<&str> {
         self.model_dispatch_halt_reason
@@ -84,9 +74,7 @@ impl AppState {
         self.llm_requests.get(&request_id)
     }
 
-    /// Pending request ids are exposed for the headless batch runner's
-    /// quiescence check. Deferred and terminal requests are intentionally
-    /// excluded.
+    /// Pending request ids for host monitoring and fixtures.
     pub fn pending_llm_request_ids(&self) -> impl Iterator<Item = u64> + '_ {
         self.llm_requests.iter().filter_map(|(request_id, state)| {
             matches!(state, LlmRequestState::Pending { .. }).then_some(*request_id)
@@ -115,22 +103,6 @@ impl AppState {
             .or_default();
         entry.0 = entry.0.saturating_add(u64::from(metadata.input_tokens));
         entry.1 = entry.1.saturating_add(u64::from(metadata.output_tokens));
-    }
-
-    /// Records metered tokens returned by a collected Batch API line. Batch
-    /// collection has no synchronous `LlmRunMetadata`, but it must remain
-    /// visible in the same per-model operational view.
-    pub(crate) fn record_batch_llm_usage(&mut self, model: &str, usage: &TokenUsage) {
-        let model = model.trim();
-        if model.is_empty() {
-            return;
-        }
-        let entry = self
-            .llm_usage_by_model
-            .entry(model.to_string())
-            .or_default();
-        entry.0 = entry.0.saturating_add(u64::from(usage.input_tokens));
-        entry.1 = entry.1.saturating_add(u64::from(usage.output_tokens));
     }
 
     /// Returns a sorted (alphabetical) snapshot of per-model token usage for rendering.

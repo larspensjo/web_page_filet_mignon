@@ -16,43 +16,40 @@ The reducer owns process-lifetime triage, summary and scoring sessions and a
 `PipelineWaves` release ledger. Entries retain the key under which they completed;
 identities leaving the window are removed. Admission is independent for each stage:
 missing, failed or stale completed work becomes pending, while current results and
-pending, in-flight or deferred entries remain unchanged. Stale results remain in caches.
+pending or in-flight entries remain unchanged. Stale results remain in caches.
 Each identity is admitted at most once per stage per run; a later run can retry failures.
 
-`PipelineRunRequested` carries Full (intake and processing), Resume (the current
-window) or Continue (already admitted batch work). Resume upgrades an active poll run
+`PipelineRunRequested` carries Full (intake and processing) or Resume (the current
+window). Resume upgrades an active poll run
 to Full. Compatible requests join the active run. A run arms model dispatch only when
 AI is available; Full otherwise performs intake only. Configuration loads once before
 the run's first preparation read and model dispatch, then stays fixed. Hydration
 discovers unfinished work without admitting scoring. Import completion uses Resume
 to process the current window without starting another source poll.
 
-The host selects an intake wave policy in state. The desktop and recurring batch hosts
-use overlap: triage can start after the quiet interval while later downloads continue.
-Batch API uses `AfterDownloadsSettle`: its Full run waits for source polling and
-downloads, then loads and releases one intake wave. Drain uses `Disabled` and requests
-no run, so it does not admit startup scoring.
-Admissions split in window order at four times
-the synchronous request budget; deferred batch allowance keeps a buffered admission in
-one wave. A triage wave releases completed, summary-eligible members in the same reducer
-step once no pending or in-flight member remains. Deferred members do not block release.
-Replay waves retain their original wave number as an origin; identity and upstream-key
-markers prevent duplicate downstream releases. Summaries release scoring per article.
+Both hosts overlap intake and processing: triage can start after the quiet
+interval while later downloads continue. Admissions split in window order at
+four times the synchronous request budget. A triage wave releases completed,
+summary-eligible members in the same reducer step once no pending or in-flight
+member remains. Identity and upstream-key markers prevent duplicate downstream
+releases. Summaries release scoring per article.
 Within a stage, dispatch follows wave and member order. Across stages, scoring precedes
 summary, then triage, all sharing one request budget. Indexed queues and changed-wave
 tracking keep completion work bounded without rebuilding the full ledger per dispatch.
 
 `AppState::pipeline_activity()` is the single settlement query for both hosts. It
 counts admitted pending and in-flight work plus intake refresh demand, loads and
-processing preparation; deferred work is non-blocking. A run becomes Terminal exactly
-once after intake closes and activity settles. Hosts pump `PipelineRunAdvance` while
-their dispatch loops run. Rearming outside an armed run records replay members while
-leaving session entries Deferred, so it cannot strand undispatchable Pending work. A
-pure collect-only batch cycle requests Continue before rearming; an intake cycle
-requests Full. A Full or Resume run arms model work only when AI is available;
-an unarmed Full run still polls and becomes Terminal after intake settles.
-Batch and import hosts mark a missing or empty API key unavailable before requesting
-a run. `--drain` requests no run.
+processing preparation. A run becomes Terminal exactly once after intake closes
+and activity settles. Hosts pump `PipelineRunAdvance` while their dispatch loops
+run. A Full or Resume run arms model work only when AI is available; an unarmed
+Full run still polls and becomes Terminal after intake settles. Batch and import
+hosts mark a missing or empty API key unavailable before requesting a run.
+The command-line host performs one Full cycle (poll, download, process, exit).
+Browser-page import starts Resume after importing; checkpoint commands remain
+separate operations. The command-line and import loops use a 60-second monotonic
+no-progress watchdog: a received message or in-flight operation restarts its
+deadline. Quiet downloads do not exhaust an iteration cap. A stalled loop logs
+its pipeline/import operation and phase through `engine_logging` before failing.
 An accepted Stop moves the run to Stopping, disarms model dispatch, closes intake,
 and withdraws never-dispatched Pending entries from triage, summary, and scoring
 without failing them. The engine cancels queued downloads while the in-flight
@@ -132,7 +129,7 @@ Key rules:
 - Runtime-state persistence is a reducer-emitted `PersistRuntimeState` effect:
   its snapshot is captured from the post-update state and the `EffectRunner`
   hands it to a host-selected sink. Normal hosts inject the debounced worker;
-  dry-run injects a no-op sink. Hosts never schedule or capture persistence
+  tests and fixtures may inject a no-op sink. Hosts never schedule or capture persistence
   snapshots themselves.
 - State is the single source of truth and is not mutated outside the update step.
 - Rendering never mutates state and never triggers I/O directly.
@@ -197,19 +194,12 @@ cache hits that admit downstream scoring. A freed slot goes to the highest-prior
 pending stage. Hydration admits no scoring; eligible unscored articles are unfinished
 work until a run admits them through this scheduler.
 
-Batch API mode sets the separate `llm_deferred_allowance` to the session call limit.
-This bounds outstanding requests being buffered into provider batches, replacing
-the synchronous budget for reducer dispatch in that mode. Requests the runner sends
-synchronously still use the worker semaphore. Both settings are logged separately
-on a `[model-budget]` line. Deferred entries remain non-blocking for
-`pipeline_activity()`; pending and in-flight scoring remain blocking.
-
 Scoring admission requires triage under the current triage key and a summary under
 the current summary key, from the summary session or a current-key cache lookup.
 Historical summaries found by URL cannot supply scoring inputs. Each scoring entry
 retains its input-key digest and a frozen input snapshot while pending or in flight.
 A changed digest replaces a completed or failed score. Pending entries update their
-input snapshot without another admission count; in-flight and deferred entries keep
+input snapshot without another admission count; in-flight entries keep
 their original request until it settles. A same-digest admission is refused.
 Successful summary sessions retain their cache
 identity so scoring can validate their provenance.
@@ -229,7 +219,7 @@ hit its current cache key, summaries must hit their current summary key, and sig
 scoring must hit the key built from those current upstream results. A stale or failed
 stage result does not make the member complete. Pre-triage exclusions and articles
 below the applicable priority cutoffs do not request model work. Admitted pending,
-in-flight, and Batch API deferred work is reported as in progress, including a pending
+and in-flight work is reported as in progress, including a pending
 stage entry that has not yet received its dispatch-time key. Unadmitted work is only in
 the completeness summary and never enters a stage queue or `pipeline_activity()`.
 
@@ -294,8 +284,6 @@ unfinished count. A host prints the reducer-recorded notice after initial admiss
 - **Preview flow:** deliver extracted content through the message pipeline for in-session inspection, with a fallback to on-demand loading after restart.
 - **Executive briefing:** a multi-step, message-driven workflow that loads completed content, summarizes it, and produces an aggregate briefing with partial-failure tolerance; its domain state remains tested, but the desktop UI no longer exposes an entry point.
 - **Automation path:** future input sources (such as feeds) and scheduled runs remain subject to the same unidirectional flow and security boundaries.
-- **Batch API automation path:** `harvester_batch --batch-api` requests a Full run for its single intake cycle and sets the reducer's `AfterDownloadsSettle` wave policy. The intake window reaches triage once after source polling and downloads settle. The runner diverts only cache-keyed article triage, summary, and signal-candidate requests after the reducer emits them, freezes each cache identity and rendered message, and durably reserves `.batch_manifest.ron` before creating provider work. Later cycles request Continue before rearming, collect completed output, and replay it through normal cache-aware dispatch. Collected results can release only the downstream members made ready by that replay; repeated manifest lines do not release a summary twice. `DeferredToBatch` settles a cycle while provider work remains outstanding. Batch buffering has its own allowance, separate from the synchronous request budget. Collected output remains untrusted until the reducer validates it, and collection writes caches only—normal replay performs article completion and downstream effects.
-- **Batch API drain path:** `harvester_batch --drain` implies the Batch API runtime, sets the reducer's wave policy to `Disabled`, requests no run, and reconnects to work an earlier run already submitted. It never polls sources; restored jobs and startup-eligible scoring remain unadmitted, so drain issues no model request of its own and exits after its collection pass rather than waiting for batches that are still running. Because deferred state is reducer-owned and in-memory, a fresh drain has no deferred counters to settle: `.batch_manifest.ron` is the durable record that decides what remains outstanding. Batches that end cancelled, expired, or failed are downloaded before their entries are released, so output the provider already produced and billed is salvaged; requests the provider never returned become line errors and are released for a later attempt.
 
 ## Crates and purposes
 - **harvester_batch:** command-line and scheduled batch host orchestration.

@@ -130,7 +130,7 @@ pub fn initialize_at(path: impl AsRef<std::path::Path>) {
     ]);
 }
 
-/// Initializes file-only logging (no console output) for dry-run mode.
+/// Initializes file-only logging (no console output) for headless diagnostics.
 ///
 /// Logs only to `./engine.log` in the current working directory.
 /// This safely no-ops if another logger has already been initialized.

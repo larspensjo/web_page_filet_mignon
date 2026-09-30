@@ -4,6 +4,12 @@ All notable changes to `openai_provider_kit` will be documented in this file.
 
 The format follows Keep a Changelog-style sections, and this crate uses semantic versioning once it is published outside the Harvester workspace.
 
+## 0.4.0 - 2026-09-30
+
+### Removed
+
+- OpenAI Batch API transport and JSONL codecs. All model calls use the synchronous Chat Completions path.
+
 ## 0.3.0 - 2026-07-19
 
 ### Added

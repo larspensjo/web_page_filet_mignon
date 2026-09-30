@@ -65,9 +65,6 @@ pub(super) fn resume(state: &mut AppState) -> Vec<Effect> {
     let Some(budget) = state.processing_budget else {
         return Vec::new();
     };
-    let wait_for_downloads = state.pipeline_wave_policy()
-        == crate::PipelineWavePolicy::AfterDownloadsSettle
-        && (state.is_poll_in_progress() || state.batch_observation().jobs_in_flight > 0);
     let current_window_has_members = !state.ordered_completed_job_urls_snapshot().is_empty()
         || state.pre_triage().window_articles().next().is_some()
         || !state.triage().articles().is_empty();
@@ -79,14 +76,9 @@ pub(super) fn resume(state: &mut AppState) -> Vec<Effect> {
         && !current_window_has_members;
     if let Some(run) = state.pipeline_admission.as_mut() {
         run.configured = true;
-        if run.scope == crate::PipelineRunScope::Continue {
-            state.processing_start = None;
-            return Vec::new();
-        }
+
         if run.fresh_load {
-            if run.scope == crate::PipelineRunScope::Full
-                && (wait_for_downloads || wait_for_first_download)
-            {
+            if run.scope == crate::PipelineRunScope::Full && wait_for_first_download {
                 return Vec::new();
             }
             run.fresh_load = false;

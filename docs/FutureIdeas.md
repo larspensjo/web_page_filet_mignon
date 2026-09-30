@@ -96,8 +96,12 @@ SuccessCriteria:
 
 ### BatchOrchestration
 
+The Batch API, its provider-wait/collection lifecycle, and its batch-only modes
+were retired on 2026-09-30. They are outside this backlog; synchronous calls and
+external scheduling are the supported automation path.
+
 #### [FI-Architecture-BatchOrchestration-0006] Idempotent single-cycle mode for external schedulers
-Status: Candidate
+Status: Implemented
 TopLevel: Architecture
 SubLevel: BatchOrchestration
 Priority: P2
@@ -108,10 +112,10 @@ Origin:
 - SourceSection: Future extensions (post-Phase 7)
 - Captured: 2026-02-17
 Tags: [batch, scheduling, idempotent, architecture]
-Summary: Add an optional idempotent single-cycle mode to the batch runner so external schedulers (cron, systemd timers) can trigger one poll-triage-brief cycle and exit.
+Summary: The command-line host always performs one poll-download-process cycle and exits (2026-09-30).
 Rationale: Enables integration with standard OS schedulers without requiring the batch runner to manage its own repeating loop.
 SuccessCriteria:
-- A CLI flag activates single-cycle mode that exits after one complete cycle.
+- Default invocation exits after one complete cycle; the fixed Batch launch policy supplies no runtime arguments.
 - Single-cycle mode is idempotent: re-running with identical inputs produces no duplicate work.
 - Exit code reflects cycle outcome (success, partial, fatal).
 
@@ -2120,7 +2124,7 @@ Summary: Add an inline confirmation prompt before executing the "Clear checkpoin
 Rationale: Clearing the briefing checkpoint is irreversible and causes the next briefing to include all-time items; a confirm step prevents accidental activation while preserving quick keyboard flow for run actions. Obsolete because the TUI launcher was removed in favor of fixed launch scripts.
 SuccessCriteria:
 - Pressing Enter on "Clear checkpoint" shows an inline Y/n prompt before executing.
-- Pressing Enter on "Run batch" or "Run dry-run" launches immediately with no confirm step.
+- The fixed Batch launcher starts one synchronous cycle immediately after scoped secret provisioning.
 - Pressing Escape on the confirm prompt returns to the launcher without executing the action.
 Related: FI-Architecture-BatchOrchestration-0007
 

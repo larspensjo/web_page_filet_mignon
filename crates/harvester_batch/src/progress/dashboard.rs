@@ -1,13 +1,13 @@
 use std::time::Duration;
 
-use harvester_core::StageKind;
+use super::projection::ProgressStage;
 use unicode_width::UnicodeWidthChar;
 #[cfg(test)]
 use unicode_width::UnicodeWidthStr;
 
-use super::{BatchDisplayPhase, BatchProgressSnapshot, ProviderLifecycle, StageProgress};
 #[cfg(test)]
-use super::{IntakeProgress, PassCounts, ProviderProgress, ProviderStageProgress, WaitProgress};
+use super::IntakeProgress;
+use super::{BatchDisplayPhase, BatchProgressSnapshot, StageProgress};
 
 pub(crate) const MIN_DASHBOARD_WIDTH: usize = 72;
 const PROGRESS_BAR_WIDTH: usize = 20;
@@ -91,24 +91,21 @@ pub fn format_dashboard(
     lines.push(format_intake_row(snapshot, glyphs));
     lines.push(format_stage_row(
         "Triage",
-        StageKind::Triage,
-        snapshot,
+        ProgressStage::Triage,
         snapshot.triage,
         active,
         glyphs,
     ));
     lines.push(format_stage_row(
         "Summaries",
-        StageKind::Summary,
-        snapshot,
+        ProgressStage::Summary,
         snapshot.summaries,
         active,
         glyphs,
     ));
     lines.push(format_stage_row(
         "Signals",
-        StageKind::SignalCandidate,
-        snapshot,
+        ProgressStage::SignalCandidate,
         snapshot.signals,
         active,
         glyphs,
@@ -126,7 +123,7 @@ fn format_compact_dashboard(snapshot: &BatchProgressSnapshot, glyphs: ProgressGl
         let progress = stage_progress(snapshot, stage);
         (
             stage_label_upper(stage),
-            display_settled(snapshot, stage, progress),
+            display_settled(progress),
             progress.total,
         )
     } else if matches!(snapshot.phase, BatchDisplayPhase::Intake) {
@@ -141,15 +138,9 @@ fn format_compact_dashboard(snapshot: &BatchProgressSnapshot, glyphs: ProgressGl
     } else {
         (phase_label_upper(snapshot.phase), 0, 0)
     };
-    let next = snapshot
-        .wait
-        .as_ref()
-        .and_then(|wait| wait.countdown)
-        .map(format_countdown)
-        .unwrap_or_else(|| "--:--".to_string());
     let separator = glyphs.separator();
     format!(
-        "[batch] {phase} {settled}/{total} {separator} {} left {separator} t={} {separator} next={next} {separator} run={}",
+        "[batch] {phase} {settled}/{total} {separator} {} left {separator} t={} {separator} run={}",
         snapshot.remaining_work,
         format_dashboard_elapsed(snapshot.elapsed),
         format_cost(snapshot.cost_this_run_microdollars),
@@ -181,10 +172,9 @@ fn format_intake_row(snapshot: &BatchProgressSnapshot, glyphs: ProgressGlyphs) -
 
 fn format_stage_row(
     label: &str,
-    stage: StageKind,
-    snapshot: &BatchProgressSnapshot,
+    stage: ProgressStage,
     progress: StageProgress,
-    active: Option<StageKind>,
+    active: Option<ProgressStage>,
     glyphs: ProgressGlyphs,
 ) -> String {
     let marker = if active == Some(stage) {
@@ -195,7 +185,7 @@ fn format_stage_row(
         glyphs.inactive_marker()
     };
     let body = if active == Some(stage) {
-        format_active_stage(progress, stage, snapshot, glyphs)
+        format_active_stage(progress, glyphs)
     } else {
         format!(
             "{}/{} {} {} failed",
@@ -208,38 +198,8 @@ fn format_stage_row(
     format!("{marker} {label:<10} {body}")
 }
 
-fn format_active_stage(
-    progress: StageProgress,
-    stage: StageKind,
-    snapshot: &BatchProgressSnapshot,
-    glyphs: ProgressGlyphs,
-) -> String {
-    match snapshot.phase {
-        BatchDisplayPhase::PreparingBatch => format!(
-            "preparing next batch {} {} queued",
-            glyphs.separator(),
-            progress.deferred
-        ),
-        BatchDisplayPhase::CheckingProvider => "checking provider...".to_string(),
-        BatchDisplayPhase::WaitingForProvider
-            if snapshot.provider.lifecycle(stage) == ProviderLifecycle::Indeterminate =>
-        {
-            format!("waiting provider status {} retrying...", glyphs.separator())
-        }
-        BatchDisplayPhase::WaitingForProvider => format_progress_body(
-            progress,
-            display_settled(snapshot, stage, progress),
-            glyphs,
-            None,
-        ),
-        BatchDisplayPhase::Collecting => {
-            format_progress_body(progress, progress.settled(), glyphs, Some("collecting"))
-        }
-        BatchDisplayPhase::Replaying => {
-            format_progress_body(progress, progress.settled(), glyphs, Some("replaying"))
-        }
-        _ => format_progress_body(progress, progress.settled(), glyphs, None),
-    }
+fn format_active_stage(progress: StageProgress, glyphs: ProgressGlyphs) -> String {
+    format_progress_body(progress, progress.settled(), glyphs, None)
 }
 
 fn format_progress_body(
@@ -280,30 +240,18 @@ fn format_progress_body(
 
 fn format_dashboard_footer(
     snapshot: &BatchProgressSnapshot,
-    active: Option<StageKind>,
+    active: Option<ProgressStage>,
     glyphs: ProgressGlyphs,
 ) -> String {
     let separator = glyphs.separator();
     let mut parts = Vec::new();
     if let Some(stage) = active {
         let progress = stage_progress(snapshot, stage);
-        if matches!(snapshot.phase, BatchDisplayPhase::WaitingForProvider)
-            && progress.provider_total > 0
-            && progress.provider_total < progress.total
-        {
-            parts.push(format!(
-                "provider {}/{} submitted",
-                progress.provider_completed, progress.provider_total
-            ));
-        }
         if progress.local_remaining > 0 {
             parts.push(format!(
                 "{} awaiting local settlement",
                 progress.local_remaining
             ));
-        }
-        if progress.unsubmitted > 0 {
-            parts.push(format!("{} not submitted", progress.unsubmitted));
         }
     }
     if parts.is_empty() {
@@ -313,90 +261,58 @@ fn format_dashboard_footer(
             _ => format!("{} left", snapshot.remaining_work),
         });
     }
-    if let Some(wait) = &snapshot.wait {
-        if let Some(checked) = wait.last_provider_check_local {
-            parts.push(format!("checked {}", checked.format("%H:%M:%S %:z")));
-        }
-        if let Some(next) = wait.next_provider_check_local {
-            let countdown = wait
-                .countdown
-                .map(format_countdown)
-                .unwrap_or_else(|| "--:--".to_string());
-            parts.push(format!(
-                "next {} ({countdown})",
-                next.format("%H:%M:%S %:z")
-            ));
-        }
-    }
+
     parts.push("Ctrl+C is safe".to_string());
     parts.join(&format!(" {separator} "))
 }
 
-fn active_stage(snapshot: &BatchProgressSnapshot) -> Option<StageKind> {
+fn active_stage(snapshot: &BatchProgressSnapshot) -> Option<ProgressStage> {
     match snapshot.phase {
-        BatchDisplayPhase::Triage => Some(StageKind::Triage),
-        BatchDisplayPhase::Summaries => Some(StageKind::Summary),
-        BatchDisplayPhase::Signals => Some(StageKind::SignalCandidate),
+        BatchDisplayPhase::Triage => Some(ProgressStage::Triage),
+        BatchDisplayPhase::Summaries => Some(ProgressStage::Summary),
+        BatchDisplayPhase::Signals => Some(ProgressStage::SignalCandidate),
         BatchDisplayPhase::Intake
         | BatchDisplayPhase::Complete
         | BatchDisplayPhase::Interrupted => None,
         _ => [
-            StageKind::Triage,
-            StageKind::Summary,
-            StageKind::SignalCandidate,
+            ProgressStage::Triage,
+            ProgressStage::Summary,
+            ProgressStage::SignalCandidate,
         ]
         .into_iter()
         .find(|stage| {
             let progress = stage_progress(snapshot, *stage);
-            progress.provider_total > 0
-                || progress.local_remaining > 0
-                || progress.settled() < progress.total
+            progress.local_remaining > 0 || progress.settled() < progress.total
         }),
     }
 }
 
-fn stage_progress(snapshot: &BatchProgressSnapshot, stage: StageKind) -> StageProgress {
+fn stage_progress(snapshot: &BatchProgressSnapshot, stage: ProgressStage) -> StageProgress {
     match stage {
-        StageKind::Triage => snapshot.triage,
-        StageKind::Summary => snapshot.summaries,
-        StageKind::SignalCandidate => snapshot.signals,
+        ProgressStage::Triage => snapshot.triage,
+        ProgressStage::Summary => snapshot.summaries,
+        ProgressStage::SignalCandidate => snapshot.signals,
     }
 }
 
-fn display_settled(
-    snapshot: &BatchProgressSnapshot,
-    stage: StageKind,
-    progress: StageProgress,
-) -> usize {
-    if matches!(snapshot.phase, BatchDisplayPhase::WaitingForProvider)
-        && snapshot.provider.lifecycle(stage) != ProviderLifecycle::Indeterminate
-    {
-        progress.provisional_settled.min(progress.total)
-    } else {
-        progress.settled().min(progress.total)
-    }
+fn display_settled(progress: StageProgress) -> usize {
+    progress.settled().min(progress.total)
 }
 
-fn stage_label_upper(stage: StageKind) -> &'static str {
+fn stage_label_upper(stage: ProgressStage) -> &'static str {
     match stage {
-        StageKind::Triage => "TRIAGE",
-        StageKind::Summary => "SUMMARIES",
-        StageKind::SignalCandidate => "SIGNALS",
+        ProgressStage::Triage => "TRIAGE",
+        ProgressStage::Summary => "SUMMARIES",
+        ProgressStage::SignalCandidate => "SIGNALS",
     }
 }
 
 fn phase_label_upper(phase: BatchDisplayPhase) -> &'static str {
     match phase {
-        BatchDisplayPhase::Reconciling => "RECONCILING",
         BatchDisplayPhase::Intake => "INTAKE",
         BatchDisplayPhase::Triage => "TRIAGE",
         BatchDisplayPhase::Summaries => "SUMMARIES",
         BatchDisplayPhase::Signals => "SIGNALS",
-        BatchDisplayPhase::PreparingBatch => "PREPARING",
-        BatchDisplayPhase::CheckingProvider => "CHECKING",
-        BatchDisplayPhase::WaitingForProvider => "WAITING",
-        BatchDisplayPhase::Collecting => "COLLECTING",
-        BatchDisplayPhase::Replaying => "REPLAYING",
         BatchDisplayPhase::Persisting => "PERSISTING",
         BatchDisplayPhase::Complete => "COMPLETE",
         BatchDisplayPhase::Interrupted => "INTERRUPTED",
@@ -415,12 +331,6 @@ fn format_dashboard_elapsed(duration: Duration) -> String {
     } else {
         format!("{seconds}s")
     }
-}
-
-fn format_countdown(duration: Duration) -> String {
-    let seconds = duration.as_secs();
-    let minutes = seconds / 60;
-    format!("{minutes:02}:{:02}", seconds % 60)
 }
 
 fn format_cost(microdollars: u64) -> String {
@@ -459,7 +369,6 @@ pub(crate) fn renderer_stage(
         successful,
         pending_or_in_flight,
         local_remaining: pending_or_in_flight,
-        provisional_settled: successful,
         ..StageProgress::default()
     }
 }
@@ -478,11 +387,8 @@ pub(crate) fn renderer_snapshot(phase: BatchDisplayPhase) -> BatchProgressSnapsh
         triage: renderer_stage(419, 419, 0),
         summaries: renderer_stage(397, 397, 0),
         signals: renderer_stage(32, 25, 7),
-        provider: ProviderProgress::default(),
         phase,
         remaining_work: 7,
-        pass_counts: PassCounts::default(),
-        wait: None,
     }
 }
 
@@ -507,7 +413,6 @@ fn unicode_expected(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{FixedOffset, TimeZone};
 
     #[test]
     fn formatter_exact_wide_dashboard_for_intake_and_each_llm_stage() {
@@ -571,70 +476,7 @@ mod tests {
     }
 
     #[test]
-    fn formatter_exact_wide_dashboard_for_provider_wait_replay_complete_and_interrupted() {
-        let checked = FixedOffset::east_opt(2 * 3600)
-            .unwrap()
-            .with_ymd_and_hms(2026, 7, 23, 9, 43, 30)
-            .unwrap();
-        let next = FixedOffset::east_opt(2 * 3600)
-            .unwrap()
-            .with_ymd_and_hms(2026, 7, 23, 9, 48, 30)
-            .unwrap();
-        let mut waiting = renderer_snapshot(BatchDisplayPhase::WaitingForProvider);
-        waiting.signals.provider_total = 32;
-        waiting.signals.provider_completed = 25;
-        waiting.signals.provisional_settled = 25;
-        waiting.provider.signals = ProviderStageProgress {
-            submitted: 32,
-            completed: 25,
-            attached_batches: 1,
-            ..ProviderStageProgress::default()
-        };
-        waiting.wait = Some(WaitProgress {
-            last_provider_check: None,
-            next_provider_check: None,
-            checked_age: None,
-            countdown: Some(Duration::from_secs(293)),
-            last_provider_check_local: Some(checked),
-            next_provider_check_local: Some(next),
-            last_provider_check_display: None,
-            next_provider_check_display: None,
-        });
-        assert_eq!(
-            format_dashboard(&waiting, 140, ProgressGlyphs::Unicode),
-            unicode_expected(
-                "✓ Intake     76 discovered · 69 fetched · 7 failed",
-                "✓ Triage     419/419 · 0 failed",
-                "✓ Summaries  397/397 · 0 failed",
-                "↻ Signals    25/32  [███████████████─────] 78%",
-                "7 awaiting local settlement · checked 09:43:30 +02:00 · next 09:48:30 +02:00 (04:53) · Ctrl+C is safe",
-            )
-        );
-
-        let replaying = renderer_snapshot(BatchDisplayPhase::Replaying);
-        assert_eq!(
-            format_dashboard(&replaying, 140, ProgressGlyphs::Unicode),
-            unicode_expected(
-                "✓ Intake     76 discovered · 69 fetched · 7 failed",
-                "✓ Triage     419/419 · 0 failed",
-                "✓ Summaries  397/397 · 0 failed",
-                "↻ Signals    replaying · 25/32  [███████████████─────] 78%",
-                "7 awaiting local settlement · Ctrl+C is safe",
-            )
-        );
-
-        let collecting = renderer_snapshot(BatchDisplayPhase::Collecting);
-        assert_eq!(
-            format_dashboard(&collecting, 140, ProgressGlyphs::Unicode),
-            unicode_expected(
-                "✓ Intake     76 discovered · 69 fetched · 7 failed",
-                "✓ Triage     419/419 · 0 failed",
-                "✓ Summaries  397/397 · 0 failed",
-                "↻ Signals    collecting · 25/32  [███████████████─────] 78%",
-                "7 awaiting local settlement · Ctrl+C is safe",
-            )
-        );
-
+    fn formatter_exact_wide_dashboard_for_complete_and_interrupted() {
         let mut complete = renderer_snapshot(BatchDisplayPhase::Complete);
         complete.signals = renderer_stage(32, 32, 0);
         complete.remaining_work = 0;
@@ -663,7 +505,7 @@ mod tests {
     }
 
     #[test]
-    fn formatter_zero_totals_and_stale_provider_counts_never_make_fake_or_overfull_bars() {
+    fn formatter_zero_totals_and_overfull_counts_never_make_fake_or_overfull_bars() {
         let mut zero = renderer_snapshot(BatchDisplayPhase::Signals);
         zero.signals = StageProgress::default();
         zero.remaining_work = 0;
@@ -671,16 +513,9 @@ mod tests {
         assert!(zero_lines[4].contains("0/0"));
         assert!(!zero_lines[4].contains('%'));
 
-        let mut stale = renderer_snapshot(BatchDisplayPhase::WaitingForProvider);
+        let mut stale = renderer_snapshot(BatchDisplayPhase::Signals);
         stale.signals.total = 32;
-        stale.signals.provisional_settled = 1_000;
-        stale.signals.provider_total = 32;
-        stale.provider.signals = ProviderStageProgress {
-            submitted: 32,
-            completed: 1_000,
-            attached_batches: 1,
-            ..ProviderStageProgress::default()
-        };
+        stale.signals.successful = 1_000;
         let row = &format_dashboard(&stale, 140, ProgressGlyphs::Unicode)[4];
         assert!(row.contains("32/32"));
         assert!(row.contains("100%"));
@@ -688,48 +523,8 @@ mod tests {
     }
 
     #[test]
-    fn formatter_shows_preparing_and_partially_submitted_provider_scopes() {
-        let mut preparing = renderer_snapshot(BatchDisplayPhase::PreparingBatch);
-        preparing.signals.deferred = 7;
-        let preparing_lines = format_dashboard(&preparing, 140, ProgressGlyphs::Unicode);
-        assert_eq!(
-            preparing_lines[4],
-            "↻ Signals    preparing next batch · 7 queued"
-        );
-        assert!(!preparing_lines.iter().any(|line| line.contains("0/0")));
-
-        let mut subset = renderer_snapshot(BatchDisplayPhase::WaitingForProvider);
-        subset.signals = StageProgress {
-            total: 50,
-            deferred: 50,
-            provider_total: 32,
-            provider_completed: 25,
-            provisional_settled: 25,
-            local_remaining: 50,
-            unsubmitted: 18,
-            ..StageProgress::default()
-        };
-        subset.remaining_work = 50;
-        subset.provider.signals = ProviderStageProgress {
-            submitted: 32,
-            completed: 25,
-            attached_batches: 1,
-            ..ProviderStageProgress::default()
-        };
-        let subset_lines = format_dashboard(&subset, 140, ProgressGlyphs::Unicode);
-        assert_eq!(
-            subset_lines[4],
-            "↻ Signals    25/50  [██████████──────────] 50%"
-        );
-        assert_eq!(
-            subset_lines[5],
-            "provider 25/32 submitted · 50 awaiting local settlement · 18 not submitted · Ctrl+C is safe"
-        );
-    }
-
-    #[test]
     fn formatter_clips_by_display_columns_at_requested_widths() {
-        let snapshot = renderer_snapshot(BatchDisplayPhase::WaitingForProvider);
+        let snapshot = renderer_snapshot(BatchDisplayPhase::Signals);
         for width in [72, 100, 140] {
             for line in format_dashboard(&snapshot, width, ProgressGlyphs::Unicode) {
                 assert!(
@@ -747,35 +542,10 @@ mod tests {
 
     #[test]
     fn formatter_narrow_fallback_and_ascii_mode_preserve_required_information() {
-        let mut snapshot = renderer_snapshot(BatchDisplayPhase::WaitingForProvider);
-        snapshot.signals.provider_total = 32;
-        snapshot.signals.provisional_settled = 25;
-        snapshot.provider.signals = ProviderStageProgress {
-            submitted: 32,
-            completed: 25,
-            attached_batches: 1,
-            ..ProviderStageProgress::default()
-        };
-        snapshot.wait = Some(WaitProgress {
-            last_provider_check: None,
-            next_provider_check: None,
-            checked_age: None,
-            countdown: Some(Duration::from_secs(293)),
-            last_provider_check_local: None,
-            next_provider_check_local: None,
-            last_provider_check_display: None,
-            next_provider_check_display: None,
-        });
+        let snapshot = renderer_snapshot(BatchDisplayPhase::Signals);
         let narrow = format_dashboard(&snapshot, 71, ProgressGlyphs::Unicode);
         assert_eq!(narrow.len(), 1);
-        for required in [
-            "SIGNALS",
-            "25/32",
-            "7 left",
-            "t=2h15m37s",
-            "next=04:53",
-            "run=$0.25",
-        ] {
+        for required in ["SIGNALS", "25/32", "7 left", "t=2h15m37s", "run=$0.25"] {
             assert!(
                 narrow[0].contains(required),
                 "missing {required}: {narrow:?}"

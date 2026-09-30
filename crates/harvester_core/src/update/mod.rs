@@ -3,7 +3,6 @@ use engine_logging::{engine_info, engine_warn};
 use crate::{AppState, Effect, Msg, SessionState};
 
 mod archive;
-mod batch_results;
 mod briefing;
 mod import;
 mod llm_completed;
@@ -171,10 +170,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                     state.remove_pending_intake_url(&url);
                 }
             }
-            if (!stopped_drain
-                && state.pipeline_wave_policy() != crate::PipelineWavePolicy::Disabled)
-                || (stopped_drain && successful)
-            {
+            if !stopped_drain || successful {
                 state.request_pre_triage_refresh_evaluation(true);
             }
             Vec::new()
@@ -268,9 +264,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             .collect(),
         Msg::RestoreCompletedJobs(entries) => {
             state.restore_completed_jobs(entries);
-            if state.pipeline_wave_policy() != crate::PipelineWavePolicy::Disabled {
-                state.request_pre_triage_refresh_evaluation(false);
-            }
+            state.request_pre_triage_refresh_evaluation(false);
             Vec::new()
         }
         Msg::RestorePendingIntake(urls) => {
@@ -329,12 +323,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             result,
             metadata,
         } => llm_completed::handle(&mut state, request_id, result, metadata),
-        Msg::RearmDeferredBatchStages => {
-            waves::rearm(&mut state);
-            state.mark_dirty();
-            Vec::new()
-        }
-        Msg::BatchResultsCollected { entries } => batch_results::handle(&mut state, entries),
+
         Msg::LlmQuotaConfigured { limits } => {
             state.set_llm_quota_limits(limits);
             state.mark_dirty();

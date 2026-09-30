@@ -39,6 +39,44 @@ fn start_resume(state: AppState, articles: Vec<LoadedArticle>) -> (AppState, Vec
 }
 
 #[test]
+fn in_flight_triage_member_blocks_wave_summaries_until_last_completion() {
+    let mut state = add_metadata(AppState::new());
+    state.set_llm_max_in_flight(3);
+    let (state, effects) = start_resume(state, vec![loaded_article(0), loaded_article(1)]);
+    let ids: Vec<_> = effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::RequestLlmCompletion {
+                request_id,
+                prompt_id: PromptId::ArticleTriage,
+                ..
+            } => Some(*request_id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ids.len(), 2);
+    assert_eq!(state.pipeline_waves().waves()[0].members.len(), 2);
+    let (state, effects) = crate::update(state, triage_success(ids[0]));
+    assert!(request_id(&effects, PromptId::ArticleSummary).is_none());
+    assert_eq!(state.triage().in_progress_count(), 1);
+    let (state, effects) = crate::update(state, triage_success(ids[1]));
+    assert_eq!(
+        effects
+            .iter()
+            .filter(|effect| matches!(
+                effect,
+                Effect::RequestLlmCompletion {
+                    prompt_id: PromptId::ArticleSummary,
+                    ..
+                }
+            ))
+            .count(),
+        2
+    );
+    assert_eq!(state.briefing().in_progress_count(), 2);
+}
+
+#[test]
 fn thirty_article_resume_splits_in_window_order_and_loads_configuration_once() {
     let mut state = add_metadata(AppState::new());
     state.set_llm_max_in_flight(3);
@@ -240,136 +278,6 @@ fn stale_summary_requeues_while_current_triage_and_other_results_survive() {
         crate::briefing::ArticleSummaryState::Pending
             | crate::briefing::ArticleSummaryState::InProgress { .. }
     ));
-}
-
-#[test]
-fn deferred_triage_replays_once_and_does_not_block_completed_wave_members() {
-    let articles = vec![loaded_article(0), loaded_article(1)];
-    let mut state = add_metadata(AppState::new());
-    state.set_llm_max_in_flight(3);
-    let (state, _) = start_resume(state, articles.clone());
-    let ids: Vec<_> = state
-        .triage()
-        .articles()
-        .iter()
-        .map(|a| match a.triage_state {
-            crate::triage::ArticleTriageState::InProgress { request_id } => request_id,
-            _ => panic!("in flight"),
-        })
-        .collect();
-    let (state, effects) = crate::update(state, triage_success(ids[0]));
-    assert!(
-        request_id(&effects, PromptId::ArticleSummary).is_none(),
-        "pending triage member blocks the wave"
-    );
-    let (state, effects) = crate::update(state, signal_deferred(ids[1]));
-    let summary =
-        request_id(&effects, PromptId::ArticleSummary).expect("deferred member does not block");
-    assert_eq!(state.briefing().articles().len(), 1);
-    let (state, effects) = crate::update(state, summary_result(summary, true));
-    let signal = request_id(&effects, PromptId::ArticleSignalCandidate).unwrap();
-    let (state, _) = crate::update(state, signal_success(signal));
-    assert!(state.run_progress().unwrap().terminal);
-    let waves_before = state.pipeline_waves().waves().len();
-    let (unarmed, effects) = crate::update(state.clone(), Msg::RearmDeferredBatchStages);
-    assert!(!unarmed.pipeline_run_armed());
-    assert!(effects
-        .iter()
-        .all(|e| !matches!(e, Effect::RequestLlmCompletion { .. })));
-    assert_eq!(unarmed.pipeline_waves().waves().len(), waves_before);
-    assert!(unarmed.pipeline_activity().is_settled());
-    assert_eq!(unarmed.triage().deferred_count(), 1);
-    let (unarmed, effects) = crate::update(unarmed, Msg::BatchResultsCollected { entries: vec![] });
-    assert!(!unarmed.pipeline_run_armed());
-    assert!(effects
-        .iter()
-        .all(|e| !matches!(e, Effect::RequestLlmCompletion { .. })));
-
-    let (state, _) = crate::update::test_support::update(
-        state,
-        Msg::PipelineRunRequested {
-            scope: PipelineRunScope::Continue,
-        },
-    );
-    let (state, effects) = crate::update(state, Msg::RearmDeferredBatchStages);
-    let triage = request_id(&effects, PromptId::ArticleTriage).unwrap();
-    let replay = state
-        .pipeline_waves()
-        .waves()
-        .iter()
-        .find(|w| w.stage == PipelineStage::Triaging && w.replay_of.is_some())
-        .unwrap();
-    assert_eq!(
-        replay.members,
-        vec![(articles[1].url.clone(), articles[1].content_hash.clone())]
-    );
-    let (state, effects) = crate::update(state, triage_success(triage));
-    let second_summary = request_id(&effects, PromptId::ArticleSummary).unwrap();
-    assert_eq!(state.briefing().articles().len(), 2);
-    let (state, effects) = crate::update(state, summary_result(second_summary, true));
-    let second_signal = request_id(&effects, PromptId::ArticleSignalCandidate).unwrap();
-    let (mut state, _) = crate::update(state, signal_success(second_signal));
-    assert!(state.run_progress().unwrap().terminal);
-    let waves = state.pipeline_waves().waves().len();
-    // Replay the same completed identity a second time. The upstream key has
-    // already released summaries, even though this new replay is a real wave.
-    let replayed = articles[1].clone();
-    let index = state
-        .triage()
-        .index_for_identity(&replayed.url, &replayed.content_hash)
-        .unwrap();
-    state.triage_mut().defer_article(index);
-    state.triage_mut().set_awaiting_batch();
-    let (state, effects) = crate::update(
-        state,
-        Msg::PipelineRunRequested {
-            scope: PipelineRunScope::Continue,
-        },
-    );
-    let (state, _) =
-        crate::fixture_support::complete_processing_configuration(state, effects, 100_000);
-    let (state, effects) = crate::update(state, Msg::RearmDeferredBatchStages);
-    assert!(effects.iter().all(|e| !matches!(
-        e,
-        Effect::RequestLlmCompletion {
-            prompt_id: PromptId::ArticleSummary,
-            ..
-        }
-    )));
-    assert_eq!(state.pipeline_waves().waves().len(), waves + 1);
-    assert_eq!(
-        state.pipeline_waves().waves().last().unwrap().members,
-        vec![(replayed.url.clone(), replayed.content_hash.clone())]
-    );
-    let summary_waves = state
-        .pipeline_waves()
-        .waves()
-        .iter()
-        .filter(|w| w.stage == PipelineStage::Summarizing)
-        .count();
-    let summary_admissions = state.pipeline_admission.as_ref().unwrap().admitted[1].len();
-    let (state, effects) = crate::update(state, Msg::NoOp);
-    assert!(effects.iter().all(|e| !matches!(
-        e,
-        Effect::RequestLlmCompletion {
-            prompt_id: PromptId::ArticleSummary,
-            ..
-        }
-    )));
-    assert_eq!(
-        state
-            .pipeline_waves()
-            .waves()
-            .iter()
-            .filter(|w| w.stage == PipelineStage::Summarizing)
-            .count(),
-        summary_waves
-    );
-    assert_eq!(
-        state.pipeline_admission.as_ref().unwrap().admitted[1].len(),
-        summary_admissions
-    );
-    assert_eq!(state.briefing().articles().len(), 2);
 }
 
 #[test]
@@ -822,21 +730,6 @@ fn three_download_bursts_release_overlapping_waves_and_monotonic_totals() {
         .stages
         .iter()
         .all(|s| s.total_is_final && s.status == StageStatus::Done));
-}
-
-#[test]
-fn batch_buffering_keeps_a_single_admission_wave() {
-    let mut state = add_metadata(AppState::new());
-    state.set_llm_deferred_allowance(3);
-    let (state, _) = start_resume(state, (0..30).map(loaded_article).collect());
-    let waves: Vec<_> = state
-        .pipeline_waves()
-        .waves()
-        .iter()
-        .filter(|w| w.stage == PipelineStage::Triaging)
-        .collect();
-    assert_eq!(waves.len(), 1);
-    assert_eq!(waves[0].members.len(), 30);
 }
 
 #[test]

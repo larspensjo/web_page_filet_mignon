@@ -13,7 +13,6 @@ pub const DEFAULT_SELECTION_THRESHOLD: u8 = 60;
 pub enum SignalCandidateState {
     Pending,
     Scoring { request_id: u64 },
-    Deferred,
     Completed { result: SignalCandidateResult },
     Failed { reason: String },
 }
@@ -23,7 +22,6 @@ pub enum SignalCandidateState {
 pub struct SignalCandidateObservationCounts {
     pub total: usize,
     pub pending_or_in_flight: usize,
-    pub deferred: usize,
     pub completed: usize,
     pub failed: usize,
 }
@@ -79,11 +77,7 @@ impl SignalCandidateSession {
         }
         if matches!(
             self.states.get(&url),
-            Some(
-                SignalCandidateState::Pending
-                    | SignalCandidateState::Scoring { .. }
-                    | SignalCandidateState::Deferred
-            )
+            Some(SignalCandidateState::Pending | SignalCandidateState::Scoring { .. })
         ) {
             return false;
         }
@@ -158,23 +152,6 @@ impl SignalCandidateSession {
         }
     }
 
-    pub fn defer(&mut self, url: &str) {
-        if let Some(slot) = self.states.get_mut(url) {
-            *slot = SignalCandidateState::Deferred;
-            if let Some(request_id) = self.pending_request_ids.remove(url) {
-                self.pending_urls_by_request.remove(&request_id);
-            }
-        }
-    }
-
-    pub fn rearm_deferred(&mut self) {
-        for state in self.states.values_mut() {
-            if matches!(state, SignalCandidateState::Deferred) {
-                *state = SignalCandidateState::Pending;
-            }
-        }
-    }
-
     pub(crate) fn withdraw_pending(&mut self) -> Vec<String> {
         let withdrawn: Vec<_> = self
             .states
@@ -191,20 +168,11 @@ impl SignalCandidateSession {
         withdrawn
     }
 
-    pub fn deferred_urls(&self) -> Vec<String> {
-        self.admission_order
-            .iter()
-            .filter(|url| matches!(self.states.get(*url), Some(SignalCandidateState::Deferred)))
-            .cloned()
-            .collect()
-    }
-
     /// Returns a single-snapshot classification of the current state map.
     pub fn observation_counts(&self) -> SignalCandidateObservationCounts {
         let mut counts = SignalCandidateObservationCounts {
             total: self.states.len(),
             pending_or_in_flight: 0,
-            deferred: 0,
             completed: 0,
             failed: 0,
         };
@@ -214,7 +182,6 @@ impl SignalCandidateSession {
                 SignalCandidateState::Pending | SignalCandidateState::Scoring { .. } => {
                     counts.pending_or_in_flight += 1;
                 }
-                SignalCandidateState::Deferred => counts.deferred += 1,
                 SignalCandidateState::Completed { .. } => counts.completed += 1,
                 SignalCandidateState::Failed { .. } => counts.failed += 1,
             }
@@ -758,7 +725,7 @@ mod tests {
     }
 
     #[test]
-    fn changed_digest_preserves_pending_scoring_and_deferred_admission() {
+    fn changed_digest_preserves_pending_and_scoring_admission() {
         let mut session = SignalCandidateSession::default();
         assert!(session.enqueue("pending".into(), "first".into()));
         assert!(!session.enqueue("pending".into(), "second".into()));
@@ -771,11 +738,7 @@ mod tests {
         assert_eq!(session.url_for_request(7), Some("scoring"));
         assert_eq!(session.input_digest_for("scoring"), Some("first"));
 
-        assert!(session.enqueue("deferred".into(), "first".into()));
-        session.defer("deferred");
-        assert!(!session.enqueue("deferred".into(), "second".into()));
-        assert_eq!(session.input_digest_for("deferred"), Some("first"));
-        assert_eq!(session.enqueued_count(), 3);
+        assert_eq!(session.enqueued_count(), 2);
     }
 
     #[test]
@@ -784,8 +747,6 @@ mod tests {
         session.enqueue("pending".into(), "fixture-input".to_string());
         session.enqueue("scoring".into(), "fixture-input".to_string());
         session.mark_scoring("scoring", 1);
-        session.enqueue("deferred".into(), "fixture-input".to_string());
-        session.defer("deferred");
         session.enqueue("completed".into(), "fixture-input".to_string());
         session.complete(
             "completed",
@@ -796,9 +757,8 @@ mod tests {
 
         let counts = session.observation_counts();
 
-        assert_eq!(counts.total, 5);
+        assert_eq!(counts.total, 4);
         assert_eq!(counts.pending_or_in_flight, 2);
-        assert_eq!(counts.deferred, 1);
         assert_eq!(counts.completed, 1);
         assert_eq!(counts.failed, 1);
         assert_eq!(
@@ -809,29 +769,24 @@ mod tests {
     }
 
     #[test]
-    fn observation_counts_include_accumulated_rearmed_members() {
+    fn observation_counts_include_current_members_after_readmission() {
         let mut session = SignalCandidateSession::default();
-        session.enqueue("completed".into(), "fixture-input".to_string());
+        session.enqueue("completed".into(), "first".into());
         session.complete(
             "completed",
             sample_result(80, "complete", SourceTier::Tier1),
         );
-        session.enqueue("failed".into(), "fixture-input".to_string());
+        session.enqueue("failed".into(), "first".into());
         session.fail("failed", "validation: bad");
-        session.defer("completed");
-        session.defer("failed");
-
-        session.rearm_deferred();
-        session.enqueue("replayed".into(), "fixture-input".to_string());
-
+        assert!(session.enqueue("completed".into(), "new-input".into()));
+        assert!(session.enqueue("failed".into(), "new-input".into()));
+        session.enqueue("new-member".into(), "first".into());
         let counts = session.observation_counts();
-
         assert_eq!(session.completed_count(), 1);
         assert_eq!(session.failed_count(), 1);
-        assert_eq!(session.enqueued_count(), 3);
+        assert_eq!(session.enqueued_count(), 5);
         assert_eq!(counts.total, 3);
         assert_eq!(counts.pending_or_in_flight, 3);
-        assert_eq!(counts.deferred, 0);
         assert_eq!(counts.completed, 0);
         assert_eq!(counts.failed, 0);
         assert_eq!(counts.total, session.states.len());

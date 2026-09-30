@@ -330,7 +330,7 @@ fn prompt_model_and_context_changes_invalidate_previously_complete_triage() {
 }
 
 #[test]
-fn failed_triage_needs_triage_and_deferred_triage_is_in_progress() {
+fn failed_triage_needs_triage_and_active_triage_is_in_progress() {
     let article = article("https://example.com/triage-state", "triage-state-hash");
     let base = load_window(
         configured_state(AppState::new(), 1, "model-old", "old-context"),
@@ -354,19 +354,7 @@ fn failed_triage_needs_triage_and_deferred_triage_is_in_progress() {
     );
     assert_eq!(known(&state).needs_triage, 1);
 
-    let (state, request_id) = start_triage(base);
-    let (state, _) = reduce(
-        state,
-        Msg::LlmCompleted {
-            request_id,
-            result: crate::LlmResultKind::DeferredToBatch,
-            metadata: None,
-        },
-    );
-    assert!(matches!(
-        state.triage().articles()[0].triage_state,
-        ArticleTriageState::Deferred
-    ));
+    let (state, _) = start_triage(base);
     assert_eq!(known(&state).in_progress, 1);
     assert_eq!(known(&state).articles_with_work, 0);
 }
@@ -395,31 +383,21 @@ fn admitted_pending_triage_articles_are_in_progress_before_dispatch() {
 }
 
 #[test]
-fn rearmed_pending_triage_with_old_snapshot_remains_in_progress() {
-    let candidate = article("https://example.com/rearmed", "rearmed-hash");
+fn admitted_pending_triage_with_old_snapshot_remains_in_progress() {
+    let candidate = article("https://example.com/admitted", "admitted-hash");
     let state = load_window(
         configured_state(AppState::new(), 1, "model-old", "old-context"),
         vec![candidate],
     );
-    let (state, request_id) = start_triage(state);
-    let (state, _) = reduce(
-        state,
-        Msg::LlmCompleted {
-            request_id,
-            result: crate::LlmResultKind::DeferredToBatch,
-            metadata: None,
-        },
-    );
+    let (state, _) = start_triage(state);
     let mut state = configured_state(state, 2, "model-old", "old-context");
-    assert_eq!(known(&state).needs_triage, 1);
-    state.triage_mut().rearm_deferred();
     state.recompute_unfinished_work();
     assert_eq!(known(&state).in_progress, 1);
     assert_eq!(known(&state).articles_with_work, 0);
 }
 
 #[test]
-fn admitted_pending_and_deferred_summaries_are_in_progress() {
+fn admitted_pending_and_active_summaries_are_in_progress() {
     let articles = (0..3)
         .map(|index| {
             article(
@@ -459,26 +437,13 @@ fn admitted_pending_and_deferred_summaries_are_in_progress() {
         },
     );
     assert_eq!(known(&state).in_progress, 3);
-    let request_id = effects
-        .iter()
-        .find_map(|effect| match effect {
-            Effect::RequestLlmCompletion {
-                request_id,
-                prompt_id: PromptId::ArticleSummary,
-                ..
-            } => Some(*request_id),
-            _ => None,
-        })
-        .expect("summary should be dispatched");
-
-    let (state, _) = reduce(
-        state,
-        Msg::LlmCompleted {
-            request_id,
-            result: crate::LlmResultKind::DeferredToBatch,
-            metadata: None,
-        },
-    );
+    assert!(effects.iter().any(|e| matches!(
+        e,
+        Effect::RequestLlmCompletion {
+            prompt_id: PromptId::ArticleSummary,
+            ..
+        }
+    )));
     assert_eq!(known(&state).in_progress, 3);
     assert_eq!(known(&state).needs_summary, 0);
 }
@@ -671,11 +636,8 @@ fn restoring_completed_jobs_clears_the_old_window_summary() {
 }
 
 #[test]
-fn deferred_scoring_is_in_progress_under_its_current_key() {
-    let candidate = article(
-        "https://example.com/deferred-scoring",
-        "deferred-scoring-hash",
-    );
+fn active_scoring_is_in_progress_under_its_current_key() {
+    let candidate = article("https://example.com/active-scoring", "active-scoring-hash");
     let state = load_window(
         configured_state(AppState::new(), 1, "model-old", "old-context"),
         vec![candidate.clone()],
@@ -693,7 +655,7 @@ fn deferred_scoring_is_in_progress_under_its_current_key() {
     )
     .0;
     let mut state =
-        seed_current_summary_cache(state, &[(&candidate, summary_result("Deferred scoring"))]);
+        seed_current_summary_cache(state, &[(&candidate, summary_result("Active scoring"))]);
     assert_eq!(known(&state).needs_scoring, 1);
     let summary_key = current_summary_key(&state, &candidate);
     let scoring_key = crate::update::signal_candidate::input_key_for_current_results(
@@ -701,13 +663,15 @@ fn deferred_scoring_is_in_progress_under_its_current_key() {
         &candidate,
         &triage_result(3),
         &summary_key,
-        &summary_result("Deferred scoring"),
+        &summary_result("Active scoring"),
     )
     .unwrap();
     state
         .signal_candidate_mut()
         .enqueue(candidate.url.clone(), scoring_key.digest());
-    state.signal_candidate_mut().defer(&candidate.url);
+    state
+        .signal_candidate_mut()
+        .mark_scoring(&candidate.url, 99);
     state.recompute_unfinished_work();
     assert_eq!(known(&state).in_progress, 1);
     assert_eq!(known(&state).articles_with_work, 0);

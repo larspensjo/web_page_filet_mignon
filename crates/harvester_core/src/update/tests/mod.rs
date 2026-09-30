@@ -10,7 +10,6 @@ use harvester_engine::llm::DEFAULT_BRIEFING_MODEL;
 mod support;
 use support::*;
 
-mod batch_api_tests;
 mod delta_tests;
 mod unfinished_work_tests;
 

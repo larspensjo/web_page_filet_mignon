@@ -209,9 +209,7 @@ pub(super) fn finish_if_settled(state: &mut AppState) {
         && activity.import_in_flight == 0;
     let mut can_finish = true;
     if let Some(run) = state.pipeline_admission.as_mut() {
-        can_finish = !run.awaiting_rearm
-            && (!run.fresh_load || !run.armed)
-            && (!run.armed || run.configured);
+        can_finish = (!run.fresh_load || !run.armed) && (!run.armed || run.configured);
         if intake_done && can_finish {
             run.intake_open = false;
         }
@@ -453,14 +451,12 @@ fn llm_event(state: &AppState, request_id: u64, result: &LlmResultKind) -> Progr
     let stage = state
         .llm_request_state(request_id)
         .and_then(|entry| match entry {
-            LlmRequestState::Pending { prompt_id } | LlmRequestState::Deferred { prompt_id } => {
-                match prompt_id {
-                    PromptId::ArticleTriage => Some(PipelineStage::Triaging),
-                    PromptId::ArticleSummary => Some(PipelineStage::Summarizing),
-                    PromptId::ArticleSignalCandidate => Some(PipelineStage::ScoringSignals),
-                    _ => None,
-                }
-            }
+            LlmRequestState::Pending { prompt_id } => match prompt_id {
+                PromptId::ArticleTriage => Some(PipelineStage::Triaging),
+                PromptId::ArticleSummary => Some(PipelineStage::Summarizing),
+                PromptId::ArticleSignalCandidate => Some(PipelineStage::ScoringSignals),
+                _ => None,
+            },
             LlmRequestState::Completed { .. } | LlmRequestState::Failed { .. } => None,
         });
     let activity = stage.and_then(|stage| {
@@ -526,9 +522,6 @@ fn activity_outcome_after(
                         reason: bounded_reason(reason),
                     })
                 }
-                crate::triage::ArticleTriageState::Deferred => Some(ActivityOutcome::Skipped {
-                    reason: "deferred to batch".into(),
-                }),
                 crate::triage::ArticleTriageState::Pending
                 | crate::triage::ArticleTriageState::InProgress { .. } => None,
             }),
@@ -546,9 +539,6 @@ fn activity_outcome_after(
                         reason: bounded_reason(reason),
                     })
                 }
-                crate::briefing::ArticleSummaryState::Deferred => Some(ActivityOutcome::Skipped {
-                    reason: "deferred to batch".into(),
-                }),
                 crate::briefing::ArticleSummaryState::Pending
                 | crate::briefing::ArticleSummaryState::InProgress { .. } => None,
             }),
@@ -556,9 +546,6 @@ fn activity_outcome_after(
             crate::SignalCandidateState::Completed { .. } => Some(ActivityOutcome::Succeeded),
             crate::SignalCandidateState::Failed { reason } => Some(ActivityOutcome::Failed {
                 reason: bounded_reason(reason),
-            }),
-            crate::SignalCandidateState::Deferred => Some(ActivityOutcome::Skipped {
-                reason: "deferred to batch".into(),
             }),
             crate::SignalCandidateState::Pending | crate::SignalCandidateState::Scoring { .. } => {
                 None
@@ -580,9 +567,6 @@ fn job_outcome(result: &JobResultKind) -> ActivityOutcome {
 fn llm_outcome(result: &LlmResultKind) -> ActivityOutcome {
     match result {
         LlmResultKind::Success { .. } => ActivityOutcome::Succeeded,
-        LlmResultKind::DeferredToBatch => ActivityOutcome::Skipped {
-            reason: "deferred to batch".into(),
-        },
         LlmResultKind::ValidationFailed { reason, .. }
         | LlmResultKind::QuotaExhausted { reason, .. }
         | LlmResultKind::RateLimited { reason }

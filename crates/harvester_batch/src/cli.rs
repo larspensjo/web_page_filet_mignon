@@ -2,7 +2,6 @@ use clap::Parser;
 use harvester_io::default_sources_path;
 use std::path::PathBuf;
 
-const DEFAULT_POLL_INTERVAL_MINUTES: u32 = 15;
 const DEFAULT_LLM_CONCURRENCY: usize = 10;
 const MAX_LLM_CONCURRENCY: usize = harvester_engine::llm::MAX_LLM_CONCURRENT_REQUESTS;
 
@@ -34,30 +33,6 @@ pub struct Args {
     #[arg(long)]
     pub force_unlock: bool,
 
-    /// Dry-run mode: poll sources and show what would be processed, but don't download or triage
-    #[arg(long)]
-    pub dry_run: bool,
-
-    /// Route non-interactive article LLM stages through OpenAI's asynchronous Batch API.
-    #[arg(
-        long,
-        conflicts_with = "dry_run",
-        conflicts_with = "refresh_stale_summaries_limit",
-        conflicts_with = "import_saved_web_dir"
-    )]
-    pub batch_api: bool,
-
-    /// Collect results for batches already submitted to the OpenAI Batch API, then exit
-    /// without polling sources or submitting new work. Implies --batch-api.
-    #[arg(
-        long,
-        conflicts_with = "dry_run",
-        conflicts_with = "single_shot",
-        conflicts_with = "import_saved_web_dir",
-        conflicts_with = "refresh_stale_summaries_limit"
-    )]
-    pub drain: bool,
-
     /// Print per-pass progress diagnostics, including cycle, source, and model details.
     #[arg(long)]
     pub verbose_progress: bool,
@@ -65,14 +40,6 @@ pub struct Args {
     /// Use ASCII markers and progress bars in the interactive dashboard.
     #[arg(long)]
     pub ascii_progress: bool,
-
-    /// Single-shot mode: run one full cycle (poll + triage + persist) and exit
-    #[arg(long, conflicts_with = "dry_run")]
-    pub single_shot: bool,
-
-    /// Wait time in minutes between poll cycles (1-1440)
-    #[arg(long, default_value_t = DEFAULT_POLL_INTERVAL_MINUTES)]
-    pub poll_interval: u32,
 
     /// Set the briefing time-filter checkpoint to the given RFC3339 timestamp
     #[arg(long, value_name = "RFC3339")]
@@ -90,21 +57,14 @@ pub struct Args {
     #[arg(long)]
     pub show_briefing_since: bool,
 
-    /// Import browser-saved .htm/.html files from this directory (conflicts with --dry-run and --single-shot)
-    #[arg(
-        long,
-        value_name = "PATH",
-        conflicts_with = "dry_run",
-        conflicts_with = "single_shot"
-    )]
+    /// Import browser-saved .htm/.html files from this directory.
+    #[arg(long, value_name = "PATH")]
     pub import_saved_web_dir: Option<PathBuf>,
 
     /// Refresh up to N article summaries that are missing the current summary prompt/model/context cache key
     #[arg(
         long,
         value_name = "N",
-        conflicts_with = "dry_run",
-        conflicts_with = "single_shot",
         conflicts_with = "import_saved_web_dir",
         conflicts_with = "set_briefing_since",
         conflicts_with = "set_briefing_since_now",
@@ -147,15 +107,6 @@ impl Args {
     fn clamp_values(&mut self) {
         // Clamp llm_concurrency to valid range
         self.llm_concurrency = self.llm_concurrency.clamp(1, MAX_LLM_CONCURRENCY);
-
-        // Clamp poll_interval to valid range (1 minute to 24 hours)
-        self.poll_interval = self.poll_interval.clamp(1, 1440);
-    }
-
-    /// The Batch API runtime is requested by `--batch-api` and implied by `--drain`,
-    /// which can only collect work that the manifest and coordinator own.
-    pub fn batch_api_enabled(&self) -> bool {
-        self.batch_api || self.drain
     }
 
     pub fn sources_path(&self) -> PathBuf {
@@ -285,9 +236,6 @@ mod tests {
             "custom_prompts",
             "--llm-concurrency",
             "4",
-            "--poll-interval",
-            "30",
-            "--dry-run",
             "--force-unlock",
         ]);
         assert_eq!(args.sources, Some(PathBuf::from("custom_sources.ron")));
@@ -295,9 +243,6 @@ mod tests {
         assert_eq!(args.contexts_dir, PathBuf::from("custom_contexts"));
         assert_eq!(args.prompts_dir, PathBuf::from("custom_prompts"));
         assert_eq!(args.llm_concurrency, 4);
-        assert_eq!(args.poll_interval, 30);
-        assert!(args.dry_run);
-        assert!(!args.single_shot);
         assert!(args.force_unlock);
         assert!(!args.verbose_progress);
         assert!(!args.ascii_progress);
@@ -314,93 +259,12 @@ mod tests {
     }
 
     #[test]
-    fn single_shot_flag_is_parsed() {
-        let args = Args::parse_from(&["harvester_batch", "--single-shot"]);
-        assert!(args.single_shot);
-    }
-
-    #[test]
-    fn single_shot_conflicts_with_dry_run() {
-        let result =
-            <Args as Parser>::try_parse_from(["harvester_batch", "--single-shot", "--dry-run"]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn batch_api_parses_and_conflicts_with_excluded_modes() {
-        assert!(Args::parse_from(&["harvester_batch", "--batch-api"]).batch_api);
-        assert!(
-            <Args as Parser>::try_parse_from(["harvester_batch", "--batch-api", "--dry-run"])
-                .is_err()
-        );
-        assert!(<Args as Parser>::try_parse_from([
-            "harvester_batch",
-            "--batch-api",
-            "--import-saved-web-dir",
-            "saved"
-        ])
-        .is_err());
-        assert!(<Args as Parser>::try_parse_from([
-            "harvester_batch",
-            "--batch-api",
-            "--refresh-stale-summaries-limit",
-            "1"
-        ])
-        .is_err());
-    }
-
-    #[test]
-    fn drain_implies_batch_api_and_conflicts_with_excluded_modes() {
-        let defaults = Args::parse_from(&["harvester_batch"]);
-        assert!(!defaults.drain);
-        assert!(!defaults.batch_api_enabled());
-
-        let drain = Args::parse_from(&["harvester_batch", "--drain"]);
-        assert!(drain.drain);
-        assert!(!drain.batch_api, "--drain does not set the raw flag");
-        assert!(drain.batch_api_enabled(), "--drain implies the runtime");
-
-        assert!(
-            Args::parse_from(&["harvester_batch", "--drain", "--batch-api"]).batch_api_enabled(),
-            "--drain and --batch-api are redundant, not conflicting"
-        );
-        assert!(Args::parse_from(&["harvester_batch", "--batch-api"]).batch_api_enabled());
-
-        for conflicting in [
-            vec!["harvester_batch", "--drain", "--dry-run"],
-            vec!["harvester_batch", "--drain", "--single-shot"],
-            vec![
-                "harvester_batch",
-                "--drain",
-                "--import-saved-web-dir",
-                "saved",
-            ],
-            vec![
-                "harvester_batch",
-                "--drain",
-                "--refresh-stale-summaries-limit",
-                "1",
-            ],
-        ] {
-            assert!(
-                <Args as Parser>::try_parse_from(conflicting.clone()).is_err(),
-                "expected conflict for {conflicting:?}"
-            );
-        }
-    }
-
-    #[test]
     fn progress_flags_default_to_false_and_parse_without_conflicts() {
         let defaults = Args::parse_from(&["harvester_batch"]);
         assert!(!defaults.verbose_progress);
         assert!(!defaults.ascii_progress);
 
-        let args = Args::parse_from(&[
-            "harvester_batch",
-            "--batch-api",
-            "--verbose-progress",
-            "--ascii-progress",
-        ]);
+        let args = Args::parse_from(&["harvester_batch", "--verbose-progress", "--ascii-progress"]);
         assert!(args.verbose_progress);
         assert!(args.ascii_progress);
     }
@@ -422,29 +286,9 @@ mod tests {
     }
 
     #[test]
-    fn poll_interval_is_clamped() {
-        let args = Args::parse_from(&["harvester_batch", "--poll-interval", "9999"]);
-        assert_eq!(args.poll_interval, 1440);
-
-        let args = Args::parse_from(&["harvester_batch", "--poll-interval", "0"]);
-        assert_eq!(args.poll_interval, 1);
-    }
-
-    #[test]
     fn refresh_stale_summaries_limit_is_parsed() {
         let args = Args::parse_from(&["harvester_batch", "--refresh-stale-summaries-limit", "100"]);
         assert_eq!(args.refresh_stale_summaries_limit, Some(100));
-    }
-
-    #[test]
-    fn refresh_stale_summaries_limit_conflicts_with_dry_run() {
-        let result = <Args as Parser>::try_parse_from([
-            "harvester_batch",
-            "--refresh-stale-summaries-limit",
-            "100",
-            "--dry-run",
-        ]);
-        assert!(result.is_err());
     }
 
     #[test]

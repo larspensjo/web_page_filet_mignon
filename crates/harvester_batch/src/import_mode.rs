@@ -1,4 +1,5 @@
 use crate::cli::Args;
+use crate::no_progress::{pipeline_operation, NoProgressWatchdog};
 use crate::runner::{
     apply_signal_candidate_selection_settings, batch_host_llm_defaults, exit_code_with_shutdown,
     should_log_batch_msg, summarize_batch_msg, CycleOutcome, CycleStartWorkReporter,
@@ -62,7 +63,7 @@ pub(crate) fn run_import_mode(
 
     let platform_handler = Box::new(NoOpPlatformHandler);
     let defaults = batch_host_llm_defaults();
-    let (effect_runner, _, _runtime, availability) = build_effect_runner(
+    let (effect_runner, _, availability) = build_effect_runner(
         paths,
         msg_tx.clone(),
         args.llm_concurrency,
@@ -130,6 +131,7 @@ pub(crate) fn run_import_mode(
         &shutdown_flag,
         DispatchLoopOptions {
             tick_interval: Duration::from_millis(75),
+            ..DispatchLoopOptions::default()
         },
         Some(&mut progress),
     )?;
@@ -200,24 +202,38 @@ fn run_import_dispatch_loop(
     effect_runner: &EffectRunner,
     shutdown_flag: &Arc<AtomicBool>,
     options: DispatchLoopOptions,
-    mut progress: Option<&mut crate::progress::ImportProgressReporter>,
+    progress: Option<&mut crate::progress::ImportProgressReporter>,
 ) -> Result<CycleOutcome, String> {
-    let timeout = Duration::from_millis(100);
+    run_import_dispatch_loop_with_sink(
+        state,
+        msg_rx,
+        &mut |effects| effect_runner.enqueue(effects),
+        shutdown_flag,
+        options,
+        progress,
+        &mut |_| {},
+    )
+}
+
+fn run_import_dispatch_loop_with_sink(
+    state: &mut AppState,
+    msg_rx: &mpsc::Receiver<Msg>,
+    effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
+    shutdown_flag: &Arc<AtomicBool>,
+    options: DispatchLoopOptions,
+    mut progress: Option<&mut crate::progress::ImportProgressReporter>,
+    iteration_observer: &mut dyn FnMut(usize),
+) -> Result<CycleOutcome, String> {
+    let timeout = options.receive_timeout;
     let mut iterations = 0;
     let mut last_tick = Instant::now();
     let mut last_progress_render = Instant::now();
     let mut resume_requested = false;
     let mut cycle_start_work = CycleStartWorkReporter::default();
-    const MAX_ITERATIONS: usize = 10_000;
+    let mut watchdog = NoProgressWatchdog::new(Instant::now());
 
     loop {
         iterations += 1;
-        if iterations > MAX_ITERATIONS {
-            return Err(format!(
-                "Import dispatch loop exceeded maximum iterations ({})",
-                MAX_ITERATIONS
-            ));
-        }
 
         if shutdown_flag.load(Ordering::Relaxed) {
             engine_info!("[import] Shutdown signal detected");
@@ -225,8 +241,10 @@ fn run_import_dispatch_loop(
             return Ok(classify_import_cycle_outcome(&obs));
         }
 
+        let mut received_message = false;
         match msg_rx.recv_timeout(timeout) {
             Ok(first_msg) => {
+                received_message = true;
                 let mut inbox = vec![first_msg];
                 while inbox.len() < MAX_DISPATCH_INBOX_BATCH {
                     let Ok(next_msg) = msg_rx.try_recv() else {
@@ -258,7 +276,7 @@ fn run_import_dispatch_loop(
                 queued_effects.extend(effects);
 
                 if !queued_effects.is_empty() {
-                    effect_runner.enqueue(queued_effects);
+                    effect_sink(queued_effects);
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -271,7 +289,7 @@ fn run_import_dispatch_loop(
             let (new_state, effects) = update(std::mem::take(state), Msg::PipelineRunAdvance);
             *state = new_state;
             if !effects.is_empty() {
-                effect_runner.enqueue(effects);
+                effect_sink(effects);
             }
         }
 
@@ -294,7 +312,7 @@ fn run_import_dispatch_loop(
             let (new_state, tick_effects) = update(std::mem::take(state), Msg::tick_at(Utc::now()));
             *state = new_state;
             if !tick_effects.is_empty() {
-                effect_runner.enqueue(tick_effects);
+                effect_sink(tick_effects);
             }
             last_tick = Instant::now();
         }
@@ -326,7 +344,7 @@ fn run_import_dispatch_loop(
             );
             *state = new_state;
             if !effects.is_empty() {
-                effect_runner.enqueue(effects);
+                effect_sink(effects);
             }
             resume_requested = true;
         }
@@ -341,6 +359,19 @@ fn run_import_dispatch_loop(
             engine_info!("[import] Cycle settled after {} iterations", iterations);
             return Ok(classify_import_cycle_outcome(&obs));
         }
+        watchdog.check(
+            Instant::now(),
+            received_message,
+            state.pipeline_has_in_flight_work(),
+            || {
+                format!(
+                    "importing saved browser pages phase={:?}; {}",
+                    obs.import_phase,
+                    pipeline_operation(state)
+                )
+            },
+        )?;
+        iteration_observer(iterations);
     }
 }
 
@@ -387,13 +418,10 @@ mod tests {
             summary_in_flight: 0,
             summary_completed,
             summary_failed,
-            triage_deferred: 0,
-            summary_deferred: 0,
             signal_total: 0,
             signal_pending_or_in_flight: 0,
             signal_completed: 0,
             signal_failed: 0,
-            signal_deferred: 0,
             triage_cache_hits: 0,
             triage_cache_misses: 0,
             triage_cache_key_unavailable: 0,
@@ -410,6 +438,40 @@ mod tests {
 
     fn idle_import_obs() -> BatchObservation {
         observation_with_import(0, 0, 0, 0, 0, 0, 0, 0, 0)
+    }
+
+    #[test]
+    fn import_loop_survives_more_than_ten_thousand_quiet_import_iterations() {
+        let (_msg_tx, msg_rx) = mpsc::channel();
+        let (mut state, _) = update(
+            AppState::new(),
+            Msg::ImportSavedWebpagesRequested {
+                dir: PathBuf::from("quiet-import"),
+            },
+        );
+        assert!(state.batch_observation().import_in_flight);
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let mut iterations = 0;
+        run_import_dispatch_loop_with_sink(
+            &mut state,
+            &msg_rx,
+            &mut |_: Vec<Effect>| {},
+            &shutdown,
+            DispatchLoopOptions {
+                receive_timeout: Duration::ZERO,
+                tick_interval: Duration::ZERO,
+            },
+            None,
+            &mut |count| {
+                iterations = count;
+                if count == 10_010 {
+                    shutdown.store(true, Ordering::Relaxed);
+                }
+            },
+        )
+        .expect("quiet in-flight import must outlast the old iteration cap");
+        assert_eq!(iterations, 10_010);
+        assert!(state.batch_observation().import_in_flight);
     }
 
     #[test]
@@ -445,28 +507,6 @@ mod tests {
             args.import_saved_web_dir,
             Some(std::path::PathBuf::from("/tmp/saved"))
         );
-    }
-
-    #[test]
-    fn import_saved_web_dir_conflicts_with_dry_run() {
-        let result = <crate::cli::Args as clap::Parser>::try_parse_from([
-            "harvester_batch",
-            "--import-saved-web-dir",
-            "/tmp/saved",
-            "--dry-run",
-        ]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn import_saved_web_dir_conflicts_with_single_shot() {
-        let result = <crate::cli::Args as clap::Parser>::try_parse_from([
-            "harvester_batch",
-            "--import-saved-web-dir",
-            "/tmp/saved",
-            "--single-shot",
-        ]);
-        assert!(result.is_err());
     }
 
     #[test]

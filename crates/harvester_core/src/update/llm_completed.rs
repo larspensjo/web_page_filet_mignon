@@ -22,9 +22,7 @@ pub(super) fn handle(
     metadata: Option<LlmRunMetadata>,
 ) -> Vec<Effect> {
     let request_prompt_id = match state.llm_request_state(request_id) {
-        Some(LlmRequestState::Pending { prompt_id } | LlmRequestState::Deferred { prompt_id }) => {
-            Some(*prompt_id)
-        }
+        Some(LlmRequestState::Pending { prompt_id }) => Some(*prompt_id),
         _ => None,
     };
     record_llm_result(state, request_id, &result);
@@ -105,15 +103,6 @@ fn note_owned_quota(state: &mut AppState, result: &LlmResultKind) {
 
 fn record_llm_result(state: &mut AppState, request_id: u64, result: &LlmResultKind) {
     let new_state = match result {
-        LlmResultKind::DeferredToBatch => match state.llm_request_state(request_id) {
-            Some(LlmRequestState::Pending { prompt_id }) => LlmRequestState::Deferred {
-                prompt_id: *prompt_id,
-            },
-            Some(LlmRequestState::Deferred { prompt_id }) => LlmRequestState::Deferred {
-                prompt_id: *prompt_id,
-            },
-            _ => return,
-        },
         LlmResultKind::Success {
             output_json,
             input_tokens,
@@ -154,7 +143,6 @@ fn handle_summary_completion(
     effects: &mut Vec<Effect>,
 ) {
     match result {
-        LlmResultKind::DeferredToBatch => state.briefing_mut().defer_article(article_idx),
         LlmResultKind::Success {
             output_json,
             input_tokens,
@@ -288,7 +276,6 @@ fn handle_triage_completion(
     effects: &mut Vec<Effect>,
 ) {
     match result {
-        LlmResultKind::DeferredToBatch => state.triage_mut().defer_article(article_idx),
         LlmResultKind::Success {
             output_json,
             input_tokens,
@@ -355,7 +342,6 @@ fn handle_triage_completion(
 
 fn handle_executive_summary_completion(state: &mut AppState, result: &LlmResultKind) {
     match result {
-        LlmResultKind::DeferredToBatch => {}
         LlmResultKind::Success { output_json, .. } => {
             match validate_briefing_executive_summary(output_json) {
                 Ok(exec) => {
@@ -391,7 +377,6 @@ fn handle_aggregate_briefing_completion(
     effects: &mut Vec<Effect>,
 ) {
     match result {
-        LlmResultKind::DeferredToBatch => {}
         LlmResultKind::Success {
             output_json,
             input_tokens,
@@ -454,7 +439,6 @@ fn handle_aggregate_briefing_completion(
 
 fn handle_next_item_completion(state: &mut AppState, result: &LlmResultKind) {
     match result {
-        LlmResultKind::DeferredToBatch => {}
         LlmResultKind::Success { output_json, .. } => {
             match validate_briefing_next_item(output_json) {
                 Ok(BriefingNextItem::Item { headline, body }) => {

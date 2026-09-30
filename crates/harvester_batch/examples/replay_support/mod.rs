@@ -268,7 +268,6 @@ pub fn run_benchmark(options: HarnessOptions) -> Result<BenchmarkReport, String>
 
     let args = Args::try_parse_from([
         "harvester_batch",
-        "--single-shot",
         "--output-dir",
         work_dir.to_str().ok_or("work path is not valid UTF-8")?,
         "--sources",
@@ -364,7 +363,6 @@ pub fn run_benchmark(options: HarnessOptions) -> Result<BenchmarkReport, String>
         BenchmarkHost::Batch => {
             runner::run_single_cycle_with_effect_sink(
                 &mut state,
-                &args,
                 &paths,
                 &msg_tx,
                 &msg_rx,
@@ -586,7 +584,7 @@ fn make_report(
         report_path: report_path.to_path_buf(),
         held_back_articles,
         llm_latency_ms,
-        model_call_path: "synchronous (not --batch-api)".to_owned(),
+        model_call_path: "synchronous".to_owned(),
         wall_time_to_completion_ms: millis(wall_time.as_nanos()),
         reducer_time_by_message_kind: measurements
             .reducer_ns

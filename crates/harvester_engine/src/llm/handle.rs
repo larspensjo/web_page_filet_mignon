@@ -167,7 +167,7 @@ pub struct LlmCompletionResult {
     pub metadata: LlmRunMetadata,
 }
 
-/// Fully rendered completion request shared by synchronous and Batch callers.
+/// Fully rendered synchronous completion request.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedCompletion {
     pub model: ModelId,

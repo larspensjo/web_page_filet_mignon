@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use crate::briefing::LoadedArticle;
 use crate::state::{AiAvailability, ArchiveTokenEstimates};
 use crate::tabs::TrendCategory;
-use crate::CollectedEntry;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[rustfmt::skip]
@@ -183,11 +182,6 @@ pub enum Msg {
         /// before timing/model info is available (e.g. `PromptNotFound`).
         metadata: Option<LlmRunMetadata>,
     },
-    /// Runner-defined cycle boundary that permits deferred batch work to be
-    /// replayed through the normal cache-aware dispatch paths.
-    RearmDeferredBatchStages,
-    /// Validated batch output supplied by the runner after durable collection.
-    BatchResultsCollected { entries: Vec<CollectedEntry> },
     /// Startup/effect boundary configured session LLM quota limits.
     LlmQuotaConfigured { limits: crate::LlmQuotaLimits },
     /// Authoritative session LLM quota usage snapshot from the worker.
@@ -369,8 +363,6 @@ impl Msg {
             Self::NoOp => "NoOp",
             Self::RequestLlmCompletion { .. } => "RequestLlmCompletion",
             Self::LlmCompleted { .. } => "LlmCompleted",
-            Self::RearmDeferredBatchStages => "RearmDeferredBatchStages",
-            Self::BatchResultsCollected { .. } => "BatchResultsCollected",
             Self::LlmQuotaConfigured { .. } => "LlmQuotaConfigured",
             Self::LlmQuotaUsageUpdated { .. } => "LlmQuotaUsageUpdated",
             Self::GenerateBriefingClicked => "GenerateBriefingClicked",
@@ -423,9 +415,6 @@ impl Msg {
 /// Result payload returned by the LLM worker.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LlmResultKind {
-    /// Non-terminal runner outcome: paid work has been durably submitted to a
-    /// batch and is retired for this cycle.
-    DeferredToBatch,
     Success {
         output_json: String,
         input_tokens: u32,

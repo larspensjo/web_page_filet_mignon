@@ -204,7 +204,7 @@ fn synthetic_run_progress(generation: u64) -> RunProgressView {
             0 => ActivityOutcome::Started,
             1 => ActivityOutcome::Succeeded,
             2 => ActivityOutcome::Failed { reason: format!("Source returned a realistic transient response for probe activity {index}; retry exhaustion recorded safely.") },
-            _ => ActivityOutcome::Skipped { reason: format!("Article was deferred to the next batch cycle after policy evaluation {index}.") },
+            _ => ActivityOutcome::Skipped { reason: format!("Article was skipped after policy evaluation {index}.") },
         },
     }).collect();
     RunProgressView {

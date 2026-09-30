@@ -296,3 +296,9 @@ Decision: A source registry entry with an unknown or removed source type is skip
 Context: Script entries have no runtime implementation, and strict whole-registry deserialization prevented the remaining valid sources from loading. Registry files are external input that may outlive supported source types.
 Consequences: Warnings identify the entry position and its id when readable. Supported entries retain their existing parsing and validation rules, including File and CuratedList.
 Refs: docs/Architecture.md, docs/plans/Plan.Simplification.md, crates/harvester_io/src/source_loader.rs
+
+## 2026-09-30 - The Batch API and batch-only modes are removed
+Decision: The Batch API and the batch-only modes (drain, dry-run, recurring, single-shot) are removed; all model calls are synchronous.
+Context: The owner approved the synchronous path and its approximate $5/month additional cost. The read-only reconciliation confirmed all 33 successful collected signal-candidate records, with nothing missing, invalid or outstanding.
+Consequences: The command-line host always runs one poll-download-process cycle and exits; the Batch launch policy supplies no runtime arguments. This retires the "Batch API buffering has its own allowance" clause of 2026-09-27. The dry-run no-op sink recorded on 2026-09-18 is gone with dry-run. The shared synchronous request budget, scoring-first priority, configuration frozen per run, append-only result sink, output-folder lock and Stop drain semantics remain. Replay records stay as forensics and are written only by the synchronous path.
+Refs: docs/plans/Plan.Simplification.md, docs/Architecture.md, crates/harvester_batch/src/runner.rs, crates/harvester_core/src/update/waves.rs, crates/harvester_engine/src/llm/handle.rs, scripts/lib/HarvesterLaunch.psm1

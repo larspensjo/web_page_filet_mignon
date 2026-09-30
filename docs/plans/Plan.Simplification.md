@@ -1392,6 +1392,372 @@ Phase 3 notes (2026-09-29):
 - Build, touched-crate tests, full root tests, both Clippy gates, and formatting checks passed.
   The IPC probe and Pester were not run; the real output-folder benchmark was not run.
 
+Phase 4 notes — Stage A (2026-09-30; removal has not started):
+
+- Added `harvester_batch/examples/reconcile_batch.rs`, with its nine tests in
+  `examples/reconcile_support/tests.rs`. Default invocation is read-only, uses the
+  existing JSONL DTOs/parser, ignores incomplete trailing lines without recovery,
+  and never migrates RON backups or acquires a lock. Missing JSONL stores count as
+  empty; a missing or unreadable manifest refuses the check. `--apply` takes the
+  command-line host's `.harvester.lock`, appends only validated missing records
+  through the coalescing result sink, flushes, and re-checks. Keys and timestamps
+  come from the frozen manifest entries, including dated model aliases.
+- Reports confirmed, missing, invalid and appended counts per kind, missing full
+  key dimensions, invalid batch/custom ids and reasons, and Created/Submitted
+  batches. Exit 0 means all successful collected records are confirmed, with no
+  invalid or outstanding work; exit 1 reports discrepancies; exit 2 reports an
+  I/O or manifest error. Temporary-folder CLI smoke checks verified all three exits.
+- Test counts: root `cargo test --offline` 1,540 → 1,549 passing (2 ignored
+  unchanged); Rust test attributes 1,550 → 1,559: 9 added, 0 removed. Removed-test
+  list: none. Per-crate root totals (before → after, including integrations):
+  batch 199 → 208 (the example has `test = true`), core 677 → 677, engine
+  462 → 462 (1 ignored), IO 135 → 135, UI bridge 33 → 33, provider kit
+  34 → 34 (1 ignored), logging 0 → 0. UI source and frontend are unchanged;
+  their tests were not rerun (prior baselines: UI 8, frontend Vitest 96).
+- The nine additions cover existing records in all three stores; apply plus a
+  second check with exact keys/provenance; invalid records alongside a valid
+  missing result; byte-identical folders with torn tails; no legacy migration or
+  stale-migration deletion; outstanding states versus failed/line-error records;
+  every frozen key dimension including model aliases; lock refusal naming the
+  desktop holder while check still works; and missing/unreadable inputs.
+- `cargo build --offline`, example build, touched-crate tests, full root tests,
+  `cargo clippy --offline --all-targets -- -D warnings`, and formatting checks
+  passed. The carry-over replay and archive-export golden fixtures passed
+  unchanged. Logs are in `.local/checks/phase4-stage-a/`. Pester and IPC probe
+  were not run; no launch policy, frontend or UI source changed. Benchmark table
+  rows remain for the owner.
+- The real `output/` was not read or written. Mandatory gate: owner/Claude runs
+  the default read-only command from the repository root and returns its report:
+  `cargo run --offline -p harvester_batch --example reconcile_batch -- "C:\Users\larsp\src\web_page_filet_mignon\output"`.
+  The earlier pre-flight expected 33 confirmed signal-candidate records; the new
+  check must establish the current count. Stage B waits for that report and
+  proceeds on a clean pass under the owner's settled authorization. Missing,
+  invalid or outstanding work stops for owner review. Stage B also removes the
+  example's test module, Cargo target, temporary manifest re-exports, and snapshot
+  reader if it has no remaining caller.
+
+Phase 4 notes — Stage B (2026-09-30; implementation complete):
+
+- Owner/Claude reconciliation, run read-only on 2026-09-30 against
+  `C:\Users\larsp\src\web_page_filet_mignon\output`: exit **0**.
+
+  ```text
+  Mode: read-only
+  triage: confirmed=0 missing=0 invalid=0 appended=0
+  summary: confirmed=0 missing=0 invalid=0 appended=0
+  signal_candidate: confirmed=33 missing=0 invalid=0 appended=0
+  outstanding=0
+  PASS: every successful collected record is confirmed; nothing invalid or outstanding.
+  ```
+
+  Claude checked SHA-256 hashes: the manifest and all three RON backups stayed
+  byte-identical; no sidecar or temporary file was created. The 33 confirmed
+  signal-candidate records match the Phase 1 pre-flight. This clean report met the
+  owner's settled option A authorization; Stage B proceeded without another
+  confirmation. Codex did not read or write the real output folder.
+- Removed Batch API transport, coordinator, manifest, collection/runtime and
+  batch-only core contracts, deferral state, counters, allowance and Continue
+  scope. The temporary reconciliation example/support module, Cargo target,
+  manifest re-export and unused read-only snapshot helper were removed too.
+  Every remaining article call uses the synchronous request budget, with scoring,
+  summary, then triage priority and overlapping waves. Replay records remain;
+  the synchronous path is their sole production writer.
+- Default command-line invocation performs one Full cycle and exits; the removed
+  flags and repeating/provider-wait loops are gone. Import and checkpoint editing
+  remain. The fixed Batch launcher supplies an empty runtime-argument array. Its
+  four assertions now check count zero, and the policy-copy test replaces the
+  empty argument array instead of indexing its nonexistent first element.
+- Bug 8: dispatch, browser import and startup hydration use
+  `NO_PROGRESS_TIMEOUT` (60 seconds, monotonic time). A received message or
+  in-flight effect resets the deadline; pending, undispatched model work alone
+  does not. A failure logs the stuck operation and pipeline/import phase through
+  `engine_logging`. The operation diagnostic is built only when the watchdog
+  expires. Quiet downloads do not exhaust an iteration cap. Bug 1 is resolved by
+  removing dry-run. Stop still drains already in-flight work.
+- Review fixes preserve synchronous contracts: the budget clamp and triage-wave
+  summary barrier tests are rewritten below. All dashboard paints and resumes
+  receive the worker's synchronous session cost; a regression checks both terminal
+  and plain output. Import has its own quiet-loop regression. Removed dead host
+  runtime data, unused dispatch sender parameters and the single-variant
+  `PipelineWavePolicy`; run admission now directly controls overlapping intake.
+  Test-only wall time and sleep live on a clock extension trait. The provider
+  changelog retains 0.3.0 verbatim and records API/codec removal in 0.4.0;
+  multipart is removed and the lockfile resolves offline. Probe copy no longer
+  mentions deferred batch cycles; no IPC fixture embeds that string, so shape and
+  schema are unchanged. The empty reconciliation support directory is removed.
+- Review verification passed: `cargo build --offline`; touched-crate tests,
+  then full root `cargo test --offline` (**1,461 passed, 2 ignored**);
+  `cargo clippy --offline --all-targets -- -D warnings`;
+  `cargo clippy --offline -p harvester_ui --all-targets -- -D warnings`;
+  `cargo fmt` and `cargo fmt --check`. The desktop binary was neither built nor
+  run; its host wiring was checked by Clippy. Carry-over/archive fixtures and IPC
+  snapshot fixtures passed unchanged. Frontend files did not change. Logs are
+  under `.local/phase4-review-*.log`. Pester remains for Claude to run.
+- Both `replay_bench` hosts build and run offline against a temporary copy of the
+  synthetic carry-over fixture (one held-back article), with `completed=true`
+  and `model_call_path=synchronous`. This is a harness smoke check, not a
+  corpus-sized performance comparison. Benchmark table rows remain for the owner.
+  Logs/reports are under `.local/checks/phase4-stage-b/`.
+- The crates/scripts/README scan contains no removed Batch API/mode usage. The
+  remaining `drain` matches concern Stop, queue/message draining or host cost
+  fixtures; the ignored engine `real_corpus_dry_run` is a content-preparation
+  diagnostic, unrelated to the removed CLI mode, and was not run. Corpus marker
+  generation contains no explicit Batch artifact; public layout is unchanged.
+  Pester was not run by Codex. Follow-ups: Claude runs
+  `Invoke-Pester -Path scripts/tests/HarvesterLaunch.Tests.ps1`; owner records
+  the full-corpus benchmark rows and observes the first normal morning cycle.
+
+Phase 4 test-count reconciliation (baseline before Stage A):
+
+| Count | Baseline | Stage A | Stage B/final |
+| --- | ---: | ---: | ---: |
+| Rust test attributes | 1,550 | 1,559 | 1,471 |
+| Root passing tests | 1,540 | 1,549 | 1,461 |
+| Root ignored tests | 2 | 2 | 2 |
+
+- Stage A: 9 additions, 0 removals. Stage B: 7 additions, 95 removals,
+  including those same 9 temporary reconciliation tests. Across the phase:
+  **1,550 + 16 - 95 = 1,471 attributes** and
+  **1,540 + 16 - 95 = 1,461 passing root tests**. The baseline loses 86
+  feature-specific tests; 17 renamed/reworked tests retain preserved behavior and have
+  no count effect. Unrenamed mixed tests were also edited in place. No preserved
+  test file was deleted. The removal exceeds the plan's rough estimate because
+  the existing provider progress, wait scheduling, reporting and flag-conflict
+  regressions also belonged exclusively to the retired path.
+
+| Crate (root totals, integrations included) | Before Stage A | After Stage A | Final passed | Ignored |
+| --- | ---: | ---: | ---: | ---: |
+| harvester_batch | 199 | 208 | 135 | 0 |
+| harvester_core | 677 | 677 | 667 | 0 |
+| harvester_engine | 462 | 462 | 461 | 1 |
+| harvester_io | 135 | 135 | 135 | 0 |
+| harvester_ui_bridge | 33 | 33 | 33 | 0 |
+| openai_provider_kit | 34 | 34 | 30 | 1 |
+| engine_logging | 0 | 0 | 0 | 0 |
+
+Added Stage B regressions (7):
+
+- `dispatch_loop_survives_more_than_ten_thousand_quiet_download_iterations` (`crates/harvester_batch/src/runner/tests.rs`).
+- `cli_with_no_flags_polls_one_cycle_persists_and_exits` (`crates/harvester_batch/tests/result_store_refusal.rs`).
+- `quiet_downloads_can_outlast_the_old_iteration_cap` (`crates/harvester_batch/src/no_progress.rs`).
+- `messages_restart_the_no_progress_deadline` (`crates/harvester_batch/src/no_progress.rs`).
+- `watchdog_fires_only_after_a_full_idle_duration_without_in_flight_work` (`crates/harvester_batch/src/no_progress.rs`).
+- `import_loop_survives_more_than_ten_thousand_quiet_import_iterations` (`crates/harvester_batch/src/import_mode.rs`).
+- `painted_cost_reflects_synchronous_session_usage` (`crates/harvester_batch/src/runner/live_progress.rs`).
+
+Renamed/reworked tests with preserved behavior (17; no count change):
+
+- `deferred_allowance_is_separate_from_clamped_synchronous_budget` → `synchronous_budget_is_clamped_and_zero_dispatches_one_triage_request` (`crates/harvester_core/src/update/model_dispatch_tests.rs`): both clamp limits remain, plus dispatch at the clamped minimum; only the removed deferred allowance assertions are dropped.
+- `deferred_triage_replays_once_and_does_not_block_completed_wave_members` → `in_flight_triage_member_blocks_wave_summaries_until_last_completion` (`crates/harvester_core/src/update/pipeline_run/wave_tests.rs`): a two-member synchronous wave holds summaries until the last triage completion, then emits both requests in that reducer step; only deferred/replay assertions are dropped.
+- `formatter_exact_wide_dashboard_for_provider_wait_replay_complete_and_interrupted` → `formatter_exact_wide_dashboard_for_complete_and_interrupted` (`crates/harvester_batch/src/progress/dashboard.rs`).
+- `formatter_zero_totals_and_stale_provider_counts_never_make_fake_or_overfull_bars` → `formatter_zero_totals_and_overfull_counts_never_make_fake_or_overfull_bars` (`crates/harvester_batch/src/progress/dashboard.rs`).
+- `rearm_transition_cannot_shrink_latched_stage_total` → `settlement_cannot_shrink_latched_stage_total` (`crates/harvester_batch/src/progress/projection.rs`).
+- `rearm_can_replace_pending_urls_without_shrinking_latched_total` → `pending_window_can_shrink_without_shrinking_latched_total` (`crates/harvester_batch/src/progress/projection.rs`).
+- `synchronous_batch_defaults_to_worker_cap_without_deferred_allowance` → `synchronous_batch_defaults_to_worker_cap` (`crates/harvester_batch/src/runner/bootstrap.rs`).
+- `terminal_progress_stays_live_across_collection_passes_and_finishes_once` → `terminal_progress_stays_live_across_stages_and_finishes_once` (`crates/harvester_batch/src/runner/live_progress.rs`).
+- `recurring_cycle_retries_a_failed_article_without_new_jobs` → `later_cycle_retries_a_failed_article_without_new_jobs` (`crates/harvester_batch/src/runner/tests.rs`).
+- `single_shot_cycle_processes_unfinished_work_without_new_jobs` → `default_cycle_processes_unfinished_work_without_new_jobs` (`crates/harvester_batch/src/runner/tests.rs`).
+- `recurring_staggered_downloads_dispatch_triage_and_settle_once` → `synchronous_staggered_downloads_dispatch_triage_and_settle_once` (`crates/harvester_batch/src/runner/tests.rs`).
+- `changed_digest_preserves_pending_scoring_and_deferred_admission` → `changed_digest_preserves_pending_and_scoring_admission` (`crates/harvester_core/src/signal_candidate.rs`).
+- `observation_counts_include_accumulated_rearmed_members` → `observation_counts_include_current_members_after_readmission` (`crates/harvester_core/src/signal_candidate.rs`).
+- `failed_triage_needs_triage_and_deferred_triage_is_in_progress` → `failed_triage_needs_triage_and_active_triage_is_in_progress` (`crates/harvester_core/src/update/tests/unfinished_work_tests.rs`).
+- `rearmed_pending_triage_with_old_snapshot_remains_in_progress` → `admitted_pending_triage_with_old_snapshot_remains_in_progress` (`crates/harvester_core/src/update/tests/unfinished_work_tests.rs`).
+- `admitted_pending_and_deferred_summaries_are_in_progress` → `admitted_pending_and_active_summaries_are_in_progress` (`crates/harvester_core/src/update/tests/unfinished_work_tests.rs`).
+- `deferred_scoring_is_in_progress_under_its_current_key` → `active_scoring_is_in_progress_under_its_current_key` (`crates/harvester_core/src/update/tests/unfinished_work_tests.rs`).
+- The existing shutdown predicate test now drives the real dispatch boundary and checks exit 130; the existing progress flag, formatter, source/model diagnostic and synchronous quota tests remain. Pending/in-flight identity classification, admission snapshots, signal counters, latch totals, rendering and wave overlap remain covered.
+
+Every removed test (95, including the 9 added-then-removed reconciliation tests):
+
+**`crates/harvester_batch/examples/reconcile_support/tests.rs` (9)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `records_already_in_each_store_are_confirmed` | Temporary collected-result reconciliation: records already in each store are confirmed |
+| `apply_appends_missing_records_then_second_check_confirms_exact_frozen_keys_and_provenance` | Temporary collected-result reconciliation: apply appends missing records then second check confirms exact frozen keys and provenance |
+| `invalid_successful_records_are_listed_and_never_appended_even_if_key_is_present` | Temporary collected-result reconciliation: invalid successful records are listed and never appended even if key is present |
+| `read_only_check_leaves_entire_folder_byte_identical_including_torn_tails` | Temporary collected-result reconciliation: read only check leaves entire folder byte identical including torn tails |
+| `read_only_check_neither_migrates_legacy_stores_nor_removes_stale_migrations` | Temporary collected-result reconciliation: read only check neither migrates legacy stores nor removes stale migrations |
+| `created_and_submitted_batches_block_pass_but_failed_and_line_errors_do_not` | Temporary collected-result reconciliation: created and submitted batches block pass but failed and line errors do not |
+| `every_frozen_key_dimension_must_match_exactly_including_model_alias` | Temporary collected-result reconciliation: every frozen key dimension must match exactly including model alias |
+| `apply_refuses_desktop_lock_with_holder_named_and_check_can_read_while_locked` | Temporary collected-result reconciliation: apply refuses desktop lock with holder named and check can read while locked |
+| `missing_or_unreadable_manifest_and_unreadable_store_fail_without_creating_files` | Temporary collected-result reconciliation: missing or unreadable manifest and unreadable store fail without creating files |
+
+**`crates/harvester_batch/src/batch_coordinator.rs` (13)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `fake_transport_batch_drain_reports_the_full_multistage_progress_lifecycle` | Batch API submission, collection and recovery: fake transport batch drain reports the full multistage progress lifecycle |
+| `submit_reserves_attaches_and_defers_the_request` | Batch API submission, collection and recovery: submit reserves attaches and defers the request |
+| `oversized_stage_group_is_chunked_by_line_cap` | Batch API submission, collection and recovery: oversized stage group is chunked by line cap |
+| `submission_budget_stops_new_batches_and_leaves_remainder_deferred` | Batch API submission, collection and recovery: submission budget stops new batches and leaves remainder deferred |
+| `duplicate_custom_id_uploads_once_and_replies_to_every_request` | Batch API submission, collection and recovery: duplicate custom id uploads once and replies to every request |
+| `upload_failure_fails_group_without_manifest_reservation` | Batch API submission, collection and recovery: upload failure fails group without manifest reservation |
+| `create_failure_releases_reservation_and_fails_group` | Batch API submission, collection and recovery: create failure releases reservation and fails group |
+| `stage_partition_submits_one_batch_per_stage` | Batch API submission, collection and recovery: stage partition submits one batch per stage |
+| `reconciliation_paginates_until_reserved_file_is_found` | Batch API submission, collection and recovery: reconciliation paginates until reserved file is found |
+| `cancelled_batch_salvages_paid_output_and_releases_unreturned_requests` | Batch API submission, collection and recovery: cancelled batch salvages paid output and releases unreturned requests |
+| `cancelled_batch_without_output_releases_every_entry` | Batch API submission, collection and recovery: cancelled batch without output releases every entry |
+| `terminal_batch_is_retained_when_the_salvage_download_fails` | Batch API submission, collection and recovery: terminal batch is retained when the salvage download fails |
+| `collected_snapshot_replays_after_restart_until_cache_confirmation` | Batch API submission, collection and recovery: collected snapshot replays after restart until cache confirmation |
+
+**`crates/harvester_batch/src/batch_manifest.rs` (4)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `round_trip_and_reserve_without_attach_are_durable` | Batch API manifest durability and lifecycle: round trip and reserve without attach are durable |
+| `manifest_stage_labels_round_trip_through_typed_stage_keys` | Batch API manifest durability and lifecycle: manifest stage labels round trip through typed stage keys |
+| `corrupt_manifest_fails_closed` | Batch API manifest durability and lifecycle: corrupt manifest fails closed |
+| `failed_and_line_error_batches_are_pruned_without_losing_attempt_count` | Batch API manifest durability and lifecycle: failed and line error batches are pruned without losing attempt count |
+
+**`crates/harvester_batch/src/cli.rs` (6)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `single_shot_flag_is_parsed` | Removed CLI mode/interval flags and their conflicts: single shot flag is parsed |
+| `single_shot_conflicts_with_dry_run` | Removed CLI mode/interval flags and their conflicts: single shot conflicts with dry run |
+| `batch_api_parses_and_conflicts_with_excluded_modes` | Removed CLI mode/interval flags and their conflicts: batch api parses and conflicts with excluded modes |
+| `drain_implies_batch_api_and_conflicts_with_excluded_modes` | Removed CLI mode/interval flags and their conflicts: drain implies batch api and conflicts with excluded modes |
+| `poll_interval_is_clamped` | Removed CLI mode/interval flags and their conflicts: poll interval is clamped |
+| `refresh_stale_summaries_limit_conflicts_with_dry_run` | Removed CLI mode/interval flags and their conflicts: refresh stale summaries limit conflicts with dry run |
+
+**`crates/harvester_batch/src/import_mode.rs` (2)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `import_saved_web_dir_conflicts_with_dry_run` | Import conflicts with removed CLI modes: import saved web dir conflicts with dry run |
+| `import_saved_web_dir_conflicts_with_single_shot` | Import conflicts with removed CLI modes: import saved web dir conflicts with single shot |
+
+**`crates/harvester_batch/src/progress/dashboard.rs` (1)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `formatter_shows_preparing_and_partially_submitted_provider_scopes` | Batch API provider-scope dashboard: formatter shows preparing and partially submitted provider scopes |
+
+**`crates/harvester_batch/src/progress/projection.rs` (7)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `provider_progress_is_provisional_without_replacing_local_denominator` | Batch API provider progress and wait presentation: provider progress is provisional without replacing local denominator |
+| `budget_capped_provider_scope_keeps_unsubmitted_work_visible` | Batch API provider progress and wait presentation: budget capped provider scope keeps unsubmitted work visible |
+| `same_stage_peeks_aggregate_by_typed_stage_after_chunking` | Batch API provider progress and wait presentation: same stage peeks aggregate by typed stage after chunking |
+| `custom_id_text_cannot_change_typed_provider_grouping` | Batch API provider progress and wait presentation: custom id text cannot change typed provider grouping |
+| `provider_lookup_failure_is_indeterminate` | Batch API provider progress and wait presentation: provider lookup failure is indeterminate |
+| `deferred_work_without_peeks_is_preparing_not_zero_request_wait` | Batch API provider progress and wait presentation: deferred work without peeks is preparing not zero request wait |
+| `local_wait_timestamps_keep_fixed_offsets` | Batch API provider progress and wait presentation: local wait timestamps keep fixed offsets |
+
+**`crates/harvester_batch/src/runner/batch_runtime.rs` (3)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `batch_confirmation_reads_new_jsonl_records_for_all_three_kinds` | Batch API collection cache confirmation and replay index: batch confirmation reads new jsonl records for all three kinds |
+| `replay_line_index_is_built_from_filenames_without_reading_contents` | Batch API collection cache confirmation and replay index: replay line index is built from filenames without reading contents |
+| `missing_replay_dir_yields_empty_index` | Batch API collection cache confirmation and replay index: missing replay dir yields empty index |
+
+**`crates/harvester_batch/src/runner/bootstrap.rs` (2)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `batch_api_sets_session_allowance_without_overwriting_sync_budget` | Batch API allowance and collect-only bootstrap: batch api sets session allowance without overwriting sync budget |
+| `drain_bootstrap_disables_unarmed_intake_refreshes` | Batch API allowance and collect-only bootstrap: drain bootstrap disables unarmed intake refreshes |
+
+**`crates/harvester_batch/src/runner/live_progress.rs` (5)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `provider_lookup_failure_retains_last_successful_counts_until_a_successful_retry` | Batch API provider retry/wait scheduling: provider lookup failure retains last successful counts until a successful retry |
+| `provider_wait_uses_second_heartbeats_without_extra_peeks_between_deadlines` | Batch API provider retry/wait scheduling: provider wait uses second heartbeats without extra peeks between deadlines |
+| `provider_wait_shutdown_is_observed_at_the_half_second_local_poll_boundary` | Batch API provider retry/wait scheduling: provider wait shutdown is observed at the half second local poll boundary |
+| `provider_wait_marks_checking_before_a_blocking_peek_and_observes_shutdown_after_it_returns` | Batch API provider retry/wait scheduling: provider wait marks checking before a blocking peek and observes shutdown after it returns |
+| `local_heartbeat_wait_observes_shutdown_within_half_a_second` | Batch API provider retry/wait scheduling: local heartbeat wait observes shutdown within half a second |
+
+**`crates/harvester_batch/src/runner/reporting.rs` (6)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `format_awaiting_batch_line_is_absent_when_nothing_deferred` | Batch API deferred, collection, cost and drain reporting: format awaiting batch line is absent when nothing deferred |
+| `format_awaiting_batch_line_reports_per_stage_and_total_counts` | Batch API deferred, collection, cost and drain reporting: format awaiting batch line reports per stage and total counts |
+| `verbose_wait_timestamp_uses_injected_local_offset` | Batch API deferred, collection, cost and drain reporting: verbose wait timestamp uses injected local offset |
+| `batch_api_final_summary_distinguishes_intake_from_collection_passes_and_cost_scope` | Batch API deferred, collection, cost and drain reporting: batch api final summary distinguishes intake from collection passes and cost scope |
+| `drain_summary_reports_batches_left_pending_for_a_later_run` | Batch API deferred, collection, cost and drain reporting: drain summary reports batches left pending for a later run |
+| `batch_drain_bailout_prints_remaining_stage_counts_without_changing_exit_code` | Batch API deferred, collection, cost and drain reporting: batch drain bailout prints remaining stage counts without changing exit code |
+
+**`crates/harvester_batch/src/runner/tests.rs` (22)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `collect_only_replay_dispatches_and_settles_without_pipeline_advance` | Batch API routing/collection or removed CLI mode control: collect only replay dispatches and settles without pipeline advance |
+| `empty_collect_only_cycle_settles_without_admitting_the_window` | Batch API routing/collection or removed CLI mode control: empty collect only cycle settles without admitting the window |
+| `batch_api_collects_replays_and_releases_summary_waves_once_across_three_cycles` | Batch API routing/collection or removed CLI mode control: batch api collects replays and releases summary waves once across three cycles |
+| `test_dry_run_exits_successfully_without_api_key` | Batch API routing/collection or removed CLI mode control: dry run exits successfully without api key |
+| `dry_run_returns_130_when_shutdown_is_already_requested` | Batch API routing/collection or removed CLI mode control: dry run returns 130 when shutdown is already requested |
+| `test_dry_run_does_not_modify_state_files` | Batch API routing/collection or removed CLI mode control: dry run does not modify state files |
+| `buffered_batch_requests_are_quiescent_but_other_pending_requests_are_not` | Batch API routing/collection or removed CLI mode control: buffered batch requests are quiescent but other pending requests are not |
+| `batch_custom_id_changes_when_model_changes` | Batch API routing/collection or removed CLI mode control: batch custom id changes when model changes |
+| `signal_custom_id_prefix_does_not_control_provider_stage_grouping` | Batch API routing/collection or removed CLI mode control: signal custom id prefix does not control provider stage grouping |
+| `batch_routing_partition_keeps_briefing_synchronous` | Batch API routing/collection or removed CLI mode control: batch routing partition keeps briefing synchronous |
+| `batch_render_failure_replies_failed_exactly_once` | Batch API routing/collection or removed CLI mode control: batch render failure replies failed exactly once |
+| `collected_replay_audit_is_idempotent_and_uses_discounted_cost` | Batch API routing/collection or removed CLI mode control: collected replay audit is idempotent and uses discounted cost |
+| `test_should_stop_after_cycle_for_single_shot` | Batch API routing/collection or removed CLI mode control: should stop after cycle for single shot |
+| `test_should_continue_after_cycle_when_not_single_shot_and_no_shutdown` | Batch API routing/collection or removed CLI mode control: should continue after cycle when not single shot and no shutdown |
+| `drain_makes_the_first_cycle_collect_only_so_no_sources_are_polled` | Batch API routing/collection or removed CLI mode control: drain makes the first cycle collect only so no sources are polled |
+| `batch_api_intake_waits_for_downloads_and_hands_off_once` | Batch API routing/collection or removed CLI mode control: batch api intake waits for downloads and hands off once |
+| `drain_with_restored_startup_work_issues_no_model_request_and_terminates` | Batch API routing/collection or removed CLI mode control: drain with restored startup work issues no model request and terminates |
+| `batch_wait_keeps_waiting_when_all_peeked_batches_are_nonterminal` | Batch API routing/collection or removed CLI mode control: batch wait keeps waiting when all peeked batches are nonterminal |
+| `batch_wait_runs_collect_cycle_when_a_peeked_batch_is_terminal` | Batch API routing/collection or removed CLI mode control: batch wait runs collect cycle when a peeked batch is terminal |
+| `batch_wait_runs_collect_cycle_when_no_batches_can_be_peeked` | Batch API routing/collection or removed CLI mode control: batch wait runs collect cycle when no batches can be peeked |
+| `batch_drain_progress_compares_manifest_and_deferred_work` | Batch API routing/collection or removed CLI mode control: batch drain progress compares manifest and deferred work |
+| `batch_drain_exits_after_second_consecutive_no_progress_cycle` | Batch API routing/collection or removed CLI mode control: batch drain exits after second consecutive no progress cycle |
+
+**`crates/harvester_core/src/pre_triage_coordinator.rs` (1)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `after_downloads_policy_never_uses_max_wait_to_release_a_partial_intake` | Removed wait-for-downloads wave policy: after downloads policy never uses max wait to release a partial intake |
+
+**`crates/harvester_core/src/update/pipeline_run/tests.rs` (1)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `deferred_signal_rearm_starts_a_new_continue_run` | Batch API rearm and Continue lifecycle: deferred signal rearm starts a new continue run |
+
+**`crates/harvester_core/src/update/pipeline_run/wave_tests.rs` (1)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `batch_buffering_keeps_a_single_admission_wave` | Batch API buffering and deferred replay waves: batch buffering keeps a single admission wave |
+
+**`crates/harvester_core/src/update/tests/batch_api_tests.rs` (5)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `deferred_triage_settles_and_rearm_redispatches` | Batch API deferral, collected-result validation and rearm: deferred triage settles and rearm redispatches |
+| `deferred_summary_settles_without_failing_article` | Batch API deferral, collected-result validation and rearm: deferred summary settles without failing article |
+| `collected_successes_insert_frozen_keys_coalesce_persistence_and_do_not_complete_articles` | Batch API deferral, collected-result validation and rearm: collected successes insert frozen keys coalesce persistence and do not complete articles |
+| `collected_line_error_and_invalid_output_do_not_write_cache` | Batch API deferral, collected-result validation and rearm: collected line error and invalid output do not write cache |
+| `collected_summary_rearm_cache_hits_and_runs_post_processing_once` | Batch API deferral, collected-result validation and rearm: collected summary rearm cache hits and runs post processing once |
+
+**`crates/harvester_core/src/update/tests/signal_candidate_tests.rs` (2)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `deferred_only_signal_work_is_settled` | Batch API scoring deferral and collected-result rearm: deferred only signal work is settled |
+| `deferred_signal_round_trip_rearms_directly_and_completes_from_collected_cache` | Batch API scoring deferral and collected-result rearm: deferred signal round trip rearms directly and completes from collected cache |
+
+**`crates/harvester_engine/src/llm/pricing.rs` (1)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `batch_price_is_half_of_standard_without_cached_input_tier` | Batch API discounted pricing: batch price is half of standard without cached input tier |
+
+**`crates/openai_provider_kit/src/batch.rs` (4)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `jsonl_round_trip` | OpenAI Batch API transport and JSONL codecs: jsonl round trip |
+| `completed_batch_parses` | OpenAI Batch API transport and JSONL codecs: completed batch parses |
+| `mixed_output_jsonl_parses` | OpenAI Batch API transport and JSONL codecs: mixed output jsonl parses |
+| `unknown_lifecycle_is_rejected` | OpenAI Batch API transport and JSONL codecs: unknown lifecycle is rejected |
+
 ## Open questions
 
 None open. The two questions from the first draft (going back to an older build after the

@@ -56,10 +56,6 @@ pub(crate) fn handle_signal_candidate_completion(
     };
 
     match result {
-        LlmResultKind::DeferredToBatch => {
-            state.signal_candidate_mut().defer(&url);
-            state.clear_signal_candidate_input_snapshot(&url);
-        }
         LlmResultKind::Success {
             output_json,
             input_tokens,
@@ -217,11 +213,6 @@ fn try_input_key(
     )
 }
 
-pub(super) fn restore_rearmed_snapshot(state: &mut AppState, url: &str) {
-    if let Ok(snapshot) = build_input_snapshot(state, url) {
-        state.set_signal_candidate_input_snapshot(url, snapshot);
-    }
-}
 pub fn handle_cache_loaded(
     state: &mut AppState,
     cache: crate::signal_candidate_cache::SignalCandidateCache,

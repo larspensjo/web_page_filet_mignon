@@ -69,13 +69,7 @@ pub(super) fn handle_articles_loaded(
     state.refresh_selected_preview();
     state.mark_dirty();
     let effects = super::processing::resume(state);
-    if state.pipeline_ready()
-        && state.processing_start.is_none()
-        && state
-            .pipeline_admission
-            .as_ref()
-            .is_some_and(|r| r.scope != crate::PipelineRunScope::Continue)
-    {
+    if state.pipeline_ready() && state.processing_start.is_none() {
         let included = state.pre_triage().resolved_included_articles();
         super::waves::admit_triage(state, included);
     }
@@ -127,7 +121,7 @@ fn schedule_pre_triage_refresh(
     let tick = state.current_tick();
     state
         .pre_triage_coordinator
-        .set_run_wave_policy(state.pipeline_run_armed(), state.pipeline_wave_policy());
+        .set_run_active(state.pipeline_run_armed());
     let result = state
         .pre_triage_coordinator
         .schedule_refresh(ordered_urls, reason, tick);
@@ -161,9 +155,7 @@ pub(super) fn dispatch_pre_triage_if_due(
         return Vec::new();
     }
     let armed = state.pipeline_run_armed();
-    state
-        .pre_triage_coordinator
-        .set_run_wave_policy(armed, state.pipeline_wave_policy());
+    state.pre_triage_coordinator.set_run_active(armed);
     let Some(dispatch) = state
         .pre_triage_coordinator
         .maybe_dispatch(tick, has_in_flight_engine_jobs)
@@ -220,11 +212,6 @@ pub(super) fn start_triage_from_pretriage(state: &mut AppState) -> Vec<Effect> {
 pub(super) fn settle_triage(state: &mut AppState, effects: &mut Vec<Effect>) {
     // Check if all articles are settled (no pending, no in-progress).
     if state.triage().pending_count() == 0 && state.triage().in_progress_count() == 0 {
-        if state.triage().deferred_count() > 0 {
-            state.triage_mut().set_awaiting_batch();
-            state.mark_dirty();
-            return;
-        }
         if state.triage().completed_count() == 0 {
             state
                 .triage_mut()

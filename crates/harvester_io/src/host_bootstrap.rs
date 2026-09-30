@@ -68,27 +68,13 @@ pub fn prepare_desktop_startup_state(
     (state, startup_effects)
 }
 
-/// LLM construction details a host may need in addition to its effect runner.
-///
-/// Batch mode uses these to construct its optional deferred-batch runtime. GUI
-/// hosts only need the runner and quota limits.
-pub struct HostLlmRuntime {
-    pub provider: OpenAiProvider,
-    pub config: LlmConfig,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostAiEnvironment {
     pub api_key: Option<String>,
     pub availability: AiAvailability,
 }
 
-pub type EffectRunnerBuild = (
-    EffectRunner,
-    Option<LlmQuotaLimits>,
-    Option<HostLlmRuntime>,
-    AiAvailability,
-);
+pub type EffectRunnerBuild = (EffectRunner, Option<LlmQuotaLimits>, AiAvailability);
 
 /// Resolve the shared API-key state for every host, preserving each host's
 /// established warning text.
@@ -203,9 +189,8 @@ pub fn build_effect_runner(
     let ai_environment =
         host_ai_environment_from_env(missing_api_key_warning, empty_api_key_warning);
     if let Some(api_key) = ai_environment.api_key {
-        let host_provider = OpenAiProvider::new(api_key);
         let provider: Arc<dyn harvester_engine::llm::provider::LlmProvider> =
-            Arc::new(host_provider.clone());
+            Arc::new(OpenAiProvider::new(api_key));
         let (runner, config) = build_effect_runner_with_provider(
             paths,
             msg_tx,
@@ -217,20 +202,10 @@ pub fn build_effect_runner(
             None,
         );
         let quota_limits = llm_quota_limits_from_engine(&config.quotas);
-        let runtime = HostLlmRuntime {
-            provider: host_provider,
-            config: config.clone(),
-        };
-        Ok((
-            runner,
-            Some(quota_limits),
-            Some(runtime),
-            ai_environment.availability,
-        ))
+        Ok((runner, Some(quota_limits), ai_environment.availability))
     } else {
         Ok((
             EffectRunner::new(paths.clone(), msg_tx, platform_handler, persistence_sink),
-            None,
             None,
             ai_environment.availability,
         ))

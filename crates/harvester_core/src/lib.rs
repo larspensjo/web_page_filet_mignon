@@ -1,6 +1,5 @@
 //! Harvester core: pure state machine and view-model helpers.
 mod archive_display;
-mod batch;
 pub mod blacklist;
 mod briefing;
 pub mod briefing_snapshot;
@@ -32,7 +31,6 @@ mod url_age;
 mod view_model;
 pub mod working_corpus;
 
-pub use batch::{CollectedEntry, CollectedOutcome, FrozenBatchKey, StageKind};
 pub use briefing::{
     format_previous_briefings_block, ArticleSummaryResult, BriefingArticle, BriefingArticleId,
     BriefingHistoryEntry, BriefingHistoryStory, BriefingItem, BriefingPhase, BriefingResult,
@@ -111,7 +109,7 @@ pub use view_model::{
 pub use working_corpus::{CurrentWorkingCorpus, CurrentWorkingCorpusSource};
 
 mod pipeline_waves;
-pub use pipeline_waves::{PipelineRunScope, PipelineWave, PipelineWavePolicy, PipelineWaves};
+pub use pipeline_waves::{PipelineRunScope, PipelineWave, PipelineWaves};
 
 pub mod result_store;
 pub use result_store::{ResultStore, SavedResult};

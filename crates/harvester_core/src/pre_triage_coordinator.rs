@@ -85,12 +85,12 @@ pub(crate) struct PreTriageRefreshCoordinator {
     poll_burst_active: bool,
     poll_sources_ended: bool,
     last_job_done_tick: Option<u64>,
-    run_wave_policy: Option<crate::PipelineWavePolicy>,
+    run_active: bool,
 }
 
 impl PreTriageRefreshCoordinator {
-    pub(crate) fn set_run_wave_policy(&mut self, armed: bool, policy: crate::PipelineWavePolicy) {
-        self.run_wave_policy = armed.then_some(policy);
+    pub(crate) fn set_run_active(&mut self, armed: bool) {
+        self.run_active = armed;
     }
     pub(crate) fn refresh_pending(&self) -> bool {
         self.dirty || self.in_flight_request_id.is_some()
@@ -101,7 +101,7 @@ impl PreTriageRefreshCoordinator {
         self.dirty = false;
         self.pending_ordered_urls.clear();
         self.demand_started_tick = None;
-        self.run_wave_policy = None;
+        self.run_active = false;
     }
 
     pub(crate) fn allocate_request_id(&mut self) -> u64 {
@@ -132,7 +132,7 @@ impl PreTriageRefreshCoordinator {
             poll_burst_active: false,
             poll_sources_ended: false,
             last_job_done_tick: None,
-            run_wave_policy: None,
+            run_active: false,
         }
     }
 
@@ -154,7 +154,7 @@ impl PreTriageRefreshCoordinator {
             return PreTriageRefreshScheduleResult::ImmediateReset;
         }
 
-        let run_active = self.run_wave_policy.is_some();
+        let run_active = self.run_active;
         let quiet_ticks = if self.poll_burst_active || run_active {
             QUIET_TICKS_AFTER_POLL
         } else {
@@ -213,20 +213,12 @@ impl PreTriageRefreshCoordinator {
             .map(|start| current_tick.saturating_sub(start) >= MAX_WAIT_TICKS)
             .unwrap_or(false);
 
-        let overlap = self.run_wave_policy == Some(crate::PipelineWavePolicy::Overlap);
-        let wait_for_downloads =
-            self.run_wave_policy == Some(crate::PipelineWavePolicy::AfterDownloadsSettle);
-        if wait_for_downloads
-            && self.poll_burst_active
-            && (!self.poll_sources_ended || has_in_flight_engine_jobs)
-        {
-            return None;
-        }
+        let overlap = self.run_active;
 
         // During an active poll burst, block dispatch until:
         //   - poll has ended AND no engine jobs are in flight
         //   - OR max-wait is exceeded (starvation guard)
-        if self.poll_burst_active && !max_wait_exceeded && !overlap && !wait_for_downloads {
+        if self.poll_burst_active && !max_wait_exceeded && !overlap {
             if !self.poll_sources_ended {
                 return None;
             }
@@ -235,9 +227,7 @@ impl PreTriageRefreshCoordinator {
             }
         }
 
-        let downloads_settled = (overlap || wait_for_downloads)
-            && self.poll_sources_ended
-            && !has_in_flight_engine_jobs;
+        let downloads_settled = overlap && self.poll_sources_ended && !has_in_flight_engine_jobs;
         if current_tick < self.earliest_dispatch_tick && !max_wait_exceeded && !downloads_settled {
             return None;
         }
@@ -423,24 +413,6 @@ mod tests {
             .maybe_dispatch(QUIET_TICKS_AFTER_POLL, false)
             .expect("should dispatch when poll ended and no engine jobs");
         assert_eq!(dispatch.ordered_urls.len(), 2);
-    }
-
-    #[test]
-    fn after_downloads_policy_never_uses_max_wait_to_release_a_partial_intake() {
-        let mut coord = PreTriageRefreshCoordinator::new();
-        coord.set_run_wave_policy(true, crate::PipelineWavePolicy::AfterDownloadsSettle);
-        coord.note_poll_started();
-        coord.schedule_refresh(urls(2), PreTriageRefreshReason::JobDone, 0);
-
-        assert!(coord.maybe_dispatch(MAX_WAIT_TICKS * 2, true).is_none());
-        coord.note_poll_sources_ended();
-        assert!(coord.maybe_dispatch(MAX_WAIT_TICKS * 3, true).is_none());
-
-        let dispatch = coord
-            .maybe_dispatch(MAX_WAIT_TICKS * 3, false)
-            .expect("settled downloads release the whole intake window");
-        assert_eq!(dispatch.ordered_urls.len(), 2);
-        assert!(coord.maybe_dispatch(MAX_WAIT_TICKS * 4, false).is_none());
     }
 
     #[test]

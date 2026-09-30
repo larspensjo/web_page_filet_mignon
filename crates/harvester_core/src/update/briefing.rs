@@ -286,12 +286,6 @@ pub(super) fn settle_summaries(state: &mut AppState, effects: &mut Vec<Effect>) 
         return;
     }
 
-    if state.briefing().deferred_count() > 0 {
-        state.briefing_mut().set_phase(BriefingPhase::AwaitingBatch);
-        state.mark_dirty();
-        return;
-    }
-
     if state.briefing().completed_summary_count() == 0 {
         state
             .briefing_mut()

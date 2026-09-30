@@ -146,7 +146,7 @@ Describe 'Harvester launch policy' {
 
     It 'returns the batch policy with exactly its fixed runtime arguments' {
         $spec = Get-HarvesterLaunchSpec -Name Batch -RepositoryRoot $script:TestRoot
-        @($spec.RuntimeArguments) | Should -Be @('--single-shot', '--batch-api')
+        @($spec.RuntimeArguments).Count | Should -Be 0
         $spec.Package | Should -Be 'harvester_batch'
         $spec.BinaryName | Should -Be 'harvester_batch.exe'
     }
@@ -260,10 +260,10 @@ Describe 'Harvester launch policy' {
 
     It 'returns an independent copy of the runtime argument policy' {
         $first = Get-HarvesterLaunchSpec -Name Batch -RepositoryRoot $script:TestRoot
-        $first.RuntimeArguments[0] = '--mutated-by-caller'
+        $first.RuntimeArguments = [string[]]@('--mutated-by-caller')
         $second = Get-HarvesterLaunchSpec -Name Batch -RepositoryRoot $script:TestRoot
 
-        @($second.RuntimeArguments) | Should -Be @('--single-shot', '--batch-api')
+        @($second.RuntimeArguments).Count | Should -Be 0
     }
 
     It 'keeps the repository root on the spec as the launch location source of truth' {
@@ -349,7 +349,7 @@ Describe 'Harvester launch policy' {
         @($calls.BuildPackages) | Should -Be @('harvester_batch')
         @($calls.SecretMap.Keys) | Should -Be @('BraveSearchApiKey', 'OpenAIProductionKey')
         @($calls.SecretMap.Values) | Should -Be @('BRAVE_SEARCH_API_KEY', 'OPENAI_API_KEY')
-        @($calls.Arguments) | Should -Be @('--single-shot', '--batch-api')
+        @($calls.Arguments).Count | Should -Be 0
     }
 
     It 'does not select forbidden secrets or inject any other environment variable' {
@@ -475,7 +475,7 @@ Describe 'Harvester launch policy' {
 
         $calls.Executable | Should -Be (Join-Path $script:TestRoot 'target\debug\harvester_batch.exe')
         $calls.Executable | Should -BeOfType [string]
-        @($calls.Arguments).Count | Should -Be 2
+        @($calls.Arguments).Count | Should -Be 0
     }
 
     It 'restores the working directory after a successful launch' {

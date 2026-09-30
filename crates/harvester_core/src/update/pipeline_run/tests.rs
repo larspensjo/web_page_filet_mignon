@@ -258,21 +258,12 @@ fn signal_success(request_id: u64) -> Msg {
     }
 }
 
-fn signal_deferred(request_id: u64) -> Msg {
-    Msg::LlmCompleted {
-        request_id,
-        result: LlmResultKind::DeferredToBatch,
-        metadata: None,
-    }
-}
-
 fn prepare_pipeline(
     download_successes: usize,
     download_failures: usize,
 ) -> (AppState, Vec<LoadedArticle>) {
     let total = download_successes + download_failures;
-    let mut state = tick(add_metadata(AppState::new()), 0);
-    state.set_pipeline_wave_policy(crate::PipelineWavePolicy::AfterDownloadsSettle);
+    let state = tick(add_metadata(AppState::new()), 0);
     let (state, effects) = crate::update::test_support::update(state, Msg::PollSourcesClicked);
     assert_eq!(effects, vec![Effect::PollAllSources]);
     let (state, _) = crate::update::test_support::update(state, Msg::PollStarted { total: 1 });
@@ -627,36 +618,6 @@ fn scoring_stays_active_from_triage_cache_hit_through_the_last_summary_wave() {
         (StageStatus::Done, 2, 2)
     );
     assert!(state.run_progress().unwrap().terminal);
-}
-
-#[test]
-fn deferred_signal_rearm_starts_a_new_continue_run() {
-    let (state, _) = prepare_pipeline(1, 0);
-    let id = triage_request(&state).unwrap();
-    let (state, effects) = crate::update(state, triage_success(id));
-    let id = request_id(&effects, PromptId::ArticleSummary).unwrap();
-    let (state, effects) = crate::update(state, summary_result(id, true));
-    let id = request_id(&effects, PromptId::ArticleSignalCandidate).unwrap();
-    let (state, _) = crate::update(state, signal_deferred(id));
-    let old_run = state.run_progress().unwrap().run_id;
-    assert!(state.run_progress().unwrap().terminal);
-    assert!(state.pipeline_activity().is_settled());
-    let (unarmed, effects) = crate::update(state.clone(), Msg::RearmDeferredBatchStages);
-    assert!(effects.is_empty());
-    assert!(!unarmed.pipeline_run_armed());
-    let (state, _) = crate::update::test_support::update(
-        state,
-        Msg::PipelineRunRequested {
-            scope: crate::PipelineRunScope::Continue,
-        },
-    );
-    let (state, effects) = crate::update(state, Msg::RearmDeferredBatchStages);
-    assert_ne!(state.run_progress().unwrap().run_id, old_run);
-    assert!(request_id(&effects, PromptId::ArticleSignalCandidate).is_some());
-    assert_eq!(
-        state.run_progress().unwrap().stages[PipelineStage::ScoringSignals.index()].status,
-        StageStatus::Active
-    );
 }
 
 #[test]

@@ -387,7 +387,7 @@ impl AppState {
                 .get(&(article.url.as_str(), article.content_hash.as_str()))
                 .is_some_and(|candidate| match &candidate.triage_state {
                     ArticleTriageState::Pending => true,
-                    ArticleTriageState::InProgress { .. } | ArticleTriageState::Deferred => {
+                    ArticleTriageState::InProgress { .. } => {
                         candidate.cache_key_snapshot.as_ref() == Some(&triage_key)
                     }
                     _ => false,
@@ -423,9 +423,7 @@ impl AppState {
                 .get(&(article.url.as_str(), article.content_hash.as_str()))
                 .is_some_and(|(_, candidate_state, cache_key)| match candidate_state {
                     ArticleSummaryState::Pending => true,
-                    ArticleSummaryState::InProgress { .. } | ArticleSummaryState::Deferred => {
-                        *cache_key == Some(&summary_key)
-                    }
+                    ArticleSummaryState::InProgress { .. } => *cache_key == Some(&summary_key),
                     _ => false,
                 });
             return Some(UnfinishedStageVerdicts {
@@ -483,7 +481,6 @@ impl AppState {
                         && matches!(
                             candidate_state,
                             crate::signal_candidate::SignalCandidateState::Scoring { .. }
-                                | crate::signal_candidate::SignalCandidateState::Deferred
                         ))
                 });
         Some(UnfinishedStageVerdicts {

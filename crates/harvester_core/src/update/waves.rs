@@ -9,27 +9,11 @@ fn run_id(state: &AppState) -> u64 {
     state.run_progress().map_or(0, |r| r.run_id)
 }
 
-pub(super) fn release(
-    state: &mut AppState,
-    stage: Stage,
-    members: Vec<Identity>,
-    replay: Option<u64>,
-) {
-    let cap = state
-        .llm_deferred_allowance()
-        .unwrap_or(state.llm_max_in_flight())
-        .max(1)
-        .saturating_mul(4);
-    let cap = if state.llm_deferred_allowance().is_some() {
-        cap.max(members.len())
-    } else {
-        cap
-    };
+pub(super) fn release(state: &mut AppState, stage: Stage, members: Vec<Identity>) {
+    let cap = state.llm_max_in_flight().max(1).saturating_mul(4);
     let id = run_id(state);
     for members in members.chunks(cap) {
-        state
-            .pipeline_waves
-            .push(id, stage, members.to_vec(), replay);
+        state.pipeline_waves.push(id, stage, members.to_vec());
     }
 }
 
@@ -74,7 +58,7 @@ pub(super) fn admit_triage(state: &mut AppState, articles: Vec<LoadedArticle>) {
                 })
         })
         .collect();
-    release(state, Stage::Triaging, members, None);
+    release(state, Stage::Triaging, members);
     admit_summaries(state, ready);
     state.mark_dirty();
 }
@@ -117,10 +101,10 @@ fn summary_articles(state: &AppState, members: &[Identity]) -> Vec<LoadedArticle
 }
 
 pub(super) fn admit_summaries(state: &mut AppState, articles: Vec<LoadedArticle>) {
-    admit_summary_wave(state, articles, None);
+    admit_summary_wave(state, articles);
 }
 
-fn admit_summary_wave(state: &mut AppState, articles: Vec<LoadedArticle>, replay: Option<u64>) {
+fn admit_summary_wave(state: &mut AppState, articles: Vec<LoadedArticle>) {
     if !state.pipeline_ready() {
         return;
     }
@@ -138,7 +122,7 @@ fn admit_summary_wave(state: &mut AppState, articles: Vec<LoadedArticle>, replay
     if !members.is_empty() {
         state.request_summary_preparation();
         state.mark_briefing_metadata_ready();
-        release(state, Stage::Summarizing, members, replay);
+        release(state, Stage::Summarizing, members);
     }
     for url in urls {
         super::signal_candidate::try_enqueue(state, &url);
@@ -166,7 +150,6 @@ pub(super) fn release_ready(state: &mut AppState) {
             continue;
         }
         let members = wave.members.clone();
-        let replay = wave.replay_of;
         let articles = summary_articles(state, &members)
             .into_iter()
             .filter(|a| {
@@ -188,7 +171,7 @@ pub(super) fn release_ready(state: &mut AppState) {
                     .insert(((a.url.clone(), a.content_hash.clone()), key));
             }
         }
-        admit_summary_wave(state, articles, replay);
+        admit_summary_wave(state, articles);
     }
 }
 
@@ -203,7 +186,7 @@ pub(super) fn scoring_admitted(state: &mut AppState, member: Identity, digest: S
         .pipeline_waves
         .scoring_released
         .insert((member.clone(), digest));
-    release(state, Stage::ScoringSignals, vec![member], None);
+    release(state, Stage::ScoringSignals, vec![member]);
     true
 }
 
@@ -223,102 +206,6 @@ pub(super) fn prune(state: &mut AppState, members: HashSet<Identity>) {
     state.briefing_mut().retain_members(&members);
     state.signal_candidate_mut().retain_urls(&urls);
     state.pipeline_waves.retain(&members);
-}
-
-pub(super) fn rearm(state: &mut AppState) {
-    if let Some(run) = state.pipeline_admission.as_mut() {
-        run.awaiting_rearm = false;
-    }
-    let mut groups = Vec::new();
-    for stage in [Stage::Triaging, Stage::Summarizing, Stage::ScoringSignals] {
-        let mut members: Vec<Identity> = match stage {
-            Stage::Triaging => state
-                .triage()
-                .articles()
-                .iter()
-                .filter(|a| matches!(a.triage_state, T::Deferred))
-                .map(|a| (a.url.clone(), a.content_hash.clone()))
-                .collect(),
-            Stage::Summarizing => state
-                .briefing()
-                .articles()
-                .iter()
-                .filter(|a| matches!(a.summary_state, S::Deferred))
-                .map(|a| (a.url.clone(), a.content_hash.clone()))
-                .collect(),
-            _ => state
-                .signal_candidate()
-                .deferred_urls()
-                .into_iter()
-                .filter_map(|url| Some((url.clone(), state.content_hash_for_url(&url)?.to_owned())))
-                .collect(),
-        };
-        members.extend(
-            state.pipeline_waves.pending_replays[stage.index() - 3]
-                .iter()
-                .cloned(),
-        );
-        let mut seen = HashSet::new();
-        members.retain(|m| seen.insert(m.clone()));
-        let mut by_origin = std::collections::BTreeMap::<Option<u64>, Vec<Identity>>::new();
-        for member in members {
-            let original = state
-                .pipeline_waves
-                .waves
-                .iter()
-                .rev()
-                .find(|w| w.stage == stage && w.replay_of.is_none() && w.members.contains(&member))
-                .map(|w| w.number);
-            by_origin.entry(original).or_default().push(member);
-        }
-        for (original, mut members) in by_origin {
-            if let Some(wave) = state
-                .pipeline_waves
-                .waves
-                .iter()
-                .find(|w| Some(w.number) == original)
-            {
-                let positions: std::collections::HashMap<_, _> = wave
-                    .members
-                    .iter()
-                    .enumerate()
-                    .map(|(i, member)| (member, i))
-                    .collect();
-                members.sort_by_key(|member| positions.get(member).copied().unwrap_or(usize::MAX));
-            } else {
-                members.sort();
-            }
-            groups.push((stage, original, members));
-        }
-    }
-    let armed = state.pipeline_run_armed();
-    let scoring = if armed {
-        state.triage_mut().rearm_deferred();
-        state.briefing_mut().rearm_deferred();
-        let scoring = state.signal_candidate().deferred_urls();
-        state.signal_candidate_mut().rearm_deferred();
-        scoring
-    } else {
-        Vec::new()
-    };
-    for (stage, original, members) in groups {
-        if armed {
-            for m in &members {
-                admit_once(state, stage, m);
-            }
-        }
-        if armed {
-            state.pipeline_waves.pending_replays[stage.index() - 3].clear();
-            release(state, stage, members, original);
-        } else {
-            state.pipeline_waves.pending_replays[stage.index() - 3].extend(members);
-        }
-    }
-    for url in scoring {
-        // Restore the same admitted input; configuration completion will supply
-        // snapshots before dispatch if rearm precedes the configuration reply.
-        super::signal_candidate::restore_rearmed_snapshot(state, &url);
-    }
 }
 
 pub(super) fn triage_changed(state: &mut AppState, url: &str, hash: &str) {

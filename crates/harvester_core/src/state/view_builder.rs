@@ -110,7 +110,7 @@ impl AppState {
         let sc = self.signal_candidate();
         let settled = sc.completed_count();
         let scoring = sc.observation_counts();
-        let in_progress = scoring.pending_or_in_flight + scoring.deferred;
+        let in_progress = scoring.pending_or_in_flight;
         let (archive_token_estimate, archive_filtered_count) =
             if matches!(archive_display.coverage(), ArchiveCoverage::LiveComplete)
                 && settled > 0
@@ -599,7 +599,6 @@ impl AppState {
             };
             match state {
                 SignalCandidateState::Pending => continue,
-                SignalCandidateState::Deferred => continue,
                 SignalCandidateState::Scoring { .. } => {
                     rows.push(SignalCandidateRow {
                         job_id,

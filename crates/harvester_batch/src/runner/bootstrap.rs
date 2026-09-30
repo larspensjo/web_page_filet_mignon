@@ -1,10 +1,8 @@
-use super::batch_runtime::BatchRuntime;
 use super::{batch_host_llm_defaults, BATCH_EMPTY_API_KEY_WARNING, BATCH_MISSING_API_KEY_WARNING};
 use crate::cli::Args;
 use engine_logging::engine_info;
 use harvester_core::signal_candidate::DEFAULT_SELECTION_THRESHOLD;
-use harvester_core::{update, AiAvailability, AppState, Effect, Msg, PipelineWavePolicy};
-use harvester_engine::llm::LlmQuotas;
+use harvester_core::{update, AiAvailability, AppState, Effect, Msg};
 use harvester_io::{
     host_bootstrap::{build_effect_runner, hydrate_state_from_disk},
     EffectRunner, NoOpPlatformHandler, PersistenceWorker, RuntimePaths,
@@ -13,21 +11,6 @@ use std::sync::mpsc;
 
 pub(crate) fn apply_model_budget(state: &mut AppState, args: &Args) {
     state.set_llm_max_in_flight(args.llm_concurrency);
-    if args.batch_api_enabled() {
-        let session_limit = LlmQuotas::default()
-            .max_calls_per_session
-            .map(|limit| limit as usize)
-            .unwrap_or(crate::batch_coordinator::MAX_BATCH_LINES);
-        state.set_llm_deferred_allowance(session_limit);
-    }
-    let wave_policy = if args.drain {
-        PipelineWavePolicy::Disabled
-    } else if args.batch_api_enabled() {
-        PipelineWavePolicy::AfterDownloadsSettle
-    } else {
-        PipelineWavePolicy::Overlap
-    };
-    state.set_pipeline_wave_policy(wave_policy);
 }
 
 pub(crate) fn apply_signal_candidate_selection_settings(state: &mut AppState, args: &Args) {
@@ -45,7 +28,7 @@ pub(crate) fn prepare_runtime(
     paths: &RuntimePaths,
     args: &Args,
     msg_tx: mpsc::Sender<Msg>,
-) -> Result<(AppState, EffectRunner, Option<BatchRuntime>), String> {
+) -> Result<(AppState, EffectRunner), String> {
     // Hydrate state
     engine_info!("[batch] Hydrating state from disk");
     let (mut state, startup_effects) = hydrate_batch_state(paths, args);
@@ -58,7 +41,7 @@ pub(crate) fn prepare_runtime(
     engine_info!("[batch] Building EffectRunner");
     let platform_handler = Box::new(NoOpPlatformHandler);
     let defaults = batch_host_llm_defaults();
-    let (effect_runner, _, runtime, availability) = build_effect_runner(
+    let (effect_runner, _, availability) = build_effect_runner(
         paths,
         msg_tx,
         args.llm_concurrency,
@@ -72,19 +55,11 @@ pub(crate) fn prepare_runtime(
         Some(BATCH_EMPTY_API_KEY_WARNING),
     )?;
     state = apply_llm_availability(state, availability);
-    let batch_runtime = if args.batch_api_enabled() && state.result_store_failure().is_none() {
-        match runtime {
-            Some(runtime) => Some(BatchRuntime::new(runtime.provider, runtime.config, paths)?),
-            None => None,
-        }
-    } else {
-        None
-    };
     if !startup_effects.is_empty() {
         effect_runner.enqueue(startup_effects);
     }
 
-    Ok((state, effect_runner, batch_runtime))
+    Ok((state, effect_runner))
 }
 
 pub(crate) fn hydrate_batch_state(paths: &RuntimePaths, args: &Args) -> (AppState, Vec<Effect>) {
@@ -99,25 +74,7 @@ mod model_budget_tests {
     use super::*;
 
     #[test]
-    fn batch_api_sets_session_allowance_without_overwriting_sync_budget() {
-        let args = Args::parse_from(&["harvester_batch", "--batch-api", "--llm-concurrency", "2"]);
-        let mut state = AppState::new();
-        apply_model_budget(&mut state, &args);
-        assert_eq!(state.llm_max_in_flight(), 2);
-        assert_eq!(
-            state.pipeline_wave_policy(),
-            PipelineWavePolicy::AfterDownloadsSettle
-        );
-        assert_eq!(
-            state.llm_deferred_allowance(),
-            LlmQuotas::default()
-                .max_calls_per_session
-                .map(|n| n as usize)
-        );
-    }
-
-    #[test]
-    fn synchronous_batch_defaults_to_worker_cap_without_deferred_allowance() {
+    fn synchronous_batch_defaults_to_worker_cap() {
         let args = Args::parse_from(&["harvester_batch"]);
         let mut state = AppState::new();
         apply_model_budget(&mut state, &args);
@@ -125,16 +82,6 @@ mod model_budget_tests {
             state.llm_max_in_flight(),
             harvester_engine::llm::MAX_LLM_CONCURRENT_REQUESTS
         );
-        assert_eq!(state.llm_deferred_allowance(), None);
-        assert_eq!(state.pipeline_wave_policy(), PipelineWavePolicy::Overlap);
-    }
-
-    #[test]
-    fn drain_bootstrap_disables_unarmed_intake_refreshes() {
-        let args = Args::parse_from(&["harvester_batch", "--drain"]);
-        let mut state = AppState::new();
-        apply_model_budget(&mut state, &args);
-        assert_eq!(state.pipeline_wave_policy(), PipelineWavePolicy::Disabled);
     }
 
     #[test]

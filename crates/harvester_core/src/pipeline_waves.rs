@@ -5,19 +5,6 @@ use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 pub enum PipelineRunScope {
     Full,
     Resume,
-    Continue,
-}
-
-/// Host-selected timing for releasing intake articles to triage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum PipelineWavePolicy {
-    /// Release incremental windows while downloads are still running.
-    #[default]
-    Overlap,
-    /// Keep the intake window together until polling and downloads settle.
-    AfterDownloadsSettle,
-    /// Do not schedule intake work without an explicit run request.
-    Disabled,
 }
 
 pub(crate) type Identity = (String, String);
@@ -28,7 +15,6 @@ pub struct PipelineWave {
     pub run_id: u64,
     pub stage: crate::PipelineStage,
     pub members: Vec<Identity>,
-    pub replay_of: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -36,7 +22,6 @@ pub struct PipelineWaves {
     pub(crate) waves: Vec<PipelineWave>,
     pub(crate) summary_released: HashSet<(Identity, crate::TriageCacheKey)>,
     pub(crate) scoring_released: HashSet<(Identity, String)>,
-    pub(crate) pending_replays: [HashSet<Identity>; 3],
     pub(crate) pending: [VecDeque<Identity>; 3],
     pub(crate) triage_wave: HashMap<Identity, usize>,
     pub(crate) changed_triage_waves: BTreeSet<usize>,
@@ -52,7 +37,6 @@ impl PipelineWaves {
         run_id: u64,
         stage: crate::PipelineStage,
         members: Vec<Identity>,
-        replay_of: Option<u64>,
     ) {
         if members.is_empty() {
             return;
@@ -67,19 +51,17 @@ impl PipelineWaves {
             self.changed_triage_waves.insert(index);
         }
         engine_logging::engine_info!(
-            "[pipeline-wave] run_id={} stage={:?} wave={} released={} replay={:?}",
+            "[pipeline-wave] run_id={} stage={:?} wave={} released={}",
             run_id,
             stage,
             number,
-            members.len(),
-            replay_of
+            members.len()
         );
         self.waves.push(PipelineWave {
             number,
             run_id,
             stage,
             members,
-            replay_of,
         });
     }
 
@@ -89,9 +71,6 @@ impl PipelineWaves {
         }
         self.summary_released.retain(|(m, _)| members.contains(m));
         self.scoring_released.retain(|(m, _)| members.contains(m));
-        for pending in &mut self.pending_replays {
-            pending.retain(|m| members.contains(m));
-        }
         for pending in &mut self.pending {
             pending.retain(|m| members.contains(m));
         }
@@ -109,7 +88,6 @@ pub(crate) struct PipelineAdmission {
     pub intake_open: bool,
     pub fresh_load: bool,
     pub initial_admitted: bool,
-    pub awaiting_rearm: bool,
     pub admitted: [HashSet<Identity>; 3],
     pub previous_window: HashSet<Identity>,
     pub reprocess_notice: Option<(usize, u64)>,
@@ -125,10 +103,9 @@ impl PipelineAdmission {
             scope,
             armed,
             configured: false,
-            intake_open: scope != PipelineRunScope::Continue,
-            fresh_load: scope != PipelineRunScope::Continue,
+            intake_open: true,
+            fresh_load: true,
             initial_admitted: false,
-            awaiting_rearm: scope == PipelineRunScope::Continue,
             admitted: Default::default(),
             previous_window,
             reprocess_notice: None,

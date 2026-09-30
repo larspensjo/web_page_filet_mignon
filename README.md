@@ -62,11 +62,15 @@ Run the Tauri desktop UI:
 .\scripts\Start-HarvesterUi.ps1
 ```
 
-Launch the batch workflow:
+Launch one command-line cycle (poll, download, synchronous processing, then exit):
 
 ```powershell
 .\scripts\Start-HarvesterBatch.ps1
 ```
+
+The Batch launcher supplies no runtime arguments. External scheduling starts a
+new process for each cycle. Browser-page import and checkpoint editing remain
+available through the command-line options; see `harvester_batch --help`.
 
 The launchers are interactive because they never add vault secrets to the
 environment of a process an LLM coding agent controls or can spawn: harvested

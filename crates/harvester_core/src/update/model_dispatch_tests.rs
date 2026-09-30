@@ -148,6 +148,24 @@ fn score_result() -> SignalCandidateResult {
 }
 
 #[test]
+fn synchronous_budget_is_clamped_and_zero_dispatches_one_triage_request() {
+    let mut state = state_with_work(&["one", "two", "three", "four"], &[], &[]);
+    state.set_llm_max_in_flight(usize::MAX);
+    assert_eq!(
+        state.llm_max_in_flight(),
+        harvester_engine::llm::MAX_LLM_CONCURRENT_REQUESTS
+    );
+    state.set_llm_max_in_flight(0);
+    assert_eq!(state.llm_max_in_flight(), 1);
+    let (state, effects) = crate::update(state, Msg::NoOp);
+    let emitted = requests(&effects);
+    assert_eq!(emitted.len(), 1);
+    assert_eq!(emitted[0].1, PromptId::ArticleTriage);
+    assert_eq!(state.triage().pending_count(), 3);
+    assert_eq!(state.article_model_requests_in_flight(), 1);
+}
+
+#[test]
 fn shared_budget_dispatches_scoring_summary_triage_and_never_exceeds_three() {
     let mut state = state_with_work(&["triage-z", "triage-a"], &["summary"], &["score"]);
     state.set_llm_max_in_flight(3);
@@ -470,21 +488,4 @@ fn existing_three_rate_limit_threshold_halts_all_stages() {
     assert_eq!(state.triage().pending_count(), 0);
     assert_eq!(state.briefing().pending_count(), 0);
     assert_eq!(state.signal_candidate().in_flight_count(), 0);
-}
-
-#[test]
-fn deferred_allowance_is_separate_from_clamped_synchronous_budget() {
-    let mut state = state_with_work(&["a", "b", "c", "d"], &[], &[]);
-    state.set_llm_max_in_flight(usize::MAX);
-    assert_eq!(
-        state.llm_max_in_flight(),
-        harvester_engine::llm::MAX_LLM_CONCURRENT_REQUESTS
-    );
-    state.set_llm_max_in_flight(0);
-    state.set_llm_deferred_allowance(4);
-    assert_eq!(state.llm_max_in_flight(), 1);
-    assert_eq!(state.llm_deferred_allowance(), Some(4));
-    let (state, effects) = crate::update(state, Msg::NoOp);
-    assert_eq!(requests(&effects).len(), 4);
-    assert_eq!(state.article_model_requests_in_flight(), 4);
 }

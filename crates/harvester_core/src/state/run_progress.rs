@@ -9,14 +9,6 @@ pub(crate) struct PollPipelineJobSnapshot {
 }
 
 impl AppState {
-    pub fn set_pipeline_wave_policy(&mut self, policy: crate::PipelineWavePolicy) {
-        self.pipeline_wave_policy = policy;
-    }
-
-    pub fn pipeline_wave_policy(&self) -> crate::PipelineWavePolicy {
-        self.pipeline_wave_policy
-    }
-
     pub fn pipeline_waves(&self) -> &crate::PipelineWaves {
         &self.pipeline_waves
     }
@@ -106,6 +98,21 @@ impl AppState {
             briefing_active: usize::from(self.briefing.is_active()),
             import_in_flight: usize::from(batch.import_in_flight),
         }
+    }
+
+    /// Outstanding side effects, excluding admitted work that has yet to dispatch.
+    /// Hosts use this to distinguish quiet operations from stalled orchestration.
+    pub fn pipeline_has_in_flight_work(&self) -> bool {
+        self.source_states.is_poll_in_progress()
+            || self.jobs.values().any(|job| job.outcome.is_none())
+            || self.import_session.phase == crate::ImportPhase::Importing
+            || self.triage_in_flight_request_id().is_some()
+            || self
+                .processing_start
+                .as_ref()
+                .is_some_and(|start| start.configuration_request.is_some())
+            || self.pending_llm_request_ids().next().is_some()
+            || matches!(self.briefing.phase(), crate::BriefingPhase::LoadingArticles)
     }
 
     pub(crate) fn run_progress_mut(&mut self) -> Option<&mut RunProgress> {

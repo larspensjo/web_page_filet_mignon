@@ -218,10 +218,6 @@ pub struct BatchObservation {
     pub summary_completed: usize,
     /// Articles that failed summary generation.
     pub summary_failed: usize,
-    /// Articles deferred to a pending Batch API job for triage.
-    pub triage_deferred: usize,
-    /// Articles deferred to a pending Batch API job for summaries.
-    pub summary_deferred: usize,
     /// Total signal-candidate URLs in the current observation epoch.
     pub signal_total: usize,
     /// Signal-candidate URLs awaiting or actively undergoing scoring.
@@ -230,8 +226,6 @@ pub struct BatchObservation {
     pub signal_completed: usize,
     /// Signal-candidate URLs with failed scoring.
     pub signal_failed: usize,
-    /// Signal-candidate URLs deferred to a pending Batch API job.
-    pub signal_deferred: usize,
     /// Triage cache hits during the latest triage cache run.
     pub triage_cache_hits: usize,
     /// Triage cache misses during the latest triage cache run.
@@ -349,8 +343,6 @@ pub struct AppState {
     triage_cache_run_start_logged: bool,
     briefing_orchestration: BriefingOrchestration,
     llm_max_in_flight: usize,
-    llm_deferred_allowance: Option<usize>,
-    pipeline_wave_policy: crate::PipelineWavePolicy,
     model_dispatch_halt_reason: Option<llm::ModelDispatchHalt>,
     /// Session-scoped per-model token usage. Only CacheStatus::Miss runs are counted.
     llm_usage_by_model: BTreeMap<String, (u64, u64)>,
@@ -469,8 +461,6 @@ impl Default for AppState {
             triage_cache_run_start_logged: false,
             briefing_orchestration: BriefingOrchestration::default(),
             llm_max_in_flight: 1,
-            llm_deferred_allowance: None,
-            pipeline_wave_policy: crate::PipelineWavePolicy::default(),
             model_dispatch_halt_reason: None,
             llm_usage_by_model: BTreeMap::new(),
             llm_quota: crate::LlmQuotaState::default(),
@@ -545,9 +535,6 @@ pub type LlmResultIndex = BTreeMap<u64, LlmRequestState>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LlmRequestState {
     Pending {
-        prompt_id: PromptId,
-    },
-    Deferred {
         prompt_id: PromptId,
     },
     Completed {

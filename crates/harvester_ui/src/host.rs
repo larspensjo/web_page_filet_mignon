@@ -767,7 +767,7 @@ fn prepare_state(
         session_id_prefix: "session-",
     };
     let llm_concurrency = llm_max_concurrency_requests_from_env();
-    let (runner, limits, _, availability) = build_effect_runner(
+    let (runner, limits, availability) = build_effect_runner(
         paths,
         sender.clone(),
         llm_concurrency,
