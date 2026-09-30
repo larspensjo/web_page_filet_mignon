@@ -339,7 +339,8 @@ fn run_dispatch_loop_with_sink_inner(
                     if should_log_batch_msg(&msg) {
                         engine_debug!("[batch] Processing message: {}", summarize_batch_msg(&msg));
                     }
-                    let (new_state, effects) = reduce_timed(state, msg, reducer_observer);
+                    let (new_state, effects) =
+                        reduce_timed_owned(std::mem::take(state), msg, reducer_observer);
                     *state = new_state;
                     queued_effects.extend(effects);
                     if let Some(p) = progress.as_deref_mut() {
@@ -383,7 +384,8 @@ fn run_dispatch_loop_with_sink_inner(
             && last_tick.elapsed() >= options.tick_interval
         {
             let tick_msg = Msg::tick_at(Utc::now());
-            let (new_state, tick_effects) = reduce_timed(state, tick_msg, reducer_observer);
+            let (new_state, tick_effects) =
+                reduce_timed_owned(std::mem::take(state), tick_msg, reducer_observer);
             *state = new_state;
             queued_effects.extend(tick_effects);
             last_tick = Instant::now();
@@ -460,17 +462,6 @@ fn run_dispatch_loop_with_sink_inner(
             return Ok(classify_cycle_outcome(&obs));
         }
     }
-}
-
-fn reduce_timed(
-    state: &mut AppState,
-    message: Msg,
-    observer: &mut dyn FnMut(&str, Duration),
-) -> (AppState, Vec<harvester_core::Effect>) {
-    let clone_started = Instant::now();
-    let owned = state.clone();
-    observer("AppStateClone", clone_started.elapsed());
-    reduce_timed_owned(owned, message, observer)
 }
 
 fn reduce_timed_owned(

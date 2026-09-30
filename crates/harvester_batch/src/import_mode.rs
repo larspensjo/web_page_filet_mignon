@@ -62,7 +62,7 @@ pub(crate) fn run_import_mode(
 
     let platform_handler = Box::new(NoOpPlatformHandler);
     let defaults = batch_host_llm_defaults();
-    let (effect_runner, _, runtime) = build_effect_runner(
+    let (effect_runner, _, _runtime, availability) = build_effect_runner(
         paths,
         msg_tx.clone(),
         args.llm_concurrency,
@@ -75,7 +75,7 @@ pub(crate) fn run_import_mode(
         BATCH_MISSING_API_KEY_WARNING,
         Some(BATCH_EMPTY_API_KEY_WARNING),
     )?;
-    state = crate::runner::apply_llm_availability(state, runtime.is_some());
+    state = crate::runner::apply_llm_availability(state, availability);
 
     // Hydrate prompt/template metadata needed for downstream work.
     effect_runner.enqueue(vec![harvester_core::Effect::LoadPromptTemplateFiles]);
@@ -240,7 +240,7 @@ fn run_import_dispatch_loop(
                     if should_log_batch_msg(&msg) {
                         engine_debug!("[import] Processing message: {}", summarize_batch_msg(&msg));
                     }
-                    let (new_state, effects) = update(state.clone(), msg);
+                    let (new_state, effects) = update(std::mem::take(state), msg);
                     *state = new_state;
                     queued_effects.extend(effects);
                     if last_progress_render.elapsed() >= Duration::from_millis(250) {
@@ -291,7 +291,7 @@ fn run_import_dispatch_loop(
             || state.pipeline_activity().intake_refresh_pending)
             && last_tick.elapsed() >= options.tick_interval
         {
-            let (new_state, tick_effects) = update(state.clone(), Msg::tick_at(Utc::now()));
+            let (new_state, tick_effects) = update(std::mem::take(state), Msg::tick_at(Utc::now()));
             *state = new_state;
             if !tick_effects.is_empty() {
                 effect_runner.enqueue(tick_effects);

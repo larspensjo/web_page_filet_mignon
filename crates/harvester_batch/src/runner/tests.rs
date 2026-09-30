@@ -169,7 +169,6 @@ fn create_test_args(dry_run: bool, temp_dir: &TempDir) -> Args {
         verbose_progress: false,
         ascii_progress: false,
         single_shot: false,
-        allow_unsupported_sources: false,
         llm_concurrency: 1,
         poll_interval: 1,
         force_unlock: false,
@@ -1948,7 +1947,12 @@ fn keyless_full_dispatch_loop_polls_and_settles_on_each_cycle() {
         Box::new(NoOpRuntimePersistenceSink),
     );
     let shutdown_flag = Arc::new(AtomicBool::new(false));
-    let mut state = apply_llm_availability(AppState::new(), false);
+    let mut state = apply_llm_availability(
+        AppState::new(),
+        harvester_core::AiAvailability::Unavailable {
+            reason: harvester_core::AiUnavailableReason::MissingApiKey,
+        },
+    );
 
     for cycle in 1..=2 {
         msg_tx
@@ -2195,6 +2199,20 @@ fn make_checkpoint_test_paths(temp_dir: &TempDir) -> RuntimePaths {
         temp_dir.path().join("contexts"),
         temp_dir.path().join("prompts"),
     )
+}
+
+#[test]
+fn cycle_persistence_clears_consumed_pending_intake() {
+    let temp_dir = TempDir::new().unwrap();
+    let paths = make_checkpoint_test_paths(&temp_dir);
+    let stale = vec!["https://example.invalid/stale".to_string()];
+    for with_observer in [false, true] {
+        harvester_io::try_persist_runtime_state_with_pending(&paths.state_path, &[], &stale)
+            .expect("seed pending intake");
+        let observer: harvester_io::FileWriteObserver = std::sync::Arc::new(|_, _, _| {});
+        persist_cycle_state(&paths, &AppState::new(), with_observer.then_some(&observer));
+        assert!(harvester_io::load_pending_intake(&paths.state_path).is_empty());
+    }
 }
 
 #[test]

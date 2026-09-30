@@ -24,6 +24,11 @@ impl OpenAiProvider {
         let api_key = env::var("OPENAI_API_KEY").map_err(|err| LlmError::Configuration {
             detail: format!("OPENAI_API_KEY missing: {err}"),
         })?;
+        if api_key.trim().is_empty() {
+            return Err(LlmError::Configuration {
+                detail: "OPENAI_API_KEY is empty".to_string(),
+            });
+        }
         Ok(Self::new(api_key))
     }
 

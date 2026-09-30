@@ -25,7 +25,6 @@ pub fn format_poll_stats_with_warning(
         (SourceKind::Brave, "Brave"),
         (SourceKind::File, "File"),
         (SourceKind::Curated, "Curated"),
-        (SourceKind::Script, "Script"),
     ];
 
     let mut sections: Vec<String> = Vec::new();

@@ -246,12 +246,7 @@ pub fn run_benchmark(options: HarnessOptions) -> Result<BenchmarkReport, String>
     let _lock_guard = if options.host == BenchmarkHost::Batch {
         Some(harvester_io::acquire_lock(
             &paths.output_dir,
-            harvester_io::LockIdentity {
-                filename: ".harvester_batch.lock",
-                log_tag: "[batch-lock]",
-                actor_description: "batch run",
-                force_unlock_hint: Some("Use --force-unlock to override."),
-            },
+            harvester_io::COMMAND_LINE_LOCK_IDENTITY,
             false,
         )?)
     } else {
@@ -1025,6 +1020,12 @@ fn hold_back_newest(paths: &RuntimePaths, count: usize) -> Result<Vec<HeldArticl
             .then_with(|| left.path.cmp(&right.path))
     });
     article_files.truncate(count);
+    if !article_files.is_empty() {
+        // Held articles retain their fetch times; the copy must let them
+        // through the archive window even when the source has a newer checkpoint.
+        harvester_io::save_briefing_checkpoint(&paths.briefing_checkpoint_path, None)
+            .map_err(|error| format!("clear benchmark-copy briefing checkpoint: {error}"))?;
+    }
     let selected_urls: HashSet<_> = article_files
         .iter()
         .map(|article| normalize_url_for_dedupe(&article.url))

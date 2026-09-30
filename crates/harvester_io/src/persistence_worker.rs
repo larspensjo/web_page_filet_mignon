@@ -159,9 +159,11 @@ fn run_worker(
             continue;
         };
         let state_write_started = Instant::now();
-        if let Err(error) =
-            crate::try_persist_runtime_state(&state_path, &pending.snapshot.completed)
-        {
+        if let Err(error) = crate::try_persist_runtime_state_with_pending(
+            &state_path,
+            &pending.snapshot.completed,
+            &pending.snapshot.pending_intake,
+        ) {
             engine_warn!(
                 "[persist] failed to save runtime state {}: {}",
                 state_path.display(),
@@ -338,6 +340,7 @@ mod tests {
         }
         let snapshot = PersistenceSnapshot {
             completed: vec![],
+            pending_intake: vec![],
             blacklist,
         };
         worker.enqueue(snapshot);

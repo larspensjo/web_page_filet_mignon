@@ -308,8 +308,20 @@ unfinished count. A host prints the reducer-recorded notice after initial admiss
   `EffectRunner` owns an injected runtime-persistence sink, so the same effect
   boundary services both hosts while write-free modes can choose a no-op sink.
   `harvester_io::host_bootstrap` is the shared home for executable-host startup
-  and state hydration. `harvester_io::run_lock` provides the parameterized
-  single-instance lock shared by the batch and GUI hosts.
+  and state hydration, including the shared environment check for AI
+  availability. `harvester_io::run_lock` uses one `.harvester.lock` per output
+  folder across the command-line host, desktop host, and IPC probe. Lock
+  metadata identifies the holder, and a competing start reports its host, PID,
+  and start time. `source_loader` reads the registry entry by entry: unknown or
+  removed source types are skipped with a warning that identifies their
+  registry path, position and readable id, while valid entries load with existing validation.
+  File and CuratedList remain supported source types.
+  Runtime persistence includes reducer-owned pending intake. A poll completing
+  after Stop and downloads cancelled before starting are saved for the next
+  Full run, which ingests them before polling. A pending URL with a successful
+  or non-cancelled failed job is discarded; only URLs with no job or solely
+  cancelled jobs are released from URL deduplication. Resume processes unfinished
+  window work without fetching pending-intake URLs.
 - **harvester_ui_bridge:** Tauri-free IPC projection, intent decoding, asset
   confinement, and the core-thread boundary for the desktop host. Its snapshot
   projection carries only rows the page can render; the driver does not capture

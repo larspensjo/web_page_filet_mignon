@@ -8,7 +8,32 @@ use harvester_io::{
     persist_brave_seen_set, persist_seen_set,
 };
 use replay_support::{run_benchmark, BenchmarkHost, HarnessOptions};
+use std::collections::BTreeMap;
 use std::fs;
+use std::path::{Path, PathBuf};
+
+fn snapshot_tree(root: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    fn visit(root: &Path, current: &Path, files: &mut BTreeMap<PathBuf, Vec<u8>>) {
+        for entry in fs::read_dir(current).expect("read snapshot directory") {
+            let entry = entry.expect("read snapshot entry");
+            let path = entry.path();
+            if entry.file_type().expect("inspect snapshot entry").is_dir() {
+                visit(root, &path, files);
+            } else {
+                files.insert(
+                    path.strip_prefix(root)
+                        .expect("path is under snapshot root")
+                        .to_path_buf(),
+                    fs::read(path).expect("read snapshot file"),
+                );
+            }
+        }
+    }
+
+    let mut files = BTreeMap::new();
+    visit(root, root, &mut files);
+    files
+}
 
 #[test]
 fn replay_harness_completes_five_articles_and_saves_results() {
@@ -120,6 +145,41 @@ fn replay_harness_completes_five_articles_and_saves_results() {
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(priorities, (1..=5).collect());
     assert!(report.report_path.is_file());
+
+    // Treat the completed benchmark copy as a source folder. It already has
+    // paid result stores and completed-job records for every article, but the
+    // held-back articles must still generate model calls in the next copy.
+    harvester_io::save_briefing_checkpoint(
+        &work.join(".briefing_checkpoint.ron"),
+        Some("2027-01-01T00:00:00Z"),
+    )
+    .expect("set source checkpoint later than held articles");
+    let work_before_rerun = snapshot_tree(&work);
+    let rerun_work = temp.path().join("rerun-work");
+    let rerun = run_benchmark(HarnessOptions {
+        source_dir: work.clone(),
+        work_dir: rerun_work,
+        hold_back: 5,
+        reuse_copy: false,
+        host: BenchmarkHost::Batch,
+        llm_latency_ms: 0,
+    })
+    .expect("held articles should be reprocessed from a current source folder");
+    assert!(rerun.completed);
+    assert!(
+        rerun
+            .effects_by_kind
+            .get("RequestLlmCompletion")
+            .copied()
+            .unwrap_or(0)
+            >= 5,
+        "held articles should trigger model calls despite source-folder results"
+    );
+    assert_eq!(
+        snapshot_tree(&work),
+        work_before_rerun,
+        "source tree is read-only"
+    );
 
     let desktop_work = temp.path().join("desktop-work");
     let desktop = run_benchmark(HarnessOptions {

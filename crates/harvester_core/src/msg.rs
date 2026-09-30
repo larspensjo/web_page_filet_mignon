@@ -31,6 +31,8 @@ pub enum Msg {
     UrlsSubmitted,
     /// Restore previously completed jobs from persisted state.
     RestoreCompletedJobs(Vec<crate::CompletedJobSnapshot>),
+    /// Restore URLs whose intake must be retried by the next Full run.
+    RestorePendingIntake(Vec<String>),
     /// App-loop boundary action: evaluate pre-triage refresh demand with a
     /// single snapshot of currently completed URLs.
     EvaluatePreTriageRefresh {
@@ -334,6 +336,7 @@ impl Msg {
             Self::StartupHydrationRequested => "StartupHydrationRequested",
             Self::UrlsSubmitted => "UrlsSubmitted",
             Self::RestoreCompletedJobs(..) => "RestoreCompletedJobs",
+            Self::RestorePendingIntake(..) => "RestorePendingIntake",
             Self::EvaluatePreTriageRefresh { .. } => "EvaluatePreTriageRefresh",
             Self::StopFinishClicked => "StopFinishClicked",
             Self::ArchiveClicked => "ArchiveClicked",

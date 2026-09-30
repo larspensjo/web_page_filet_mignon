@@ -27,6 +27,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
     let run_was_active = state.run_progress_is_active();
     let stop_requested = matches!(&msg, Msg::StopFinishClicked)
         && state.stop_finish_button_state().policy().is_some();
+    let pending_before_stop = stop_requested.then(|| state.pending_intake_urls().len());
     let progress_before = pipeline_run::progress_before(&state, &msg);
     let unfinished_revisions = state.unfinished_revisions();
     let completed_identity = match &msg {
@@ -65,7 +66,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 | harvester_engine::FetchOutcomeClass::Success,
             ..
         }
-    );
+    ) || (matches!(&msg, Msg::SourcePollCompleted { .. })
+        && !state.pipeline_intake_open());
     let mut effects = match msg {
         Msg::ValidatedResultReceived { record } => {
             match *record {
@@ -164,6 +166,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 extracted_links,
                 fetched_utc,
             );
+            if successful {
+                if let Some(url) = state.job_url(job_id).map(str::to_owned) {
+                    state.remove_pending_intake_url(&url);
+                }
+            }
             if (!stopped_drain
                 && state.pipeline_wave_policy() != crate::PipelineWavePolicy::Disabled)
                 || (stopped_drain && successful)
@@ -264,6 +271,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             if state.pipeline_wave_policy() != crate::PipelineWavePolicy::Disabled {
                 state.request_pre_triage_refresh_evaluation(false);
             }
+            Vec::new()
+        }
+        Msg::RestorePendingIntake(urls) => {
+            state.restore_pending_intake(urls);
             Vec::new()
         }
         Msg::EvaluatePreTriageRefresh {
@@ -684,7 +695,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
     if stop_requested || (run_was_active && !state.run_progress_is_active()) {
         effects.push(Effect::FlushResults);
     }
-    if persist_runtime_state {
+    if persist_runtime_state
+        || pending_before_stop.is_some_and(|before| state.pending_intake_urls().len() != before)
+    {
         effects.push(Effect::PersistRuntimeState {
             snapshot: crate::PersistenceSnapshot::capture(&state),
         });

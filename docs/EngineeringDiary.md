@@ -2577,3 +2577,43 @@ with only that import's results.
 Refs: crates/harvester_io/src/result_store/tests.rs,
 crates/harvester_io/src/result_sink.rs,
 crates/harvester_batch/tests/result_store_refusal.rs
+
+## 2026-09-29 - Poll limits leave un-emitted entries unseen
+Type: Bug Fix
+Context: RSS and Brave applied their per-poll caps after marking every newly returned entry seen, so entries past the cap disappeared from later polls.
+Change: RSS and Brave now mark only emitted URL-bearing entries as seen. RSS entries without a URL remain marked seen, preserving the prior behavior, and the stale dead-code allowance on `poll_rss_source` is gone.
+Lessons Learned: A poll cap is an intake boundary, so seen-state must match the entries actually handed to the reducer.
+Prevention: Added limit-one, two-poll regressions for both seen sets and strengthened `poll_rss_source_applies_max_after_dedup` to assert the next entry is returned by the second poll.
+Refs: crates/harvester_engine/src/rss_seen_set.rs, crates/harvester_engine/src/brave_seen_set.rs, crates/harvester_engine/src/source_poll.rs, crates/harvester_io/src/effect_helpers.rs
+
+## 2026-09-29 - Stop preserves intake for the next Full run
+Type: Bug Fix
+Context: Poll workers persist seen-set changes before their completion message reaches the reducer. A poll finishing after Stop therefore lost its URLs, and queued downloads cancelled before starting were not present in the persisted successful-job list.
+Change: The reducer captures late poll URLs and never-started queued downloads in a pending-intake list included in the existing runtime-persistence snapshot. Startup restores it; Full ingests the list before polling, while Resume leaves it pending.
+Lessons Learned: Persisting source cursors before reducer intake needs an explicit recovery channel for results that arrive after intake closes. Stop-cancelled work needs the same durable path as late poll results.
+Prevention: Regression walks cover Stop, persistence, simulated restart, Full ordering, Resume behavior, old state files, and queued downloads cancelled before their first progress event.
+Refs: crates/harvester_core/src/effect.rs, crates/harvester_core/src/update/pipeline_run.rs, crates/harvester_core/src/update/polling.rs, crates/harvester_io/src/persistence.rs, post_stop_poll_urls_persist_and_full_run_reingests_before_polling_after_restore, stop_preserves_downloads_that_were_queued_but_never_started
+
+## 2026-09-29 - Desktop and command-line starts share one output lock
+Type: Bug Fix
+Context: Separate GUI and batch lock files let the two hosts enter the same output folder concurrently, risking overlapping persistence and corpus writes.
+Change: Both hosts and the IPC probe now use `.harvester.lock`. Metadata identifies the host, and a refusal names the holder, PID, start time, and lock path. The desktop keeps its pre-window dialog, and the command-line path returns a non-zero failure with the same message.
+Lessons Learned: Lock metadata is part of the user-facing conflict report; file existence alone does not identify whether or who is using the output folder.
+Prevention: A two-direction public-contract test checks both host identities, holder details, and release when each guard is dropped. `--force-unlock` retains its override behavior.
+Refs: crates/harvester_io/src/run_lock.rs, crates/harvester_batch/src/runner.rs, crates/harvester_ui/src/host.rs, desktop_and_command_line_share_lock_and_report_holder_both_directions
+
+## 2026-09-30 - Pending intake respects completed download history
+Type: Bug Fix
+Context: A stopped run could preserve a queued URL while its worker completed successfully, or a late poll could return a URL already downloaded by another source. Clearing URL deduplication for every pending URL then downloaded it again.
+Change: Full-run intake checks each pending URL against job history. Successful or non-cancelled failed jobs block replay; URLs with no job or only cancelled jobs can be retried. A success during Stop removes its URL from pending intake. Stop writes a runtime snapshot only when it adds pending intake, and batch cycle persistence writes the reducer's pending list.
+Lessons Learned: A durable retry queue needs the job outcome as well as the source seen set. A queued reducer stage alone does not prove a worker never started.
+Prevention: Reducer regressions cover a restored successful job, a stopped queued job retried once, and Stop without a pending-list change. The replay harness clears a copied briefing checkpoint so held articles retain their original fetch times and still enter the processing window.
+Refs: crates/harvester_core/src/state/ingest.rs, crates/harvester_core/src/update/pipeline_run.rs, crates/harvester_batch/examples/replay_support/mod.rs, crates/harvester_batch/tests/replay_bench.rs
+
+## 2026-09-29 - Host AI availability rejects blank API keys consistently
+Type: Bug Fix
+Context: The desktop and command-line bootstraps made their own environment checks, and the OpenAI provider accepted whitespace-only keys as configured.
+Change: `harvester_io::host_bootstrap` now owns the shared missing, empty, and whitespace key check used by both hosts. `OpenAiProvider::from_env` also rejects blank values while preserving the provider's existing error messages.
+Lessons Learned: Availability policy belongs at the shared host boundary so both executables disable AI in the same state before they can schedule model work.
+Prevention: Bootstrap regressions cover missing and blank values on the desktop and command-line paths; provider tests cover the empty-value error without reading an existing key.
+Refs: crates/harvester_io/src/host_bootstrap.rs, crates/harvester_batch/src/runner/bootstrap.rs, crates/harvester_ui/src/host.rs, crates/openai_provider_kit/src/openai.rs

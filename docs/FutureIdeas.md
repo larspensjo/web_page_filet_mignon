@@ -179,7 +179,7 @@ SuccessCriteria:
 ### HostConcurrency
 
 #### [FI-Architecture-HostConcurrency-0001] Coordinate batch and GUI host locking
-Status: Deferred
+Status: Implemented
 TopLevel: Architecture
 SubLevel: HostConcurrency
 Priority: P1
@@ -189,11 +189,12 @@ Origin:
 - SourceDoc: Plan.TauriDesktopUi.md
 - SourceSection: Phase 7
 - Captured: 2026-09-18
-Tags: [architecture, host-concurrency, out-of-scope]
+Tags: [architecture, host-concurrency]
 Summary: Define the batch-versus-GUI lock policy.
-Rationale: It is explicitly out of scope of this plan.
+Rationale: Both hosts must exclude concurrent writes to the same output folder
+and identify the active holder when a competing start is refused.
 SuccessCriteria:
-- Both hosts follow one documented concurrency policy.
+- Both hosts and the IPC probe use the shared `.harvester.lock` policy.
 
 ### PersistenceEffects
 
@@ -430,7 +431,7 @@ SuccessCriteria:
 ### ScriptSources
 
 #### [FI-Ingestion-ScriptSources-0001] Runtime implementation for script sources
-Status: Candidate
+Status: Rejected
 TopLevel: Ingestion
 SubLevel: ScriptSources
 Priority: P2
@@ -447,7 +448,7 @@ SuccessCriteria:
 - Script sources execute with a defined contract (input/output format, timeout, and error handling).
 - Successful script runs emit discovered items into the same ingestion pipeline as file/RSS sources.
 - Failures are reported with actionable diagnostics and do not crash the batch runner.
-Notes: Implementation should include explicit execution guardrails and policy controls because script execution has elevated security risk.
+Notes: Superseded by the 2026-09-29 DecisionLog entry on unknown or removed source types. Script is no longer a supported source type; such entries are skipped with a warning.
 
 ### SourceCursoring
 

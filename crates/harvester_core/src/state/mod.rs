@@ -398,6 +398,7 @@ pub struct AppState {
     /// Reducer-owned state for the imported-corpus workflow.
     pub(crate) import_session: crate::import_session::ImportSessionState,
     pub(crate) blacklist: crate::blacklist::BlacklistState,
+    pending_intake: Vec<String>,
     unfinished_work: UnfinishedWork,
     unfinished_classes: HashMap<(String, String), UnfinishedWorkClass>,
     unfinished_inputs_revision: u64,
@@ -499,6 +500,7 @@ impl Default for AppState {
             pre_triage_refresh_eval_job_done: false,
             import_session: crate::import_session::ImportSessionState::default(),
             blacklist: crate::blacklist::BlacklistState::default(),
+            pending_intake: Vec::new(),
             unfinished_work: UnfinishedWork::Unknown,
             unfinished_classes: HashMap::new(),
             unfinished_inputs_revision: 0,

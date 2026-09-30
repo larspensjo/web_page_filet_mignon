@@ -12,7 +12,7 @@ use harvester_engine::llm::{
 };
 
 use crate::{
-    load_blacklist, load_completed_jobs, load_signal_candidate_cache,
+    load_blacklist, load_completed_jobs, load_pending_intake, load_signal_candidate_cache,
     load_signal_candidate_overrides, load_summary_cache, load_triage_cache, EffectRunner,
     PlatformEffectHandler, RuntimePaths, RuntimePersistenceSink,
 };
@@ -77,7 +77,65 @@ pub struct HostLlmRuntime {
     pub config: LlmConfig,
 }
 
-pub type EffectRunnerBuild = (EffectRunner, Option<LlmQuotaLimits>, Option<HostLlmRuntime>);
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostAiEnvironment {
+    pub api_key: Option<String>,
+    pub availability: AiAvailability,
+}
+
+pub type EffectRunnerBuild = (
+    EffectRunner,
+    Option<LlmQuotaLimits>,
+    Option<HostLlmRuntime>,
+    AiAvailability,
+);
+
+/// Resolve the shared API-key state for every host, preserving each host's
+/// established warning text.
+pub fn host_ai_environment_from_env(
+    missing_api_key_warning: &'static str,
+    empty_api_key_warning: Option<&'static str>,
+) -> HostAiEnvironment {
+    host_ai_environment_from_value(
+        std::env::var("OPENAI_API_KEY"),
+        missing_api_key_warning,
+        empty_api_key_warning,
+    )
+}
+
+pub fn host_ai_environment_from_value(
+    value: Result<String, std::env::VarError>,
+    missing_api_key_warning: &'static str,
+    empty_api_key_warning: Option<&'static str>,
+) -> HostAiEnvironment {
+    match value {
+        Ok(api_key) if !api_key.trim().is_empty() => HostAiEnvironment {
+            api_key: Some(api_key),
+            availability: AiAvailability::Available,
+        },
+        Ok(_) => {
+            engine_warn!(
+                "{}",
+                empty_api_key_warning.unwrap_or(missing_api_key_warning)
+            );
+            HostAiEnvironment {
+                api_key: None,
+                availability: AiAvailability::Unavailable {
+                    reason: harvester_core::AiUnavailableReason::MissingApiKey,
+                },
+            }
+        }
+        Err(_) => {
+            engine_warn!("{}", missing_api_key_warning);
+            HostAiEnvironment {
+                api_key: None,
+                availability: AiAvailability::Unavailable {
+                    reason: harvester_core::AiUnavailableReason::MissingApiKey,
+                },
+            }
+        }
+    }
+}
 
 pub fn effective_model_map(config: &LlmConfig) -> HashMap<PromptId, String> {
     let mut map = HashMap::new();
@@ -142,18 +200,9 @@ pub fn build_effect_runner(
     missing_api_key_warning: &'static str,
     empty_api_key_warning: Option<&'static str>,
 ) -> Result<EffectRunnerBuild, String> {
-    if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
-        if api_key.trim().is_empty() {
-            if let Some(warning) = empty_api_key_warning {
-                engine_warn!("{}", warning);
-                return Ok((
-                    EffectRunner::new(paths.clone(), msg_tx, platform_handler, persistence_sink),
-                    None,
-                    None,
-                ));
-            }
-        }
-
+    let ai_environment =
+        host_ai_environment_from_env(missing_api_key_warning, empty_api_key_warning);
+    if let Some(api_key) = ai_environment.api_key {
         let host_provider = OpenAiProvider::new(api_key);
         let provider: Arc<dyn harvester_engine::llm::provider::LlmProvider> =
             Arc::new(host_provider.clone());
@@ -172,13 +221,18 @@ pub fn build_effect_runner(
             provider: host_provider,
             config: config.clone(),
         };
-        Ok((runner, Some(quota_limits), Some(runtime)))
+        Ok((
+            runner,
+            Some(quota_limits),
+            Some(runtime),
+            ai_environment.availability,
+        ))
     } else {
-        engine_warn!("{}", missing_api_key_warning);
         Ok((
             EffectRunner::new(paths.clone(), msg_tx, platform_handler, persistence_sink),
             None,
             None,
+            ai_environment.availability,
         ))
     }
 }
@@ -281,6 +335,10 @@ pub fn hydrate_state_from_disk(
     let completed_job_count = completed_jobs.len();
     if !completed_jobs.is_empty() {
         (state, _) = update(state, Msg::RestoreCompletedJobs(completed_jobs));
+    }
+    let pending_intake = load_pending_intake(&paths.state_path);
+    if !pending_intake.is_empty() {
+        (state, _) = update(state, Msg::RestorePendingIntake(pending_intake));
     }
 
     let (next, effects) = hydrate_result_stores(state, paths);
@@ -404,5 +462,52 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn desktop_bootstrap_marks_missing_and_blank_keys_unavailable() {
+        let missing_warning = "test missing key warning";
+        let empty_warning = "test empty key warning";
+        let cases = [
+            Err(std::env::VarError::NotPresent),
+            Ok(String::new()),
+            Ok(" \t ".to_string()),
+        ];
+
+        for value in cases {
+            let environment =
+                host_ai_environment_from_value(value, missing_warning, Some(empty_warning));
+            assert!(environment.api_key.is_none());
+            assert_eq!(
+                environment.availability,
+                AiAvailability::Unavailable {
+                    reason: harvester_core::AiUnavailableReason::MissingApiKey,
+                }
+            );
+
+            let temp = tempfile::tempdir().expect("tempdir");
+            let paths = RuntimePaths::with_defaults(temp.path().to_path_buf());
+            let (state, _) = prepare_desktop_startup_state(
+                AppState::new(),
+                &paths,
+                DEFAULT_LLM_MAX_CONCURRENT_REQUESTS,
+                Some(environment.availability),
+                None,
+            );
+            assert_eq!(
+                state.ai_availability(),
+                &AiAvailability::Unavailable {
+                    reason: harvester_core::AiUnavailableReason::MissingApiKey,
+                }
+            );
+        }
+
+        let available = host_ai_environment_from_value(
+            Ok("test-key".to_string()),
+            missing_warning,
+            Some(empty_warning),
+        );
+        assert_eq!(available.api_key.as_deref(), Some("test-key"));
+        assert_eq!(available.availability, AiAvailability::Available);
     }
 }

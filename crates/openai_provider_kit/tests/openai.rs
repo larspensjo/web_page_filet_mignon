@@ -1,4 +1,5 @@
 use std::env;
+use std::sync::Mutex;
 
 use openai_provider_kit::{
     ChatMessage, ChatRole, FinishReason, LlmError, LlmProvider, LlmRequest, ModelId,
@@ -6,6 +7,26 @@ use openai_provider_kit::{
 };
 use wiremock::matchers::{header as header_matcher, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+static OPENAI_API_KEY_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+struct SavedApiKey(Option<std::ffi::OsString>);
+
+impl SavedApiKey {
+    fn capture() -> Self {
+        Self(env::var_os("OPENAI_API_KEY"))
+    }
+}
+
+impl Drop for SavedApiKey {
+    fn drop(&mut self) {
+        if let Some(value) = self.0.take() {
+            env::set_var("OPENAI_API_KEY", value);
+        } else {
+            env::remove_var("OPENAI_API_KEY");
+        }
+    }
+}
 
 fn sample_request() -> LlmRequest {
     LlmRequest::new(
@@ -19,7 +40,10 @@ fn sample_request() -> LlmRequest {
 
 #[test]
 fn from_env_missing_key_returns_configuration_error() {
-    let original = env::var("OPENAI_API_KEY").ok();
+    let _guard = OPENAI_API_KEY_TEST_LOCK
+        .lock()
+        .expect("environment test lock");
+    let _saved_key = SavedApiKey::capture();
     env::remove_var("OPENAI_API_KEY");
 
     match OpenAiProvider::from_env() {
@@ -27,9 +51,20 @@ fn from_env_missing_key_returns_configuration_error() {
         Err(other) => panic!("unexpected error variant: {other:?}"),
         Ok(_) => panic!("expected configuration error"),
     }
+}
 
-    if let Some(value) = original {
-        env::set_var("OPENAI_API_KEY", value);
+#[test]
+fn from_env_rejects_empty_or_whitespace_key() {
+    let _guard = OPENAI_API_KEY_TEST_LOCK
+        .lock()
+        .expect("environment test lock");
+    let _saved_key = SavedApiKey::capture();
+    env::set_var("OPENAI_API_KEY", " \t ");
+
+    match OpenAiProvider::from_env() {
+        Err(LlmError::Configuration { detail }) if detail.contains("OPENAI_API_KEY is empty") => {}
+        Err(other) => panic!("unexpected error variant: {other:?}"),
+        Ok(_) => panic!("expected configuration error"),
     }
 }
 

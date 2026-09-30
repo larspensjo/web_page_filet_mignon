@@ -14,12 +14,23 @@ pub struct LockIdentity {
     pub force_unlock_hint: Option<&'static str>,
 }
 
-/// Shared identity for the mutually exclusive desktop hosts.
-pub const GUI_LOCK_IDENTITY: LockIdentity = LockIdentity {
-    filename: ".harvester_gui.lock",
-    log_tag: "[gui-lock]",
-    actor_description: "Harvester window",
+/// Shared lock file name for all hosts using an output folder.
+pub const LOCK_FILENAME: &str = ".harvester.lock";
+
+/// Identity written when the desktop application or IPC probe holds the lock.
+pub const DESKTOP_LOCK_IDENTITY: LockIdentity = LockIdentity {
+    filename: LOCK_FILENAME,
+    log_tag: "[desktop-lock]",
+    actor_description: "the Harvester window",
     force_unlock_hint: None,
+};
+
+/// Identity written when the command-line host holds the lock.
+pub const COMMAND_LINE_LOCK_IDENTITY: LockIdentity = LockIdentity {
+    filename: LOCK_FILENAME,
+    log_tag: "[command-line-lock]",
+    actor_description: "a command-line run",
+    force_unlock_hint: Some("Use --force-unlock to override."),
 };
 
 /// Lock metadata stored in the lock file
@@ -28,6 +39,8 @@ struct LockMetadata {
     pid: u32,
     started_utc: String,
     owner: String,
+    #[serde(default)]
+    host_description: String,
     command: Option<String>,
 }
 
@@ -53,7 +66,11 @@ impl Drop for LockGuard {
         drop(self.file.take());
 
         if !self.lock_path.exists() {
-            engine_info!("{} Released lock", self.identity.log_tag);
+            engine_info!(
+                "{} Released lock path={}",
+                self.identity.log_tag,
+                self.lock_path.display()
+            );
             return;
         }
 
@@ -65,34 +82,42 @@ impl Drop for LockGuard {
                 Ok(meta) if meta.owner == self.owner => {
                     if let Err(err) = fs::remove_file(&self.lock_path) {
                         engine_warn!(
-                            "{} Failed to remove lock file: {}",
+                            "{} Failed to remove lock path={}: {}",
                             self.identity.log_tag,
+                            self.lock_path.display(),
                             err
                         );
                     } else {
-                        engine_info!("{} Released lock", self.identity.log_tag);
+                        engine_info!(
+                            "{} Released lock path={}",
+                            self.identity.log_tag,
+                            self.lock_path.display()
+                        );
                     }
                 }
                 Ok(meta) => {
                     engine_warn!(
-                        "{} Lock ownership changed (expected: {}, found: {}), not removing",
+                        "{} Lock ownership changed path={} (expected: {}, found: {}), not removing",
                         self.identity.log_tag,
+                        self.lock_path.display(),
                         self.owner,
                         meta.owner
                     );
                 }
                 Err(err) => {
                     engine_warn!(
-                        "{} Failed to parse lock metadata on drop: {}",
+                        "{} Failed to parse lock metadata path={} on drop: {}",
                         self.identity.log_tag,
+                        self.lock_path.display(),
                         err
                     );
                 }
             },
             Err(err) => {
                 engine_warn!(
-                    "{} Failed to read lock file on drop: {}",
+                    "{} Failed to read lock path={} on drop: {}",
                     self.identity.log_tag,
+                    self.lock_path.display(),
                     err
                 );
             }
@@ -122,8 +147,13 @@ pub fn acquire_lock(
     let lock_path = output_dir.join(identity.filename);
 
     // Ensure output directory exists
-    fs::create_dir_all(output_dir)
-        .map_err(|err| format!("Failed to create output directory: {}", err))?;
+    fs::create_dir_all(output_dir).map_err(|err| {
+        format!(
+            "Failed to create output directory {}: {}",
+            output_dir.display(),
+            err
+        )
+    })?;
 
     // Generate owner token for this lock attempt
     let owner = generate_owner_token();
@@ -136,22 +166,27 @@ pub fn acquire_lock(
     if force && lock_path.exists() {
         match &previous {
             Some(meta) => engine_warn!(
-                "{} Force-unlocking existing lock (pid: {}, owner: {}, started: {})",
+                "{} Force-unlocking lock path={} (pid: {}, owner: {}, started: {})",
                 identity.log_tag,
+                lock_path.display(),
                 meta.pid,
                 meta.owner,
                 meta.started_utc
             ),
             None => {
                 engine_warn!(
-                    "{} Force-unlocking existing lock (corrupted or unreadable)",
-                    identity.log_tag
+                    "{} Force-unlocking unreadable lock path={}",
+                    identity.log_tag,
+                    lock_path.display()
                 )
             }
         }
 
         if let Err(err) = fs::remove_file(&lock_path) {
-            return Err(format!("Failed to remove existing lock: {}", err));
+            return Err(format!(
+                "Failed to remove lock path={}: {err}",
+                lock_path.display()
+            ));
         }
     }
 
@@ -163,24 +198,35 @@ pub fn acquire_lock(
         Ok(file) => file,
         Err(err) if is_lock_held(&err) => return Err(describe_active_lock(&lock_path, identity)),
         Err(err) if err.kind() == io::ErrorKind::PermissionDenied => {
-            return Err("Permission denied writing lock file".to_string());
+            return Err(format!(
+                "Permission denied writing lock path={}",
+                lock_path.display()
+            ));
         }
-        Err(err) => return Err(format!("Failed to create lock file: {}", err)),
+        Err(err) => {
+            return Err(format!(
+                "Failed to create lock path={}: {}",
+                lock_path.display(),
+                err
+            ))
+        }
     };
 
     if reclaiming {
         match &previous {
             Some(meta) => engine_warn!(
-                "{} Reclaimed lock left by a run that is no longer holding it \
+                "{} Reclaimed lock path={} left by a run that is no longer holding it \
                  (pid: {}, owner: {}, started: {})",
                 identity.log_tag,
+                lock_path.display(),
                 meta.pid,
                 meta.owner,
                 meta.started_utc
             ),
             None => engine_warn!(
-                "{} Reclaimed lock file with corrupted or unreadable metadata",
-                identity.log_tag
+                "{} Reclaimed lock path={} with corrupted or unreadable metadata",
+                identity.log_tag,
+                lock_path.display()
             ),
         }
     }
@@ -190,20 +236,35 @@ pub fn acquire_lock(
         pid: std::process::id(),
         started_utc: Utc::now().to_rfc3339(),
         owner: owner.clone(),
+        host_description: identity.actor_description.to_string(),
         command: std::env::args().next(),
     };
 
-    let metadata_str = serde_json::to_string_pretty(&metadata)
-        .map_err(|err| format!("Failed to serialize lock metadata: {}", err))?;
+    let metadata_str = serde_json::to_string_pretty(&metadata).map_err(|err| {
+        format!(
+            "Failed to serialize lock metadata path={}: {err}",
+            lock_path.display()
+        )
+    })?;
 
-    file.write_all(metadata_str.as_bytes())
-        .map_err(|err| format!("Failed to write lock metadata: {}", err))?;
-    file.flush()
-        .map_err(|err| format!("Failed to flush lock metadata: {}", err))?;
+    file.write_all(metadata_str.as_bytes()).map_err(|err| {
+        format!(
+            "Failed to write lock metadata path={}: {err}",
+            lock_path.display()
+        )
+    })?;
+    file.flush().map_err(|err| {
+        format!(
+            "Failed to flush lock metadata path={}: {err}",
+            lock_path.display()
+        )
+    })?;
 
     engine_info!(
-        "{} Acquired lock (pid: {})",
+        "{} Acquired lock path={} host={} pid={}",
         identity.log_tag,
+        lock_path.display(),
+        identity.actor_description,
         std::process::id()
     );
 
@@ -232,15 +293,34 @@ fn describe_active_lock(lock_path: &Path, identity: LockIdentity) -> String {
                 .force_unlock_hint
                 .map(|hint| format!(" {hint}"))
                 .unwrap_or_default();
+            let host = if meta.host_description.is_empty() {
+                "another Harvester host"
+            } else {
+                &meta.host_description
+            };
             format!(
-                "Another {} is already active (pid: {}, started: {}, owner: {}).{}",
-                identity.actor_description, meta.pid, meta.started_utc, meta.owner, hint
+                "Output folder is already in use by {} (pid: {}, started: {}, lock: {}).{}",
+                host,
+                meta.pid,
+                meta.started_utc,
+                lock_path.display(),
+                hint
             )
         }
         None => identity
             .force_unlock_hint
-            .map(|hint| format!("Lock file exists but is unreadable. {hint}"))
-            .unwrap_or_else(|| "Lock file exists but is unreadable.".to_string()),
+            .map(|hint| {
+                format!(
+                    "Lock path={} exists but is unreadable. {hint}",
+                    lock_path.display()
+                )
+            })
+            .unwrap_or_else(|| {
+                format!(
+                    "Lock path={} exists but is unreadable.",
+                    lock_path.display()
+                )
+            }),
     }
 }
 
@@ -315,9 +395,9 @@ mod tests {
     use tempfile::tempdir;
 
     const BATCH_LOCK: LockIdentity = LockIdentity {
-        filename: ".harvester_batch.lock",
-        log_tag: "[batch-lock]",
-        actor_description: "batch run",
+        filename: LOCK_FILENAME,
+        log_tag: "[command-line-lock]",
+        actor_description: "a command-line run",
         force_unlock_hint: Some("Use --force-unlock to override."),
     };
 
@@ -351,7 +431,9 @@ mod tests {
         let _guard1 = acquire_batch_lock(dir.path(), false).expect("first acquire");
 
         let err = acquire_batch_lock(dir.path(), false).expect_err("second should fail");
-        assert!(err.contains("already active"));
+        assert!(err.contains("in use by a command-line run"));
+        assert!(err.contains(&std::process::id().to_string()));
+        assert!(err.contains("started:"));
     }
 
     #[test]
@@ -408,7 +490,7 @@ mod tests {
 
         let err = acquire_batch_lock(dir.path(), false).expect_err("second should fail");
         assert!(
-            err.contains("already active"),
+            err.contains("in use by a command-line run"),
             "unexpected message: {}",
             err
         );
@@ -564,23 +646,31 @@ mod tests {
     }
 
     #[test]
-    fn lock_identity_keeps_hosts_independent_and_describes_the_holder() {
-        const GUI_LOCK: LockIdentity = LockIdentity {
-            filename: ".harvester_gui.lock",
-            log_tag: "[gui-lock]",
-            actor_description: "Harvester window",
-            force_unlock_hint: None,
-        };
-
+    fn desktop_and_command_line_share_lock_and_report_holder_both_directions() {
         let dir = tempdir().unwrap();
         let batch_guard = acquire_batch_lock(dir.path(), false).expect("batch lock acquires");
-        let gui_guard = acquire_lock(dir.path(), GUI_LOCK, false).expect("GUI lock acquires");
-
-        let err = acquire_lock(dir.path(), GUI_LOCK, false).expect_err("second GUI lock fails");
-        assert!(err.contains("Another Harvester window is already active"));
+        let lock_path = dir.path().join(LOCK_FILENAME);
+        assert!(lock_path.is_file());
+        let err = acquire_lock(dir.path(), DESKTOP_LOCK_IDENTITY, false)
+            .expect_err("desktop start must refuse a command-line holder");
+        assert!(err.contains("a command-line run"), "message: {err}");
         assert!(err.contains(&std::process::id().to_string()));
+        assert!(err.contains("started:"));
+        assert!(err.contains(&lock_path.display().to_string()));
 
-        drop(gui_guard);
         drop(batch_guard);
+        assert!(!lock_path.exists());
+
+        let desktop_guard =
+            acquire_lock(dir.path(), DESKTOP_LOCK_IDENTITY, false).expect("desktop lock acquires");
+        let err = acquire_batch_lock(dir.path(), false)
+            .expect_err("command-line start must refuse a desktop holder");
+        assert!(err.contains("the Harvester window"), "message: {err}");
+        assert!(err.contains(&std::process::id().to_string()));
+        assert!(err.contains("started:"));
+        assert!(err.contains(&lock_path.display().to_string()));
+
+        drop(desktop_guard);
+        assert!(!lock_path.exists());
     }
 }

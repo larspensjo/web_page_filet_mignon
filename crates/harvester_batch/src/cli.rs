@@ -34,10 +34,6 @@ pub struct Args {
     #[arg(long)]
     pub force_unlock: bool,
 
-    /// Allow running with unsupported source types (downgrades errors to warnings)
-    #[arg(long)]
-    pub allow_unsupported_sources: bool,
-
     /// Dry-run mode: poll sources and show what would be processed, but don't download or triage
     #[arg(long)]
     pub dry_run: bool,
@@ -293,7 +289,6 @@ mod tests {
             "30",
             "--dry-run",
             "--force-unlock",
-            "--allow-unsupported-sources",
         ]);
         assert_eq!(args.sources, Some(PathBuf::from("custom_sources.ron")));
         assert_eq!(args.output_dir, PathBuf::from("custom_output"));
@@ -304,7 +299,6 @@ mod tests {
         assert!(args.dry_run);
         assert!(!args.single_shot);
         assert!(args.force_unlock);
-        assert!(args.allow_unsupported_sources);
         assert!(!args.verbose_progress);
         assert!(!args.ascii_progress);
     }

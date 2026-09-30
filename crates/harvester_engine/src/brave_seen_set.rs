@@ -76,6 +76,27 @@ impl BraveSeenSet {
         unseen
     }
 
+    /// Emit at most `limit` unseen URLs, marking only those emitted as seen.
+    /// New URLs beyond the limit are left for the next poll.
+    pub fn filter_unseen_limited(
+        &mut self,
+        urls: Vec<String>,
+        limit: usize,
+    ) -> (Vec<String>, usize) {
+        let mut selected = Vec::new();
+        let mut dedup_filtered = 0;
+        for url in urls {
+            let normalized = normalize_url_for_dedupe(&url);
+            if self.is_seen(&normalized) {
+                dedup_filtered += 1;
+            } else if selected.len() < limit {
+                self.mark_seen(&normalized);
+                selected.push(url);
+            }
+        }
+        (selected, dedup_filtered)
+    }
+
     fn evict_oldest(&mut self) {
         let to_remove = EVICT_BATCH.min(self.entries.len());
         for _ in 0..to_remove {
@@ -178,5 +199,25 @@ mod tests {
 
         let emitted: Vec<_> = deduped.into_iter().take(1).collect();
         assert_eq!(emitted, vec!["https://example.com/new-1"]);
+    }
+
+    #[test]
+    fn limited_poll_leaves_urls_after_the_limit_for_the_next_poll() {
+        let mut set = BraveSeenSet::new();
+        let urls = || {
+            vec![
+                "https://example.com/1".to_string(),
+                "https://example.com/2".to_string(),
+                "https://example.com/3".to_string(),
+            ]
+        };
+
+        let (first, first_dedup) = set.filter_unseen_limited(urls(), 1);
+        assert_eq!(first, ["https://example.com/1"]);
+        assert_eq!(first_dedup, 0);
+
+        let (second, second_dedup) = set.filter_unseen_limited(urls(), 1);
+        assert_eq!(second, ["https://example.com/2"]);
+        assert_eq!(second_dedup, 1);
     }
 }

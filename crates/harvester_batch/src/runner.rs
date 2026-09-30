@@ -9,7 +9,7 @@ use harvester_core::{AppState, BatchObservation, Msg};
 use harvester_engine::llm::{ModelId, ProviderKind, OPENAI_MODEL_GPT_4O_MINI};
 use harvester_io::{
     acquire_lock, host_bootstrap::HostLlmDefaults, load_briefing_checkpoint, load_sources,
-    persist_completed_jobs, save_blacklist, save_briefing_checkpoint, LockIdentity, RuntimePaths,
+    save_blacklist, save_briefing_checkpoint, RuntimePaths, COMMAND_LINE_LOCK_IDENTITY,
 };
 use std::io::{IsTerminal, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,13 +24,6 @@ mod drain_control;
 mod dry_run;
 mod live_progress;
 mod reporting;
-
-const BATCH_LOCK_IDENTITY: LockIdentity = LockIdentity {
-    filename: ".harvester_batch.lock",
-    log_tag: "[batch-lock]",
-    actor_description: "batch run",
-    force_unlock_hint: Some("Use --force-unlock to override."),
-};
 
 pub(crate) const BATCH_MISSING_API_KEY_WARNING: &str =
     "[batch] OPENAI_API_KEY not set; AI triage/summary features disabled";
@@ -205,8 +198,11 @@ pub fn run(args: Args) -> Result<i32, String> {
             return Ok(0);
         }
         Some(cmd) => {
-            let _lock_guard =
-                acquire_lock(&paths.output_dir, BATCH_LOCK_IDENTITY, args.force_unlock)?;
+            let _lock_guard = acquire_lock(
+                &paths.output_dir,
+                COMMAND_LINE_LOCK_IDENTITY,
+                args.force_unlock,
+            )?;
             execute_checkpoint_write(cmd, &paths)?;
             return Ok(0);
         }
@@ -214,7 +210,11 @@ pub fn run(args: Args) -> Result<i32, String> {
     }
 
     engine_info!("[batch] Acquiring lock");
-    let _lock_guard = acquire_lock(&paths.output_dir, BATCH_LOCK_IDENTITY, args.force_unlock)?;
+    let _lock_guard = acquire_lock(
+        &paths.output_dir,
+        COMMAND_LINE_LOCK_IDENTITY,
+        args.force_unlock,
+    )?;
 
     // Install signal handler immediately after lock acquisition so Ctrl-C always
     // reaches the shared graceful-shutdown path for every execution mode.
@@ -253,38 +253,10 @@ pub fn run(args: Args) -> Result<i32, String> {
         paths.sources_path
     );
     let source_registry = load_sources(&paths.sources_path);
-
-    // Drain never polls, so an unsupported source must not be able to abort a
-    // collection of work that has already been paid for.
-    if !args.allow_unsupported_sources && !args.drain {
-        let unsupported: Vec<_> = source_registry
-            .sources
-            .iter()
-            .filter_map(|s| match &s.source_type {
-                harvester_engine::SourceType::Script { .. } => Some(s.id.to_string()),
-                _ => None,
-            })
-            .collect();
-
-        if !unsupported.is_empty() {
-            return Err(format!(
-                "Unsupported source types detected: {:?}. Use --allow-unsupported-sources to override.",
-                unsupported
-            ));
-        }
-    } else {
-        let unsupported_count = source_registry
-            .sources
-            .iter()
-            .filter(|s| matches!(&s.source_type, harvester_engine::SourceType::Script { .. }))
-            .count();
-        if unsupported_count > 0 {
-            engine_warn!(
-                "[batch] Running with {} unsupported source(s) (Script type)",
-                unsupported_count
-            );
-        }
-    }
+    engine_info!(
+        "[batch] Source registry entries loaded={}",
+        source_registry.sources.len()
+    );
 
     // Create message channel
     let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
@@ -564,7 +536,10 @@ pub fn prepare_cycle_state_with_effect_sink(
     reducer_observer: &mut dyn FnMut(&str, Duration),
 ) -> Result<AppState, String> {
     let (hydrated_state, startup_effects) = bootstrap::hydrate_batch_state(paths, args);
-    let mut state = bootstrap::apply_llm_availability(hydrated_state, true);
+    let mut state = bootstrap::apply_llm_availability(
+        hydrated_state,
+        harvester_core::AiAvailability::Available,
+    );
     if !startup_effects.is_empty() {
         effect_sink(startup_effects);
     }
@@ -725,21 +700,21 @@ fn persist_cycle_state(
     observer: Option<&harvester_io::FileWriteObserver>,
 ) {
     let started = Instant::now();
-    if let Some(observer) = observer {
-        if let Err(error) = harvester_io::try_persist_runtime_state(
-            &paths.state_path,
-            &state.completed_jobs_snapshot(),
-        ) {
-            engine_warn!(
-                "[batch] failed to save runtime state {}: {}",
-                paths.state_path.display(),
-                error
-            );
-        } else if let Ok(metadata) = std::fs::metadata(&paths.state_path) {
+    let snapshot = harvester_core::PersistenceSnapshot::capture(state);
+    if let Err(error) = harvester_io::try_persist_runtime_state_with_pending(
+        &paths.state_path,
+        &snapshot.completed,
+        &snapshot.pending_intake,
+    ) {
+        engine_warn!(
+            "[batch] failed to save runtime state {}: {}",
+            paths.state_path.display(),
+            error
+        );
+    } else if let Some(observer) = observer {
+        if let Ok(metadata) = std::fs::metadata(&paths.state_path) {
             observer(&paths.state_path, metadata.len(), started.elapsed());
         }
-    } else {
-        persist_completed_jobs(&paths.state_path, &state.completed_jobs_snapshot());
     }
     let started = Instant::now();
     if let Err(error) = save_blacklist(&paths.blacklist_path, state.blacklist()) {

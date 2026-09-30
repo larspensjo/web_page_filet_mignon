@@ -78,7 +78,14 @@ fn stop_finish_emits_effect() {
             Effect::StopFinish {
                 policy: StopPolicy::Finish
             },
-            Effect::FlushResults
+            Effect::FlushResults,
+            Effect::PersistRuntimeState {
+                snapshot: harvester_core::PersistenceSnapshot {
+                    completed: Vec::new(),
+                    pending_intake: vec!["https://example.com".to_string()],
+                    blacklist: Default::default(),
+                }
+            }
         ]
     );
 }

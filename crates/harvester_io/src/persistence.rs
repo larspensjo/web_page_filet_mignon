@@ -27,6 +27,8 @@ struct PersistedLink {
 struct PersistedState {
     completed: Vec<PersistedJob>,
     #[serde(default)]
+    pending_intake: Vec<String>,
+    #[serde(default)]
     window_width: Option<i32>,
     #[serde(default)]
     window_height: Option<i32>,
@@ -93,6 +95,19 @@ pub fn load_completed_jobs(state_path: &Path) -> Vec<CompletedJobSnapshot> {
         state_path
     );
     completed
+}
+
+/// Load URLs saved for intake by the next Full run. Older runtime-state files
+/// omit the optional field and therefore return an empty list.
+pub fn load_pending_intake(state_path: &Path) -> Vec<String> {
+    let content = match fs::read_to_string(state_path) {
+        Ok(text) => text,
+        Err(_) => return Vec::new(),
+    };
+    match ron::from_str::<PersistedState>(&content) {
+        Ok(state) => state.pending_intake,
+        Err(_) => Vec::new(),
+    }
 }
 
 pub fn load_window_size(state_path: &Path) -> Option<(i32, i32)> {
@@ -229,6 +244,20 @@ pub fn try_persist_runtime_state(
     state_path: &Path,
     completed: &[CompletedJobSnapshot],
 ) -> Result<(), String> {
+    let existing: PersistedState = fs::read_to_string(state_path)
+        .ok()
+        .and_then(|text| ron::from_str(&text).ok())
+        .unwrap_or_default();
+    let pending_intake = existing.pending_intake.clone();
+    persist_runtime_state_with_existing(state_path, completed, &pending_intake, existing)
+}
+
+/// Persist the completed-job projection and the reducer-owned pending-intake list.
+pub fn try_persist_runtime_state_with_pending(
+    state_path: &Path,
+    completed: &[CompletedJobSnapshot],
+    pending_intake: &[String],
+) -> Result<(), String> {
     let output_dir = state_path.parent().unwrap_or_else(|| Path::new("."));
     ensure_output_dir(output_dir).map_err(|err| format!("ensure output dir: {err}"))?;
 
@@ -237,6 +266,18 @@ pub fn try_persist_runtime_state(
         .ok()
         .and_then(|text| ron::from_str(&text).ok())
         .unwrap_or_default();
+
+    persist_runtime_state_with_existing(state_path, completed, pending_intake, existing)
+}
+
+fn persist_runtime_state_with_existing(
+    state_path: &Path,
+    completed: &[CompletedJobSnapshot],
+    pending_intake: &[String],
+    existing: PersistedState,
+) -> Result<(), String> {
+    let output_dir = state_path.parent().unwrap_or_else(|| Path::new("."));
+    ensure_output_dir(output_dir).map_err(|err| format!("ensure output dir: {err}"))?;
 
     let state = PersistedState {
         completed: completed
@@ -256,6 +297,7 @@ pub fn try_persist_runtime_state(
                 fetched_utc: job.fetched_utc.clone(),
             })
             .collect(),
+        pending_intake: pending_intake.to_vec(),
         window_width: existing.window_width,
         window_height: existing.window_height,
         desktop_window_width: existing.desktop_window_width,
@@ -604,6 +646,26 @@ mod tests {
         let snapshot = load_completed_jobs(&state_path(temp.path()));
         assert_eq!(snapshot.len(), 1);
         assert!(snapshot[0].links.is_empty());
+        assert!(load_pending_intake(&state_path(temp.path())).is_empty());
+    }
+
+    #[test]
+    fn pending_intake_roundtrips_in_runtime_state() {
+        let temp = tempdir().expect("tempdir");
+        let path = state_path(temp.path());
+        let jobs = vec![CompletedJobSnapshot {
+            url: "https://example.com/completed".to_string(),
+            tokens: Some(10),
+            bytes: Some(512),
+            links: vec![],
+            fetched_utc: None,
+        }];
+        let pending = vec!["https://example.com/pending".to_string()];
+
+        try_persist_runtime_state_with_pending(&path, &jobs, &pending).expect("persist snapshot");
+
+        assert_eq!(load_pending_intake(&path), pending);
+        assert_eq!(load_completed_jobs(&path), jobs);
     }
 
     #[test]

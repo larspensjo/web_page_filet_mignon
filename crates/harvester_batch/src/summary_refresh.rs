@@ -146,11 +146,12 @@ fn build_summary_refresh_runtime(
     paths: &RuntimePaths,
     llm_concurrency: usize,
 ) -> Result<SummaryRefreshRuntime, String> {
-    let api_key =
-        std::env::var("OPENAI_API_KEY").map_err(|_| "OPENAI_API_KEY not set".to_string())?;
-    if api_key.trim().is_empty() {
-        return Err("OPENAI_API_KEY is empty".to_string());
-    }
+    let api_key = harvester_io::host_bootstrap::host_ai_environment_from_env(
+        "OPENAI_API_KEY not set",
+        Some("OPENAI_API_KEY is empty"),
+    )
+    .api_key
+    .ok_or_else(|| "OPENAI_API_KEY not set or empty".to_string())?;
 
     let provider: Arc<dyn harvester_engine::llm::provider::LlmProvider> =
         Arc::new(OpenAiProvider::new(api_key));

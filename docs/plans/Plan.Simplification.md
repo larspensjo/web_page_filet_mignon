@@ -645,6 +645,10 @@ Regression tests:
 Expected test counts: `source_config.rs` and `cli.rs` tests that construct Script sources or
 `--allow-unsupported-sources` are removed and named; about 11 added. No file deleted wholesale.
 
+Test disposition: no tests were removed. The source registry tests and
+`explicit_values_are_parsed_and_applied` remain, with the latter no longer passing or asserting
+the removed `--allow-unsupported-sources` flag. No test file was deleted wholesale.
+
 Verification: standard Rust checks, plus `cargo clippy -p harvester_ui --all-targets -- -D warnings`
 (the desktop host changes). Benchmark (command-line reducer time per message should fall).
 Human testing recommended: start the desktop, then the command-line launcher, and confirm the
@@ -1326,14 +1330,13 @@ Phase 2 notes (2026-09-29):
 
 - The Phase 2 benchmark rows are not comparable with the baseline: every run made 0 model
   calls. The owner's desktop run that morning had already processed the 40 newest articles
-  the harness holds back, and the runtime state records that work. The pre-phase code
-  (b293945) on the same source copy also made 0 model calls, so the cause is the data, not
-  this phase. The expected fall in bytes written per completion is therefore not yet shown
+  the harness holds back, and the copied briefing checkpoint was later than their original
+  fetch times. The pre-phase code (b293945) on the same source copy also made 0 model calls;
+  the checkpoint filtered the held articles from processing. The expected fall in bytes written per completion is therefore not yet shown
   by the benchmark. The sink tests and the file-write report show it instead: no
   `.*_cache.*` file is rewritten, and results are appended only as new records. Follow-up
-  before Phase 3's benchmark: make the harness independent of how current the source is.
-  For example, it could drop the held-back articles' saved results and completed-job
-  records from the work copy, or benchmark from a pinned snapshot.
+  before Phase 3's benchmark: clear the checkpoint in the work copy after selecting held
+  articles, alongside dropping their saved results and completed-job records.
 - The runs used a copy of `output/` without the new `.jsonl` files, so each run also migrated
   the RON stores at startup. The RON files stayed byte-identical.
 - Migration of the owner's data (a scratch copy made during review, then the live desktop run
@@ -1352,6 +1355,42 @@ Phase 2 notes (2026-09-29):
   fixtures are unchanged.
 - The IPC probe and Pester were not run. The owner's desktop app held the GUI lock throughout,
   and this phase changes no launch script.
+
+Phase 3 notes (2026-09-29):
+
+- Regression coverage now includes the repeat-poll limit for RSS and Brave, pending intake
+  across Stop and simulated restart, Resume without fetching, persisted compatibility with old
+  state files, both lock-holder directions and release, host AI availability, lenient registry
+  entries, and benchmark replays from a source folder that already has saved results and a
+  briefing checkpoint later than the held articles. The
+  carry-over replay and archive-export fixtures pass unchanged.
+- Cancellation finding: `EngineHandle::stop(false)` drains queued downloads and emits cancelled
+  completion events. Runtime persistence stores successful completed jobs only, so a download
+  cancelled before its first progress event was not re-enqueued after restart. Accepted Stop now
+  adds those queued URLs to the same pending-intake list as late poll results. Review follow-up:
+  Full run retries a pending URL only when it has no job history or all its jobs ended cancelled;
+  success during Stop removes that URL immediately. Batch cycle persistence writes the reducer's
+  current list, including an empty list after consumption. Stop emits a full state snapshot only
+  when it added pending URLs.
+- Test counts: root `cargo test --offline` passed 1,540 tests (2 ignored), from the 1,527-pass
+  baseline; `harvester_ui` passed 8 tests, unchanged; Rust test attributes are 1,550, from
+  1,537 (13 added, 0 removed); Script-source tests had no constructed Script source to remove.
+  Frontend Vitest remains at its 96-test baseline and was not rerun
+  because frontend files were untouched. No test functions or test files were removed. The existing
+  `full_run_after_stop_polls_again_and_enqueues_the_returned_url` regression was rewritten as
+  `post_stop_poll_urls_persist_and_full_run_reingests_before_polling_after_restore`; the
+  `poll_rss_source_applies_max_after_dedup` regression was strengthened in place.
+- The replay smoke test now uses the first run's completed work folder as the next source, sets
+  its briefing checkpoint later than the held articles, then verifies held-back articles still
+  trigger model calls while the source tree stays byte-identical. The zero-call failure came from
+  the copied checkpoint filtering articles by their original fetch times; the harness clears that
+  checkpoint in its work copy after selecting held articles. This test covers the newer-checkpoint
+  case with five held articles.
+- The source-registry fixture now uses synthetic feeds, names, and queries with the same 24 Brave
+  and 5 RSS entry shape, plus the two unsupported types.
+  Benchmark table rows are left for the owner to run.
+- Build, touched-crate tests, full root tests, both Clippy gates, and formatting checks passed.
+  The IPC probe and Pester were not run; the real output-folder benchmark was not run.
 
 ## Open questions
 

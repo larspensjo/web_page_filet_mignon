@@ -8,8 +8,7 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use engine_logging::{engine_error, engine_info, engine_warn};
 use harvester_core::{
-    update, AiAvailability, AiUnavailableReason, AppState, IntentContext, IntentEffect, Msg,
-    DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH,
+    update, AppState, IntentContext, IntentEffect, Msg, DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH,
 };
 use harvester_engine::llm::{ModelId, ProviderKind, OPENAI_MODEL_GPT_5_4_NANO};
 use harvester_io::{
@@ -19,7 +18,7 @@ use harvester_io::{
         HostLlmDefaults,
     },
     load_desktop_window_size, EffectRunner, PersistenceWorker, PlatformEffectHandler, RuntimePaths,
-    GUI_LOCK_IDENTITY,
+    DESKTOP_LOCK_IDENTITY,
 };
 use harvester_ui_bridge::{
     decode_intent, fetch_body as bridge_fetch_body, run_driver, BodyKey, BodyResponse, BodyTable,
@@ -222,12 +221,13 @@ fn probe_report(
 pub fn run(probe: bool) -> Result<(), String> {
     let root = repository_root();
     initialize_logging(&root);
+    let paths = runtime_paths(&root);
     if probe {
+        let _lock = acquire_lock(&paths.output_dir, DESKTOP_LOCK_IDENTITY, false)?;
         return run_probe(root);
     }
-    let paths = runtime_paths(&root);
     let _lock =
-        acquire_lock(&paths.output_dir, GUI_LOCK_IDENTITY, false).inspect_err(|message| {
+        acquire_lock(&paths.output_dir, DESKTOP_LOCK_IDENTITY, false).inspect_err(|message| {
             rfd::MessageDialog::new()
                 .set_title("Harvester already running")
                 .set_description(message)
@@ -767,7 +767,7 @@ fn prepare_state(
         session_id_prefix: "session-",
     };
     let llm_concurrency = llm_max_concurrency_requests_from_env();
-    let (runner, limits, _) = build_effect_runner(
+    let (runner, limits, _, availability) = build_effect_runner(
         paths,
         sender.clone(),
         llm_concurrency,
@@ -778,16 +778,10 @@ fn prepare_state(
             paths.blacklist_path.clone(),
         )),
         "OPENAI_API_KEY not set; LLM features disabled",
-        None,
+        Some("OPENAI_API_KEY is empty; LLM features disabled"),
     )?;
-    let availability =
-        std::env::var("OPENAI_API_KEY")
-            .is_err()
-            .then_some(AiAvailability::Unavailable {
-                reason: AiUnavailableReason::MissingApiKey,
-            });
     let (state, effects) =
-        prepare_desktop_startup_state(state, paths, llm_concurrency, availability, limits);
+        prepare_desktop_startup_state(state, paths, llm_concurrency, Some(availability), limits);
     if !effects.is_empty() {
         runner.enqueue(effects);
     }

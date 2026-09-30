@@ -53,8 +53,16 @@ pub(super) fn handle_source_poll_completed(
         let ingest = state.ingest_urls(urls, chrono::Utc::now());
         (ingest.effects, ingest.enqueued_job_ids, ingest.enqueued)
     } else {
-        // A poll already in flight may finish after Stop. Record its source
-        // result, but leave its URLs for the next Full run to collect.
+        // Seen-sets are persisted by the poll worker, so preserve these URLs
+        // in reducer-owned runtime state for the next Full run.
+        let received = urls.len();
+        let preserved = state.add_pending_intake_urls(urls);
+        engine_info!(
+            "[pending-intake] source={} operation=poll_completed_after_stop received={} preserved={}",
+            source_id,
+            received,
+            preserved
+        );
         (Vec::new(), Vec::new(), 0)
     };
     state.record_poll_stat(crate::SourcePollStat {

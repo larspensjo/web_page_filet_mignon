@@ -619,8 +619,8 @@ pub(crate) fn fetch_brave_results_with_url(
 
 /// Handle a single Brave News source poll.
 ///
-/// Flow: resolve API key → fetch → parse → limit → emit.
-/// Dedup (BraveSeenSet) is added in Slice C (Task 7).
+/// Flow: resolve the API key, fetch and parse results, select unseen URLs up to
+/// the per-poll limit, persist seen state, then emit the selected URLs.
 pub fn handle_brave_source_poll(
     source_id: &SourceId,
     cfg: &harvester_engine::BraveNewsSourceConfig,
@@ -682,14 +682,12 @@ pub fn handle_brave_source_poll(
         Ok(items) => {
             let parsed_count = items.len();
 
-            // Dedup first (matches RSS semantics: dedup → limit → emit).
+            // Select only emitted URLs into the seen-set so the next poll can
+            // continue through entries beyond this poll's cap.
             let all_urls: Vec<String> = items.iter().map(|i| i.url.clone()).collect();
-            let deduped_urls = brave_seen_set.filter_unseen(all_urls);
-            let deduped_count = deduped_urls.len();
-
-            // Apply max_urls_per_poll cap after dedup.
-            let limit = max_urls_per_poll.unwrap_or(deduped_count);
-            let emitted_urls: Vec<String> = deduped_urls.into_iter().take(limit).collect();
+            let (emitted_urls, dedup_filtered) = brave_seen_set
+                .filter_unseen_limited(all_urls, max_urls_per_poll.unwrap_or(usize::MAX));
+            let deduped_count = parsed_count - dedup_filtered;
 
             // Persist seen set after successful dedup.
             if let Err(err) = crate::persist_brave_seen_set(brave_seen_set, brave_seen_set_path) {
@@ -722,7 +720,6 @@ pub fn handle_brave_source_poll(
                 deduped_count,
                 emitted_urls.len()
             );
-            let dedup_filtered = parsed_count - deduped_count;
             let _ = msg_tx.send(Msg::SourcePollCompleted {
                 source_id: source_id.clone(),
                 urls: emitted_urls,

@@ -973,7 +973,7 @@ fn accepted_stop_during_poll_drains_the_poll_without_ingesting_its_urls() {
 }
 
 #[test]
-fn full_run_after_stop_polls_again_and_enqueues_the_returned_url() {
+fn post_stop_poll_urls_persist_and_full_run_reingests_before_polling_after_restore() {
     let state = tick(add_metadata(AppState::new()), 0);
     let (state, effects) = crate::update(
         state,
@@ -1003,34 +1003,183 @@ fn full_run_after_stop_polls_again_and_enqueues_the_returned_url() {
     assert!(effects
         .iter()
         .all(|effect| !matches!(effect, Effect::EnqueueUrl { .. })));
+    let snapshot = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::PersistRuntimeState { snapshot } => Some(snapshot.clone()),
+            _ => None,
+        })
+        .expect("post-stop poll persists pending intake");
+    assert_eq!(
+        snapshot.pending_intake,
+        ["https://progress.invalid/returned-after-stop"]
+    );
     let state = crate::update(state, Msg::AllSourcesPollEnded).0;
     assert!(state.run_progress().unwrap().terminal);
     assert_eq!(state.view().session, crate::SessionState::Idle);
 
+    let restored = crate::update(
+        AppState::new(),
+        Msg::RestorePendingIntake(snapshot.pending_intake.clone()),
+    )
+    .0;
+    assert_eq!(restored.pending_intake_urls(), snapshot.pending_intake);
+
+    let (resume_state, resume_effects) = crate::update(
+        restored.clone(),
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
+    assert!(resume_effects
+        .iter()
+        .all(|effect| !matches!(effect, Effect::PollAllSources | Effect::EnqueueUrl { .. })));
+    assert_eq!(resume_state.pending_intake_urls(), snapshot.pending_intake);
+
+    let (full_state, effects) = crate::update(
+        restored,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
+    let enqueue_index = effects
+        .iter()
+        .position(|effect| {
+            matches!(
+                effect,
+                Effect::EnqueueUrl { url, .. }
+                    if url == "https://progress.invalid/returned-after-stop"
+            )
+        })
+        .expect("pending URL is re-enqueued");
+    let poll_index = effects
+        .iter()
+        .position(|effect| matches!(effect, Effect::PollAllSources))
+        .expect("Full run polls sources");
+    assert!(
+        enqueue_index < poll_index,
+        "pending intake precedes polling"
+    );
+    assert!(full_state.pending_intake_urls().is_empty());
+}
+
+#[test]
+fn stop_preserves_downloads_that_were_queued_but_never_started() {
+    let (state, _) = crate::update(
+        tick(AppState::new(), 0),
+        Msg::InputChanged("https://progress.invalid/cancelled-before-start".into()),
+    );
+    let (state, effects) = crate::update(state, Msg::UrlsSubmitted);
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::EnqueueUrl { .. })));
+    let (state, stop_effects) = crate::update(state, Msg::StopFinishClicked);
+
+    assert!(stop_effects.iter().any(|effect| matches!(
+        effect,
+        Effect::PersistRuntimeState { snapshot }
+            if snapshot.pending_intake == ["https://progress.invalid/cancelled-before-start"]
+    )));
+    assert_eq!(
+        state.pending_intake_urls(),
+        ["https://progress.invalid/cancelled-before-start"],
+        "queued work cancelled before its first download progress event is retried"
+    );
+
+    let (state, _) = crate::update(
+        state,
+        Msg::JobDone {
+            job_id: 1,
+            result: crate::JobResultKind::Failed {
+                reason: harvester_engine::FailureKind::Cancelled.to_string(),
+            },
+            content_preview: None,
+            extracted_links: Vec::new(),
+            fetched_utc: None,
+        },
+    );
     let (state, effects) = crate::update(
         state,
         Msg::PipelineRunRequested {
             scope: crate::PipelineRunScope::Full,
         },
     );
-    assert!(effects
-        .iter()
-        .any(|effect| matches!(effect, Effect::PollAllSources)));
-    let (state, _) = crate::update(state, Msg::PollStarted { total: 1 });
-    let (_, effects) = crate::update(
+    assert_eq!(effects.iter().filter(|effect| matches!(effect,
+        Effect::EnqueueUrl { url, .. } if url == "https://progress.invalid/cancelled-before-start"
+    )).count(), 1);
+    assert!(state.pending_intake_urls().is_empty());
+}
+
+#[test]
+fn pending_url_matching_restored_completed_job_is_not_downloaded_again() {
+    let url = "https://progress.invalid/already-downloaded";
+    let (state, _) = crate::update(
+        AppState::new(),
+        Msg::RestoreCompletedJobs(vec![crate::CompletedJobSnapshot {
+            url: url.into(),
+            tokens: None,
+            bytes: None,
+            links: Vec::new(),
+            fetched_utc: None,
+        }]),
+    );
+    let (state, _) = crate::update(state, Msg::RestorePendingIntake(vec![url.into()]));
+    let (state, effects) = crate::update(
         state,
-        Msg::SourcePollCompleted {
-            source_id: SourceId::new("stop-second-poll").expect("valid source id"),
-            urls: vec!["https://progress.invalid/returned-after-stop".into()],
-            kind: SourceKind::Rss,
-            parsed: 1,
-            dedup_filtered: 0,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
         },
     );
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        Effect::EnqueueUrl { url, .. } if url == "https://progress.invalid/returned-after-stop"
+    assert!(effects.iter().all(|effect| !matches!(effect,
+        Effect::EnqueueUrl { url: enqueued, .. } if enqueued == url
     )));
+    assert!(state.pending_intake_urls().is_empty());
+}
+
+#[test]
+fn pending_url_completed_successfully_during_stop_is_not_downloaded_again() {
+    let url = "https://progress.invalid/finished-during-stop";
+    let (state, _) = crate::update(tick(AppState::new(), 0), Msg::InputChanged(url.into()));
+    let (state, _) = crate::update(state, Msg::UrlsSubmitted);
+    let (state, _) = crate::update(state, Msg::StopFinishClicked);
+    assert_eq!(state.pending_intake_urls(), [url]);
+    let (state, _) = crate::update(
+        state,
+        Msg::JobDone {
+            job_id: 1,
+            result: crate::JobResultKind::Success,
+            content_preview: None,
+            extracted_links: Vec::new(),
+            fetched_utc: None,
+        },
+    );
+    let (state, effects) = crate::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
+    assert!(effects.iter().all(|effect| !matches!(effect,
+        Effect::EnqueueUrl { url: enqueued, .. } if enqueued == url
+    )));
+    assert!(state.pending_intake_urls().is_empty());
+}
+
+#[test]
+fn stop_without_new_pending_intake_skips_runtime_snapshot() {
+    let (state, _) = crate::update(
+        tick(add_metadata(AppState::new()), 0),
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
+    let (_, effects) = crate::update(state, Msg::StopFinishClicked);
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::StopFinish { .. })));
+    assert!(effects
+        .iter()
+        .all(|effect| !matches!(effect, Effect::PersistRuntimeState { .. })));
 }
 
 #[test]

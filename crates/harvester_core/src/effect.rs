@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PersistenceSnapshot {
     pub completed: Vec<crate::CompletedJobSnapshot>,
+    pub pending_intake: Vec<String>,
     pub blacklist: crate::blacklist::BlacklistState,
 }
 
@@ -19,6 +20,7 @@ impl PersistenceSnapshot {
     pub fn capture(state: &crate::AppState) -> Self {
         Self {
             completed: state.completed_jobs_snapshot(),
+            pending_intake: state.pending_intake_urls().to_vec(),
             blacklist: state.blacklist().clone(),
         }
     }

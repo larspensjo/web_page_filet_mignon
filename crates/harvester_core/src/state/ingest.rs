@@ -8,6 +8,100 @@ use engine_logging::engine_info;
 use harvester_engine::{ExtractedLink, ImportedArchiveRef};
 
 impl AppState {
+    pub(crate) fn pending_intake_urls(&self) -> &[String] {
+        &self.pending_intake
+    }
+
+    pub(crate) fn restore_pending_intake(&mut self, urls: Vec<String>) {
+        self.pending_intake.clear();
+        self.add_pending_intake_urls(urls);
+    }
+
+    pub(crate) fn add_pending_intake_urls(
+        &mut self,
+        urls: impl IntoIterator<Item = String>,
+    ) -> usize {
+        let mut known: std::collections::HashSet<String> = self
+            .pending_intake
+            .iter()
+            .map(|url| normalize_url_for_dedupe(url))
+            .collect();
+        let mut added = 0;
+        for url in urls {
+            let normalized = normalize_url_for_dedupe(&url);
+            if normalized.is_empty() || !known.insert(normalized) {
+                continue;
+            }
+            self.pending_intake.push(url);
+            added += 1;
+        }
+        if added > 0 {
+            self.dirty = true;
+        }
+        added
+    }
+
+    pub(crate) fn take_pending_intake_urls(&mut self) -> Vec<String> {
+        let urls = std::mem::take(&mut self.pending_intake);
+        if !urls.is_empty() {
+            self.dirty = true;
+        }
+        urls
+    }
+
+    pub(crate) fn remove_pending_intake_url(&mut self, url: &str) {
+        let normalized = normalize_url_for_dedupe(url);
+        let before = self.pending_intake.len();
+        self.pending_intake
+            .retain(|pending| normalize_url_for_dedupe(pending) != normalized);
+        if self.pending_intake.len() != before {
+            self.dirty = true;
+        }
+    }
+
+    pub(crate) fn job_url(&self, job_id: JobId) -> Option<&str> {
+        self.jobs.get(&job_id).map(|job| job.url.as_str())
+    }
+
+    pub(crate) fn pending_intake_for_reingest(&mut self, urls: Vec<String>) -> Vec<String> {
+        urls.into_iter()
+            .filter(|url| {
+                let normalized = normalize_url_for_dedupe(url);
+                let jobs = self
+                    .jobs
+                    .values()
+                    .filter(|job| normalize_url_for_dedupe(&job.url) == normalized);
+                let mut has_job = false;
+                let mut all_cancelled = true;
+                let cancelled_reason = harvester_engine::FailureKind::Cancelled.to_string();
+                for job in jobs {
+                    has_job = true;
+                    if !matches!(job.outcome.as_ref(),
+                        Some(JobResultKind::Failed { reason }) if reason == &cancelled_reason)
+                    {
+                        all_cancelled = false;
+                    }
+                }
+                if !has_job || all_cancelled {
+                    self.seen_urls.remove(&normalized);
+                    true
+                } else {
+                    false
+                }
+            })
+            .collect()
+    }
+
+    pub(crate) fn preserve_unstarted_downloads_for_retry(&mut self) -> usize {
+        let urls = self
+            .jobs
+            .values()
+            .filter(|job| job.stage == Stage::Queued && job.outcome.is_none())
+            .map(|job| job.url.clone())
+            .collect::<Vec<_>>();
+        self.add_pending_intake_urls(urls)
+    }
+
     pub(crate) fn apply_imported_archive_entries(&mut self, entries: &[ImportedArchiveRef]) {
         if entries.is_empty() {
             return;

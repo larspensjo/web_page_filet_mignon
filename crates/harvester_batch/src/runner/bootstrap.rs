@@ -3,9 +3,7 @@ use super::{batch_host_llm_defaults, BATCH_EMPTY_API_KEY_WARNING, BATCH_MISSING_
 use crate::cli::Args;
 use engine_logging::engine_info;
 use harvester_core::signal_candidate::DEFAULT_SELECTION_THRESHOLD;
-use harvester_core::{
-    update, AiAvailability, AiUnavailableReason, AppState, Effect, Msg, PipelineWavePolicy,
-};
+use harvester_core::{update, AiAvailability, AppState, Effect, Msg, PipelineWavePolicy};
 use harvester_engine::llm::LlmQuotas;
 use harvester_io::{
     host_bootstrap::{build_effect_runner, hydrate_state_from_disk},
@@ -39,20 +37,8 @@ pub(crate) fn apply_signal_candidate_selection_settings(state: &mut AppState, ar
     );
 }
 
-pub(crate) fn apply_llm_availability(state: AppState, has_runtime: bool) -> AppState {
-    if has_runtime {
-        state
-    } else {
-        update(
-            state,
-            Msg::AiAvailabilityDetected {
-                availability: AiAvailability::Unavailable {
-                    reason: AiUnavailableReason::MissingApiKey,
-                },
-            },
-        )
-        .0
-    }
+pub(crate) fn apply_llm_availability(state: AppState, availability: AiAvailability) -> AppState {
+    update(state, Msg::AiAvailabilityDetected { availability }).0
 }
 
 pub(crate) fn prepare_runtime(
@@ -72,7 +58,7 @@ pub(crate) fn prepare_runtime(
     engine_info!("[batch] Building EffectRunner");
     let platform_handler = Box::new(NoOpPlatformHandler);
     let defaults = batch_host_llm_defaults();
-    let (effect_runner, _, runtime) = build_effect_runner(
+    let (effect_runner, _, runtime, availability) = build_effect_runner(
         paths,
         msg_tx,
         args.llm_concurrency,
@@ -85,7 +71,7 @@ pub(crate) fn prepare_runtime(
         BATCH_MISSING_API_KEY_WARNING,
         Some(BATCH_EMPTY_API_KEY_WARNING),
     )?;
-    state = apply_llm_availability(state, runtime.is_some());
+    state = apply_llm_availability(state, availability);
     let batch_runtime = if args.batch_api_enabled() && state.result_store_failure().is_none() {
         match runtime {
             Some(runtime) => Some(BatchRuntime::new(runtime.provider, runtime.config, paths)?),
@@ -152,39 +138,52 @@ mod model_budget_tests {
     }
 
     #[test]
-    fn missing_key_disarms_full_and_resume_even_after_metadata() {
-        for scope in [
-            harvester_core::PipelineRunScope::Full,
-            harvester_core::PipelineRunScope::Resume,
-        ] {
-            let state = apply_llm_availability(AppState::new(), false);
-            let (state, _) = update(
-                state,
-                Msg::LlmMetadataLoaded {
-                    active_versions: [(harvester_engine::llm::PromptId::ArticleTriage, 1)]
+    fn missing_and_blank_keys_disarm_full_and_resume_even_after_metadata() {
+        let values = [
+            Err(std::env::VarError::NotPresent),
+            Ok(String::new()),
+            Ok(" \t ".to_string()),
+        ];
+        for value in values {
+            let availability = harvester_io::host_bootstrap::host_ai_environment_from_value(
+                value,
+                "test missing warning",
+                Some("test empty warning"),
+            )
+            .availability;
+            for scope in [
+                harvester_core::PipelineRunScope::Full,
+                harvester_core::PipelineRunScope::Resume,
+            ] {
+                let state = apply_llm_availability(AppState::new(), availability.clone());
+                let (state, _) = update(
+                    state,
+                    Msg::LlmMetadataLoaded {
+                        active_versions: [(harvester_engine::llm::PromptId::ArticleTriage, 1)]
+                            .into_iter()
+                            .collect(),
+                        effective_models: [(
+                            harvester_engine::llm::PromptId::ArticleTriage,
+                            "test-model".into(),
+                        )]
                         .into_iter()
                         .collect(),
-                    effective_models: [(
-                        harvester_engine::llm::PromptId::ArticleTriage,
-                        "test-model".into(),
-                    )]
-                    .into_iter()
-                    .collect(),
-                },
-            );
-            assert_eq!(
-                state.ai_availability(),
-                &AiAvailability::Unavailable {
-                    reason: AiUnavailableReason::MissingApiKey
-                }
-            );
-            let (state, effects) = update(state, Msg::PipelineRunRequested { scope });
-            assert!(!state.pipeline_run_armed());
-            assert!(effects.iter().all(|effect| !matches!(
-                effect,
-                harvester_core::Effect::LoadProcessingConfiguration { .. }
-                    | harvester_core::Effect::RequestLlmCompletion { .. }
-            )));
+                    },
+                );
+                assert_eq!(
+                    state.ai_availability(),
+                    &AiAvailability::Unavailable {
+                        reason: harvester_core::AiUnavailableReason::MissingApiKey
+                    }
+                );
+                let (state, effects) = update(state, Msg::PipelineRunRequested { scope });
+                assert!(!state.pipeline_run_armed());
+                assert!(effects.iter().all(|effect| !matches!(
+                    effect,
+                    harvester_core::Effect::LoadProcessingConfiguration { .. }
+                        | harvester_core::Effect::RequestLlmCompletion { .. }
+                )));
+            }
         }
     }
 }

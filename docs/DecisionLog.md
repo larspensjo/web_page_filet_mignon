@@ -284,3 +284,15 @@ persistence boundary to paid results.
 Refs: docs/Architecture.md, docs/CorpusFormat.md,
 crates/harvester_core/src/result_store.rs,
 crates/harvester_io/src/result_store.rs, crates/harvester_io/src/result_sink.rs
+
+## 2026-09-29 - One lock per output folder for both hosts; a second start refuses and names the holder
+Decision: The desktop host, command-line host, and IPC probe share `.harvester.lock` in the output folder. A competing start refuses and identifies the current host, PID, and start time.
+Context: Separate desktop and command-line lock files allowed both hosts to write the same runtime state and corpus at once. One shared lock makes the output-folder concurrency policy enforceable while keeping the refusal actionable.
+Consequences: The desktop reports refusal through its pre-window dialog, and the command-line host reports the same holder details before exiting non-zero. `--force-unlock` remains an explicit override.
+Refs: docs/Architecture.md, docs/FutureIdeas.md (FI-Architecture-HostConcurrency-0001), crates/harvester_io/src/run_lock.rs
+
+## 2026-09-29 - Source registry entries of unknown or removed type are skipped with a warning; the rest load
+Decision: A source registry entry with an unknown or removed source type is skipped with a warning; valid entries in the same registry continue to load.
+Context: Script entries have no runtime implementation, and strict whole-registry deserialization prevented the remaining valid sources from loading. Registry files are external input that may outlive supported source types.
+Consequences: Warnings identify the entry position and its id when readable. Supported entries retain their existing parsing and validation rules, including File and CuratedList.
+Refs: docs/Architecture.md, docs/plans/Plan.Simplification.md, crates/harvester_io/src/source_loader.rs

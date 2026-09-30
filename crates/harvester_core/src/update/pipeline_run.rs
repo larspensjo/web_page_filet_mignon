@@ -153,6 +153,20 @@ pub(super) fn handle_pipeline_requested(
     ));
     state.set_pipeline_run_phase(PipelineRunPhase::Requested);
     let mut effects = Vec::new();
+    if scope == crate::PipelineRunScope::Full {
+        let pending_urls = state.take_pending_intake_urls();
+        if !pending_urls.is_empty() {
+            let retryable = state.pending_intake_for_reingest(pending_urls);
+            let intake = state.ingest_urls(retryable, chrono::Utc::now());
+            engine_logging::engine_info!(
+                "[pending-intake] run_id={} ingested={} skipped={}",
+                state.run_progress().map_or(0, |run| run.run_id),
+                intake.enqueued,
+                intake.skipped
+            );
+            effects.extend(intake.effects);
+        }
+    }
     if scope == crate::PipelineRunScope::Full && !polling {
         effects.extend(super::polling::handle_poll_sources_clicked(state));
     }
@@ -255,6 +269,7 @@ fn settle_stopped_run(state: &mut AppState) {
 }
 
 pub(super) fn handle_stop_for_pipeline(state: &mut AppState) {
+    let preserved_downloads = state.preserve_unstarted_downloads_for_retry();
     if state.run_progress_is_active() {
         state.set_pipeline_run_phase(PipelineRunPhase::Stopping);
         if let Some(run) = state.run_progress_mut() {
@@ -292,6 +307,11 @@ pub(super) fn handle_stop_for_pipeline(state: &mut AppState) {
         in_flight_llm,
         in_flight_download
     );
+    if preserved_downloads > 0 {
+        engine_logging::engine_info!(
+            "[pending-intake] operation=stop preserved_unstarted_downloads={preserved_downloads}"
+        );
+    }
     state.mark_dirty();
 }
 
