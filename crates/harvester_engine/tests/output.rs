@@ -1,22 +1,15 @@
 use harvester_engine::{
-    archive_url_key, build_concatenated_export, build_markdown_document, build_triage_archive,
-    deterministic_filename, ArchiveDocAnnotations, Converter, ExportOptions, Extractor,
-    Html2MdConverter, ReadabilityLikeExtractor, TokenCounter, WhitespaceTokenCounter,
-    CORPUS_MANIFEST_FILENAME, CORPUS_SCHEMA_VERSION, MAX_FALLBACK_BODY_CHARS,
+    archive_url_key, build_markdown_document, build_triage_archive, deterministic_filename,
+    ArchiveDocAnnotations, Converter, Extractor, Html2MdConverter, ReadabilityLikeExtractor,
+    TokenCounter, WhitespaceTokenCounter, MAX_FALLBACK_BODY_CHARS,
 };
 use pretty_assertions::assert_eq;
-use serde_json::Value;
 
 struct CountingTokens;
 impl TokenCounter for CountingTokens {
     fn count(&self, text: &str) -> u32 {
         text.split_whitespace().count() as u32
     }
-}
-
-fn read_manifest(path: &std::path::Path) -> Value {
-    let manifest = std::fs::read_to_string(path).unwrap();
-    serde_json::from_str(&manifest).unwrap()
 }
 
 #[test]
@@ -72,104 +65,33 @@ fn pipeline_assemble_markdown_end_to_end() {
 }
 
 #[test]
-fn concatenated_export_builds_delimited_output_and_manifest() {
+fn triage_archive_writes_and_refreshes_corpus_manifest() {
     let temp = tempfile::TempDir::new().unwrap();
-    let dir = temp.path();
-    let md1 = "---\nurl: \"https://a\"\ntitle: \"A\"\ntoken_count: 2\nfetched_utc: \"2024-01-01T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nBody A\n";
-    let md2 = "---\nurl: \"https://b\"\ntitle: \"B\"\ntoken_count: 3\nfetched_utc: \"2024-01-02T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nBody B\n";
-    std::fs::write(dir.join("a.md"), md1).unwrap();
-    std::fs::write(dir.join("b.md"), md2).unwrap();
-
-    let summary = build_concatenated_export(dir, ExportOptions::default()).unwrap();
-    let export = std::fs::read_to_string(summary.output_path).unwrap();
-
-    assert!(export.contains("===== DOC START ====="));
-    assert!(export.contains("url: https://a"));
-    assert!(export.contains("url: https://b"));
-    assert!(export.contains("===== DOC END ====="));
-    assert_eq!(summary.doc_count, 2);
-    assert_eq!(summary.total_tokens, 5);
-
-    let manifest = read_manifest(summary.manifest_path.as_ref().unwrap());
-    assert_eq!(manifest["doc_count"].as_u64(), Some(2));
-    assert_eq!(manifest["total_tokens"].as_u64(), Some(5));
-    assert_eq!(manifest["files"].as_array().unwrap().len(), 2);
-}
-
-#[test]
-fn concatenated_export_creates_missing_output_dir() {
-    let temp = tempfile::TempDir::new().unwrap();
-    let missing_dir = temp.path().join("missing_output");
-
-    let summary = build_concatenated_export(&missing_dir, ExportOptions::default()).unwrap();
-
-    assert!(summary.output_path.exists());
-    let export = std::fs::read_to_string(summary.output_path).unwrap();
-    assert!(export.is_empty());
-
-    let manifest = read_manifest(summary.manifest_path.as_ref().unwrap());
-    assert_eq!(manifest["doc_count"].as_u64(), Some(0));
-    assert_eq!(manifest["total_tokens"].as_u64(), Some(0));
-    assert_eq!(manifest["files"].as_array().unwrap().len(), 0);
-}
-
-#[test]
-fn concatenated_export_writes_corpus_manifest() {
-    let temp = tempfile::TempDir::new().unwrap();
-    let dir = temp.path();
-    let md = "---\nurl: \"https://a\"\ntitle: \"A\"\ntoken_count: 2\nfetched_utc: \"2024-01-01T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nBody A\n";
-    std::fs::write(dir.join("a.md"), md).unwrap();
-
-    build_concatenated_export(dir, ExportOptions::default()).unwrap();
-
-    let manifest_path = dir.join(CORPUS_MANIFEST_FILENAME);
-    assert!(manifest_path.exists());
-    let manifest: Value =
-        serde_json::from_str(&std::fs::read_to_string(manifest_path).unwrap()).unwrap();
-    assert_eq!(manifest["format"].as_str(), Some("harvester-corpus"));
-    assert_eq!(
-        manifest["schema_version"].as_u64(),
-        Some(CORPUS_SCHEMA_VERSION as u64)
-    );
-    assert_eq!(manifest["layout"]["articles"].as_array().unwrap().len(), 2);
-}
-
-#[test]
-fn concatenated_export_includes_linked_pages_and_dedupes_urls() {
-    let temp = tempfile::TempDir::new().unwrap();
-    let dir = temp.path();
-    let linked_dir = dir.join("linked");
-    std::fs::create_dir_all(&linked_dir).unwrap();
-
-    let root_md = "---\nurl: \"https://root\"\ntitle: \"Root\"\ntoken_count: 1\nfetched_utc: \"2024-01-01T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nroot\n";
-    let link_md = "---\nurl: \"https://link\"\ntitle: \"Link\"\ntoken_count: 2\nfetched_utc: \"2024-01-02T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nlink\n";
-    let duplicate_md = "---\nurl: \"https://link/\"\ntitle: \"Link Dup\"\ntoken_count: 3\nfetched_utc: \"2024-01-03T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\ndup\n";
-
-    std::fs::write(dir.join("root.md"), root_md).unwrap();
-    std::fs::write(linked_dir.join("link.md"), link_md).unwrap();
-    std::fs::write(dir.join("duplicate.md"), duplicate_md).unwrap();
-
-    let summary = build_concatenated_export(dir, ExportOptions::default()).unwrap();
-    assert_eq!(summary.doc_count, 2);
-    let export = std::fs::read_to_string(summary.output_path).unwrap();
-    assert!(export.contains("url: https://root"));
-    assert!(export.contains("url: https://link"));
-    assert!(!export.contains("link Dup"));
-
-    let manifest = read_manifest(summary.manifest_path.as_ref().unwrap());
-    let urls = manifest["files"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|entry| entry["url"].as_str().unwrap())
-        .collect::<Vec<_>>();
-    assert_eq!(urls.len(), 2);
-    assert!(urls.contains(&"https://root"));
-    assert!(
-        urls.iter()
-            .any(|url| url.trim_end_matches('/') == "https://link"),
-        "linked url missing: {urls:?}"
-    );
+    let marker = temp.path().join("harvester-corpus.json");
+    let export = || {
+        build_triage_archive(
+            temp.path(),
+            "archive.md",
+            &[],
+            None,
+            false,
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&marker).unwrap()).unwrap();
+        assert_eq!(manifest["format"], "harvester-corpus");
+        assert_eq!(manifest["schema_version"], 1);
+        assert_eq!(
+            manifest["layout"]["generated_artifacts"],
+            serde_json::json!(["archive.md", "archive-*.md"])
+        );
+    };
+    export();
+    std::fs::write(&marker, "stale marker").unwrap();
+    export();
 }
 
 #[test]
@@ -181,17 +103,11 @@ fn triage_archive_uses_ordered_urls_and_preserves_full_markdown() {
     std::fs::write(dir.join("a.md"), md_a).unwrap();
     std::fs::write(dir.join("b.md"), md_b).unwrap();
 
-    let options = ExportOptions {
-        output_filename: "archive.md".to_string(),
-        manifest_filename: None,
-        ..ExportOptions::default()
-    };
     let summary = build_triage_archive(
         dir,
         "custom-archive.md",
         &["https://b".to_string(), "https://a".to_string()],
         None,
-        options,
         false,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
@@ -208,7 +124,6 @@ fn triage_archive_uses_ordered_urls_and_preserves_full_markdown() {
     );
     assert_eq!(summary.doc_count, 2);
     assert_eq!(summary.total_tokens, 5);
-    assert!(summary.manifest_path.is_none());
 
     let archive = std::fs::read_to_string(summary.output_path).unwrap();
     let idx_b = archive.find("url: https://b").unwrap();
@@ -232,17 +147,11 @@ fn triage_archive_since_filter_excludes_old_docs_but_keeps_malformed_timestamps(
     let since = chrono::DateTime::parse_from_rfc3339("2025-01-01T00:00:00Z")
         .unwrap()
         .with_timezone(&chrono::Utc);
-    let options = ExportOptions {
-        output_filename: "archive.md".to_string(),
-        manifest_filename: None,
-        ..ExportOptions::default()
-    };
     let summary = build_triage_archive(
         dir,
         "archive.md",
         &["https://old".to_string(), "https://bad".to_string()],
         Some(since),
-        options,
         false,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
@@ -278,17 +187,11 @@ fn triage_archive_ignores_existing_archive_md_artifact() {
     )
     .unwrap();
 
-    let options = ExportOptions {
-        output_filename: "archive.md".to_string(),
-        manifest_filename: None,
-        ..ExportOptions::default()
-    };
     let summary = build_triage_archive(
         dir,
         "archive.md",
         &["https://keep".to_string()],
         None,
-        options,
         false,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
@@ -321,17 +224,11 @@ fn triage_archive_uses_summary_body_when_provided() {
         "## Summary\nCompact summary.\n\n## Key Points\n- Key point one\n".to_string(),
     );
 
-    let options = ExportOptions {
-        output_filename: "archive.md".to_string(),
-        manifest_filename: None,
-        ..ExportOptions::default()
-    };
     let summary = build_triage_archive(
         dir,
         "archive.md",
         &["https://example.com/a".to_string()],
         None,
-        options,
         true,
         &summaries,
         &std::collections::HashMap::new(),
@@ -358,17 +255,11 @@ fn triage_archive_falls_back_to_full_body_when_no_summary() {
         "## Summary\nOther.\n".to_string(),
     );
 
-    let options = ExportOptions {
-        output_filename: "archive.md".to_string(),
-        manifest_filename: None,
-        ..ExportOptions::default()
-    };
     let summary = build_triage_archive(
         dir,
         "archive.md",
         &["https://example.com/b".to_string()],
         None,
-        options,
         true,
         &summaries,
         &std::collections::HashMap::new(),
@@ -389,17 +280,11 @@ fn triage_archive_summary_mode_with_empty_map_uses_fallback_format() {
     let md = "---\nurl: \"https://example.com/e\"\ntitle: \"No Summary\"\ntoken_count: 50\nfetched_utc: \"2026-04-01T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nBody text.\n";
     std::fs::write(dir.join("e.md"), md).unwrap();
 
-    let options = ExportOptions {
-        output_filename: "archive.md".to_string(),
-        manifest_filename: None,
-        ..ExportOptions::default()
-    };
     let summary = build_triage_archive(
         dir,
         "archive.md",
         &["https://example.com/e".to_string()],
         None,
-        options,
         true,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
@@ -426,17 +311,11 @@ fn triage_archive_truncates_large_fallback_body_safely() {
     let md = format!("---\nurl: \"https://example.com/c\"\ntitle: \"Big\"\ntoken_count: 15000\nfetched_utc: \"2026-04-01T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\n{body}\n");
     std::fs::write(dir.join("c.md"), md).unwrap();
 
-    let options = ExportOptions {
-        output_filename: "archive.md".to_string(),
-        manifest_filename: None,
-        ..ExportOptions::default()
-    };
     let summary = build_triage_archive(
         dir,
         "archive.md",
         &["https://example.com/c".to_string()],
         None,
-        options,
         true,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
@@ -448,25 +327,6 @@ fn triage_archive_truncates_large_fallback_body_safely() {
     assert!(content.contains("content: full-truncated"));
 }
 
-#[test]
-fn concatenated_export_ignores_custom_archive_artifacts_by_content() {
-    let temp = tempfile::TempDir::new().unwrap();
-    let dir = temp.path();
-    let md = "---\nurl: \"https://keep\"\ntitle: \"Keep\"\ntoken_count: 1\nfetched_utc: \"2026-02-15T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nkeep\n";
-    std::fs::write(dir.join("keep.md"), md).unwrap();
-    std::fs::write(
-        dir.join("old-custom.md"),
-        "===== DOC START =====\n---\nurl: \"https://ignore\"\ntitle: \"Ignore\"\ntoken_count: 1\nfetched_utc: \"2026-02-14T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nignore\n",
-    )
-    .unwrap();
-
-    let summary = build_concatenated_export(dir, ExportOptions::default()).unwrap();
-    assert_eq!(summary.doc_count, 1);
-    let export = std::fs::read_to_string(summary.output_path).unwrap();
-    assert!(export.contains("url: https://keep"));
-    assert!(!export.contains("url: https://ignore"));
-}
-
 const MIXED_URLS: [&str; 5] = [
     "https://example.com/triaged",
     "https://example.com/untriaged",
@@ -474,14 +334,6 @@ const MIXED_URLS: [&str; 5] = [
     "https://example.com/score-zero",
     "https://example.com/no-model",
 ];
-
-fn archive_options(output_filename: &str) -> ExportOptions {
-    ExportOptions {
-        output_filename: output_filename.into(),
-        manifest_filename: None,
-        ..ExportOptions::default()
-    }
-}
 
 fn write_article(
     dir: &std::path::Path,
@@ -575,7 +427,6 @@ fn export_mixed_fixture(
         "archive.md",
         &MIXED_URLS.map(str::to_string),
         None,
-        archive_options("archive.md"),
         use_summaries,
         summaries,
         &mixed_annotations(),
@@ -644,7 +495,6 @@ fn triage_archive_schema2_since_matches_shared_golden_fixture() {
             "https://example.com/scored".into(),
         ],
         Some(since),
-        archive_options("archive.md"),
         false,
         &Default::default(),
         &mixed_annotations(),
@@ -753,7 +603,6 @@ fn triage_archive_since_coverage_counts_window_remainders_and_zero_export() {
             "https://coverage.example/selected-1".into(),
         ],
         Some(since),
-        archive_options("coverage.md"),
         false,
         &Default::default(),
         &Default::default(),
@@ -777,7 +626,6 @@ fn triage_archive_since_coverage_counts_window_remainders_and_zero_export() {
         "zero.md",
         &[],
         Some(since),
-        archive_options("zero.md"),
         false,
         &Default::default(),
         &Default::default(),
@@ -903,7 +751,6 @@ fn triage_archive_boundary_forgery_matches_shared_multi_document_fixture() {
             "https://example.com/straddle".into(),
         ],
         None,
-        archive_options("forgery.md"),
         true,
         &summaries,
         &Default::default(),
@@ -942,7 +789,6 @@ fn triage_archive_sanitizes_header_injection_and_json_escapes_tags() {
         "archive.md",
         &["https://example.com/injection".into()],
         None,
-        archive_options("archive.md"),
         false,
         &Default::default(),
         &annotations,
@@ -976,7 +822,6 @@ fn triage_archive_sanitizes_header_injection_and_json_escapes_tags() {
         "archive.md",
         &["https://example.com/marker-title".into()],
         None,
-        archive_options("archive.md"),
         false,
         &Default::default(),
         &Default::default(),
@@ -1023,7 +868,6 @@ fn triage_archive_index_offsets_follow_escaped_lines_and_skip_bad_timestamp_boun
             "https://example.com/c".into(),
         ],
         None,
-        archive_options("archive.md"),
         false,
         &Default::default(),
         &Default::default(),
@@ -1062,7 +906,6 @@ fn triage_archive_unparseable_only_timestamp_has_dash_bounds() {
         "archive.md",
         &["https://example.com/bad".into()],
         None,
-        archive_options("archive.md"),
         false,
         &Default::default(),
         &Default::default(),
@@ -1082,7 +925,6 @@ fn triage_archive_zero_documents_matches_fixture_and_is_excluded_from_next_expor
         "custom-empty.md",
         &[],
         None,
-        archive_options("custom-empty.md"),
         false,
         &Default::default(),
         &Default::default(),
@@ -1107,7 +949,6 @@ fn triage_archive_zero_documents_matches_fixture_and_is_excluded_from_next_expor
         "next.md",
         &["https://example.com/article".into()],
         None,
-        archive_options("next.md"),
         false,
         &Default::default(),
         &Default::default(),

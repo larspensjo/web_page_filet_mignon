@@ -1758,6 +1758,454 @@ Every removed test (95, including the 9 added-then-removed reconciliation tests)
 | `mixed_output_jsonl_parses` | OpenAI Batch API transport and JSONL codecs: mixed output jsonl parses |
 | `unknown_lifecycle_is_rejected` | OpenAI Batch API transport and JSONL codecs: unknown lifecycle is rejected |
 
+Phase 5 notes (2026-09-30; implementation complete):
+
+- Removed aggregate executive briefing, stream/history, stale-summary refresh and concatenated export. Per-article summaries remain in the live BriefingSession; settlement has no aggregate branch or switch. Removed replay provider lookup and Prompt Lab one-off overrides, keeping replay writes and saved overlay loading. Retained checkpoint names and the indexed corpus loader. Manual pre-triage decisions are fixture support.
+- Review follow-up: the linked-page effect/runner/completion/marking chain became unreachable when LinkToggleRequested was removed. It remains unchanged here and is removed in Phase 6 work item 3 together with LinkDownloadState and the IPC bump.
+- Phase 6 must regenerate run_finished_with_notice.json and ai_unavailable.json and remove the retired-field blanking workaround in the snapshot projection comparison; no fixture bytes or IPC fields change here.
+- Polling fixtures now drive PipelineRunRequested { scope: Full } and consume its configuration effect. The refresh-coordinator isolation tests keep a local helper inside the cfg(test) module; fixture_poll_sources and the unreachable corpus-clear handler, fixture and two tests are removed. Obsolete allow(deprecated) attributes are gone.
+- JSONL and legacy RON summary stores skip AggregateBriefing entries with engine_logging warnings naming the file and skipped count. JSONL retirement/unknown-prompt counts are aggregated separately from malformed-line counts; the regression checks both classification and absence of per-line warnings. Other paid entries load without refusing the store; RON backups and existing retired artifacts remain untouched.
+- The marker lists exactly archive.md and archive-*.md. CORPUS_SCHEMA_VERSION remains 1. IPC_SCHEMA_VERSION remains 12; retired controls remain present and false/empty. Snapshot fixture bytes are unchanged: their decoder inputs remain, while the projection test asserts the three retired values and compares every other field unchanged.
+- Backlog review: added the missing FI-LLM-Briefing-0003 retirement line, restored FI-Storage-ExportArtifacts-0003 for per-article cycle results, and recorded FI-Storage-CorpusScanning-0001 for skip-and-warn scanning of unreadable articles. The live scanner remains unchanged. Corrected the removed selected-URL loader test label.
+- Archive golden fixtures, carry-over fixture and IPC decoding/projection tests pass. Summary resolution keeps live-session-first then newest content-hash entry under any key; archive and estimate lookups remain lookup_any_by_content_hash. Frontend files and launch policy are unchanged; frontend checks were not rerun (prior Vitest baseline: 96).
+- Verification: cargo build --offline; touched-crate tests followed by full root cargo test --offline; cargo clippy --offline --all-targets -- -D warnings; cargo clippy --offline -p harvester_ui --all-targets -- -D warnings; cargo fmt and cargo fmt --check. All passed. Pester, the GUI IPC probe and owner-only project-stats.ps1 were not run. No keys, live LLM APIs or real output folder were used. Changes remain uncommitted.
+- Both replay_bench host harnesses built and completed using temporary synthetic carry-over copies, one held-back article, zero synthetic model latency, synchronous requests. Batch wall time 35.5 ms; desktop 157.3 ms. These are smoke checks, not corpus-sized performance comparisons or before/after speed claims. Reports are .local/bench/phase5-review-batch/report.json and .local/bench/phase5-review-desktop/report.json; check logs are under .local/bench/phase5-checks/. Owner may record full-corpus benchmark/size rows on the next normal run.
+
+Phase 5 test-count reconciliation:
+
+| Count | Baseline | Final |
+| --- | ---: | ---: |
+| Rust test attributes | 1,471 | 1,319 |
+| Root passing tests | 1,461 | 1,309 |
+| Root ignored tests | 2 | 2 |
+
+**1,471 + 4 - 156 = 1,319 attributes** and **1,461 + 4 - 156 = 1,309 root passing tests**. Twenty-two renamed/reworked tests have no count effect. The eight unchanged harvester_ui test attributes remain outside the default-member root test run. Of the removals, 67 are in the permitted wholesale deletions and 89 are edited out of surviving files. The extra removals beyond the plan's rough estimate are aggregate domain/readiness/validation tests, retired corpus selector tests, override/replay lookup tests and unreachable link-toggle tests. Preserved cache, quota, halt, Stop, ordering, cutoff, scan exclusion, archive bytes and IPC contracts retain their tests.
+
+| Crate | Root passed before | Root passed after | Ignored after |
+| --- | ---: | ---: | ---: |
+| harvester_batch | 135 | 104 | 0 |
+| harvester_core | 667 | 596 | 0 |
+| harvester_engine | 461 | 417 | 1 |
+| harvester_io | 135 | 129 | 0 |
+| harvester_ui_bridge | 33 | 33 | 0 |
+| openai_provider_kit | 30 | 30 | 1 |
+| engine_logging | 0 | 0 | 0 |
+
+Phase 5 added regressions (4):
+
+| File | Added test | Contract |
+| --- | --- | --- |
+| `crates/harvester_core/src/update/tests/summary_settlement_tests.rs` | `every_summary_settle_path_saves_successes_and_emits_only_article_requests` | Success, partial/all failure, both quota origins, rate limit, Stop drain and cache-hit settlement retain saved successes and emit only article requests |
+| `crates/harvester_io/tests/retired_summary_entries.rs` | `jsonl_skips_aggregate_entries_warns_with_file_and_count_and_keeps_paid_results` | Mixed retired/current prompt entries load, warn with store/count, retain paid results and do not refuse hydration |
+| `crates/harvester_io/tests/retired_summary_entries.rs` | `ron_migration_skips_aggregate_entries_warns_with_file_and_count_and_keeps_paid_results` | Mixed retired/current prompt entries load, warn with store/count, retain paid results and do not refuse hydration |
+| `crates/harvester_batch/src/progress/import_reporter.rs` | `format_elapsed_formats_minutes_and_padded_seconds` | Zero, sub-minute, minute rollover, long durations and sub-second truncation preserve elapsed formatting |
+
+The removed concatenated_export_writes_corpus_manifest test is restored as triage_archive_writes_and_refreshes_corpus_manifest: archive production writes and refreshes the marker with format harvester-corpus, schema 1 and exactly archive.md/archive-*.md. This adds one back to the pre-review count; the new elapsed test adds one and the two unreachable corpus-clear tests subtract two, leaving the final count unchanged.
+
+The existing manifest_records_current_schema_version_and_layout regression now pins the exact two generated artifacts and schema 1. The existing migration test was rewritten for skip semantics; no fixture bytes changed.
+
+Phase 5 renamed/reworked tests (22; no count effect):
+
+| Before | After |
+| --- | --- |
+| `concatenated_export_writes_corpus_manifest` | `triage_archive_writes_and_refreshes_corpus_manifest` |
+| `test_dispatch_loop_reduces_queued_poll_before_settling` | `test_dispatch_loop_drains_full_run_poll_effects_before_settling` |
+| `cli_summary_refresh_refuses_any_damaged_store_before_model_setup` | `cli_one_cycle_refuses_any_damaged_store_before_model_setup` |
+| `briefing_complete_then_job_selected_shows_the_selected_summary` | `summaries_complete_then_job_selected_shows_the_selected_summary` |
+| `resume_run_sets_current_working_corpus_to_unavailable_until_triage_completes` | `resume_run_makes_archive_corpus_available_when_triage_completes` |
+| `generate_briefing_loads_archive_final_selection` | `archive_selection_loads_archive_final_selection` |
+| `generate_briefing_loads_signal_filtered_archive_final_selection` | `archive_selection_loads_signal_filtered_archive_final_selection` |
+| `generate_briefing_preserves_signal_order_and_honors_exclusions` | `archive_selection_preserves_signal_order_and_honors_exclusions` |
+| `generate_briefing_cache_hit_reuses_summary_for_aligned_selection` | `archive_selection_reuses_cached_summaries_under_any_key` |
+| `prepare_summaries_loads_base_corpus_skip_aggregate` | `prepare_summaries_loads_base_corpus` |
+| `summary_completion_advances_and_generates_briefing` | `summary_completion_advances_and_saves_without_aggregate` |
+| `aggregate_briefing_success_records_usage_for_status_bar` | `summary_success_records_usage_for_status_bar` |
+| `briefing_generate_enabled_true_when_summaries_settled_and_signal_idle` | `retired_briefing_controls_are_empty_when_summaries_settled` |
+| `briefing_quota_exhaustion_reclassifies_all_pending_article_work` | `triage_quota_exhaustion_reclassifies_all_pending_article_work` |
+| `update_is_noop` | `advance_without_a_run_is_noop` |
+| `resume_run_enters_the_pipeline_after_briefing_readiness_failure` | `resume_run_enters_the_pipeline_with_retired_briefing_controls_disabled` |
+| `path_based_loading_preserves_same_url_duplicate_entries` | `imported_same_url_duplicate_entries_remain_separate_files` |
+| `single_article_is_loaded_and_in_collection` | `single_article_is_loaded_and_prepared` |
+| `triage_delta_and_summary_collection_use_identical_preparation` | `triage_delta_preserves_summary_hash_and_preparation_budget` |
+| `stage_model_wins_over_default_when_override_is_none` | `stage_model_wins_over_default` |
+| `triage_loader_shared_scanning_matches_briefing` | `triage_loader_shared_scanning_matches_archive_metadata` |
+| `retired_aggregate_briefing_summary_entries_still_migrate` | `retired_aggregate_briefing_summary_entries_are_skipped_during_migration` |
+
+Phase 5 tests reworked in place (including live-summary and manual-fixture harness changes; no count effect):
+
+- `crates/harvester_batch/src/runner/tests.rs`: `synchronous_staggered_downloads_dispatch_triage_and_settle_once`.
+- `crates/harvester_core/src/briefing.rs`: `briefing_progress_text_shows_failure_reason`.
+- `crates/harvester_core/src/pre_triage_filter.rs`: `borrowed_included_article_queries_follow_verdict_and_delta_changes`.
+- `crates/harvester_core/src/state/batch.rs`: `cache_derived_archive_display_tracks_delta_verdict_cache_and_metadata_changes`.
+- `crates/harvester_core/src/state/tests/mod.rs`: `pre_triage_actionability_is_ready_with_pending_review_when_reviewing`, `unrequested_review_work_does_not_enter_a_stage_queue`, `batch_status_is_running_when_summary_article_load_is_in_flight`, `selecting_job_sets_preview_mode_to_selected_job_summary`, `ai_warning_banner_present_for_missing_api_key`, `resolve_preview_prefers_summary_over_triage`, `resolve_preview_returns_correct_kind`, `desktop_view_carries_rich_state_for_the_filtered_job_list`.
+- `crates/harvester_core/src/update/model_dispatch_tests.rs`: `synchronous_budget_is_clamped_and_zero_dispatches_one_triage_request`, `shared_budget_dispatches_scoring_summary_triage_and_never_exceeds_three`, `completion_gives_slot_to_new_highest_priority_work`, `summary_cache_completion_yields_to_scoring_before_next_summary`, `changed_in_flight_score_settles_and_caches_old_request_before_readmission`, `every_stage_preserves_admission_order`, `cache_hits_in_all_stages_take_no_slot`, `triage_cache_hit_rejects_old_summary_then_current_completion_admits_scoring`, `quota_halts_all_stages_and_future_admissions_with_provider_reason`, `existing_three_rate_limit_threshold_halts_all_stages`.
+- `crates/harvester_core/src/update/pipeline_run/tests.rs`: `total_source_failure_marks_scanning_failed`, `poll_only_run_becomes_terminal_when_source_poll_settles`, `accepted_stop_during_poll_drains_the_poll_without_ingesting_its_urls`, `pipeline_request_joins_an_active_poll_run_without_resetting`.
+- `crates/harvester_core/src/update/pipeline_run/wave_tests.rs`: `failed_triage_is_requested_in_the_next_run_without_an_advance_message`, `hydration_with_eligible_scoring_is_settled_and_unadmitted`, `run_requested_during_continuous_downloads_starts_triage_before_downloads_end`, `three_download_bursts_release_overlapping_waves_and_monotonic_totals`.
+- `crates/harvester_core/src/update/tests/archive_tests.rs`: `archive_clicked_with_triage_complete_and_pre_triage_ready_sets_pending_count`, `parity_a_pre_triage_ready_archive_count_is_zero_pending_count_is_nonzero`, `parity_b_triage_complete_corpus_count_dialog_count_urls_match`, `checkpoint_set_does_not_reduce_corpus_count_to_zero`, `summary_failed_for_url_returns_true_for_failed_summary`, `summaries_can_start_false_when_briefing_active`, `archive_counts_derive_from_triage_cache_at_startup_without_running_triage`.
+- `crates/harvester_core/src/update/tests/delta_tests.rs`: `delta_appends_replaces_rebudgets_preserves_verdicts_and_removes_departed_members`, `triage_waits_for_matching_budget_then_summaries_reuse_snapshot_and_prepared_text`, `duplicate_url_delta_keeps_first_identity_and_manual_decision`.
+- `crates/harvester_core/src/update/tests/import_tests.rs`: `poll_stats_cleared_when_new_poll_starts`, `poll_started_sets_total`, `poll_complete_increments_progress`, `poll_failed_increments_progress`, `poll_ended_preserves_the_current_desktop_workspace`.
+- `crates/harvester_core/src/update/tests/mod.rs`: `articles_loaded_dispatches_first_summary`, `summary_store_uses_run_frozen_metadata_when_completion_model_differs`, `summary_persisted_with_dated_model_variant_is_cache_hit_after_reload`, `second_run_reuses_cached_summary_with_configured_model_key`, `summary_completion_emits_exact_record_before_settlement`.
+- `crates/harvester_core/src/update/tests/pre_triage_refresh_tests.rs`: `poll_burst_multiple_job_dones_yields_exactly_one_triage_load`, `poll_burst_waits_for_engine_jobs_to_drain_before_dispatching`, `poll_burst_zero_urls_no_triage_load_dispatched`.
+- `crates/harvester_core/src/update/tests/provider_alert_tests.rs`: `stale_quota_completion_after_new_run_start_does_not_raise_banner`.
+- `crates/harvester_core/src/update/tests/signal_candidate_tests.rs`: `summary_completion_enqueues_signal_scoring`, `summary_cache_hit_reuses_signal_candidate_cache_without_snapshot_leak`.
+- `crates/harvester_core/src/update/tests/ui_state_tests.rs`: `missing_api_key_blocks_triage_and_briefing_actions`.
+- `crates/harvester_core/src/update/tests/unfinished_work_tests.rs`: `admitted_pending_and_active_summaries_are_in_progress`.
+- `crates/harvester_core/src/working_corpus.rs`: `triage_complete_but_all_below_cutoff_yields_unavailable`, `fingerprint_changes_on_membership_and_order_change`, `select_for_archive_ignores_pre_triage`.
+- `crates/harvester_core/tests/brave_integration.rs`: `brave_source_poll_completed_enqueues_urls`, `brave_source_dedup_skips_already_seen_urls`.
+- `crates/harvester_core/tests/jobs.rs`: `link_download_failed_sets_failed_state`.
+- `crates/harvester_core/tests/pre_triage_filter.rs`: `manual_include_overrides_hard_exclude`, `manual_exclude_overrides_auto_include`, `corpus_fingerprint_changes_when_decisions_change`.
+- `crates/harvester_core/tests/reducer_behaviour.rs`: `llm_completed_success_updates_state`, `request_ids_monotonically_increase`.
+- `crates/harvester_engine/src/corpus_manifest.rs`: `manifest_records_current_schema_version_and_layout`.
+- `crates/harvester_engine/src/llm/handle.rs`: `extra_template_vars_not_in_context_block`, `worker_request_matches_prepare_completion`, `signal_candidate_falls_back_to_summary_model_then_default`.
+- `crates/harvester_engine/src/llm/prompts/mod.rs`: `register_defaults_activates_exported_default_aliases`, `register_defaults_keeps_older_exported_versions_addressable`.
+- `crates/harvester_engine/src/llm/template_validation.rs`: `both_fields_reported_independently`.
+- `crates/harvester_engine/tests/briefing_loader_integration.rs`: `empty_directory_returns_no_articles`, `non_md_files_are_skipped`, `linked_directory_is_not_scanned`, `files_without_frontmatter_are_skipped`, `valid_files_do_not_prevent_others_from_loading`, `prepared_text_is_within_summary_budget`, `filtered_loader_includes_only_selected_urls`, `filtered_loader_preserves_caller_order`, `filtered_loader_missing_selected_url_is_skipped`, `filtered_loader_empty_selection_returns_empty_result`, `filtered_loader_matches_www_and_eu_host_variants`, `filtered_loader_matches_normalized_url_shape`, `filtered_loader_matches_mobile_and_query_variants`, `filtered_loader_matches_http_https_and_edition_variants`, `filtered_loader_matches_cisco_content_path_alias`, `archive_format_file_in_output_dir_does_not_block_article_scan`, `filtered_loader_selected_urls_older_than_since_utc_produce_empty_result`, `filtered_loader_with_progress_reports_scan_progress`.
+- `crates/harvester_engine/tests/llm_handle.rs`: `llm_handle_dispatches_completion_event`, `llm_handle_emits_usage_update_after_completion`, `concurrent_requests_never_exceed_cap`, `retry_under_concurrency_pressure`.
+- `crates/harvester_engine/tests/llm_pricing.rs`: `default_pricing_covers_configured_default_models`.
+- `crates/harvester_engine/tests/llm_prompt.rs`: `prompt_id_from_str_round_trips`, `registry_with_defaults_exposes_active_latest_template_for_each_prompt`.
+- `crates/harvester_engine/tests/output.rs`: `triage_archive_uses_ordered_urls_and_preserves_full_markdown`, `triage_archive_since_filter_excludes_old_docs_but_keeps_malformed_timestamps`, `triage_archive_ignores_existing_archive_md_artifact`, `triage_archive_uses_summary_body_when_provided`, `triage_archive_falls_back_to_full_body_when_no_summary`, `triage_archive_summary_mode_with_empty_map_uses_fallback_format`, `triage_archive_truncates_large_fallback_body_safely`, `triage_archive_schema2_since_matches_shared_golden_fixture`, `triage_archive_since_coverage_counts_window_remainders_and_zero_export`, `triage_archive_boundary_forgery_matches_shared_multi_document_fixture`, `triage_archive_sanitizes_header_injection_and_json_escapes_tags`, `triage_archive_index_offsets_follow_escaped_lines_and_skip_bad_timestamp_bounds`, `triage_archive_unparseable_only_timestamp_has_dash_bounds`, `triage_archive_zero_documents_matches_fixture_and_is_excluded_from_next_export`.
+- `crates/harvester_engine/tests/triage_loader_integration.rs`: `triage_loader_respects_shared_summary_budget`, `triage_loader_truncates_at_utf8_boundary`, `triage_loader_mapping_preserves_fields`.
+- `crates/harvester_io/src/effect_helpers.rs`: `every_prompt_id_has_a_context_filename`.
+- `crates/harvester_io/src/effect_runner/dispatch.rs`: `loaded_context_pairs_are_sorted_by_key`.
+- `crates/harvester_ui_bridge/src/driver.rs`: `driver_flushes_the_trailing_snapshot_without_another_message`.
+- `crates/harvester_ui_bridge/src/fixtures.rs`: `checked_in_snapshot_fixtures_match_core_projection`.
+
+All retained tests using the old ArticlesLoaded/orchestration harness now release completed triage through update/test_support.rs and the live downstream scheduler. Boundary tests continue to use the raw reducer and inspect emitted effects. The independent template-field validator and link-failure handler tests remain, and the old generic-selector cutoff test now uses the archive selector.
+
+Phase 5 removed tests (156), by file:
+
+**`crates/harvester_batch/src/cli.rs` (1)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `refresh_stale_summaries_limit_is_parsed` | Stale-summary refresh mode: refresh stale summaries limit is parsed |
+
+**`crates/harvester_batch/src/progress/stale_reporter.rs` (27)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `format_eta_zero_completed_returns_dashes` | Stale-summary refresh terminal reporting: format eta zero completed returns dashes |
+| `format_eta_partial_progress_returns_minutes_seconds` | Stale-summary refresh terminal reporting: format eta partial progress returns minutes seconds |
+| `format_eta_all_completed_returns_zero` | Stale-summary refresh terminal reporting: format eta all completed returns zero |
+| `format_eta_clamps_to_zero_when_completed_exceeds_selected` | Stale-summary refresh terminal reporting: format eta clamps to zero when completed exceeds selected |
+| `format_eta_zero_selected_returns_zero` | Stale-summary refresh terminal reporting: format eta zero selected returns zero |
+| `startup_line_emits_expected_fields` | Stale-summary refresh terminal reporting: startup line emits expected fields |
+| `startup_line_disabled_writes_nothing` | Stale-summary refresh terminal reporting: startup line disabled writes nothing |
+| `completed_ok_increments_counts_and_redraws` | Stale-summary refresh terminal reporting: completed ok increments counts and redraws |
+| `request_dispatched_alone_does_not_paint_status` | Stale-summary refresh terminal reporting: request dispatched alone does not paint status |
+| `completed_ok_disabled_writes_nothing` | Stale-summary refresh terminal reporting: completed ok disabled writes nothing |
+| `completed_fail_writes_sticky_stderr_and_redraws_status` | Stale-summary refresh terminal reporting: completed fail writes sticky stderr and redraws status |
+| `completed_fail_balances_pending_with_request_dispatched` | Stale-summary refresh terminal reporting: completed fail balances pending with request dispatched |
+| `completed_fail_truncates_long_reason` | Stale-summary refresh terminal reporting: completed fail truncates long reason |
+| `completed_fail_normalizes_control_chars_in_reason` | Stale-summary refresh terminal reporting: completed fail normalizes control chars in reason |
+| `completed_fail_clears_active_status_row_before_failure` | Stale-summary refresh terminal reporting: completed fail clears active status row before failure |
+| `completed_fail_disabled_writes_nothing` | Stale-summary refresh terminal reporting: completed fail disabled writes nothing |
+| `unloadable_target_increments_fail_without_touching_pending` | Stale-summary refresh terminal reporting: unloadable target increments fail without touching pending |
+| `unloadable_target_does_not_underflow_when_pending_already_zero` | Stale-summary refresh terminal reporting: unloadable target does not underflow when pending already zero |
+| `unloadable_target_clears_active_status_row_before_failure` | Stale-summary refresh terminal reporting: unloadable target clears active status row before failure |
+| `unloadable_target_disabled_writes_nothing` | Stale-summary refresh terminal reporting: unloadable target disabled writes nothing |
+| `finish_writes_done_line_with_path_and_no_cr` | Stale-summary refresh terminal reporting: finish writes done line with path and no cr |
+| `finish_disabled_writes_nothing` | Stale-summary refresh terminal reporting: finish disabled writes nothing |
+| `drop_cleanup_emits_newline_when_status_was_painted_and_finish_not_called` | Stale-summary refresh terminal reporting: drop cleanup emits newline when status was painted and finish not called |
+| `drop_cleanup_is_silent_when_no_status_was_painted` | Stale-summary refresh terminal reporting: drop cleanup is silent when no status was painted |
+| `drop_cleanup_is_silent_when_disabled` | Stale-summary refresh terminal reporting: drop cleanup is silent when disabled |
+| `finish_marks_cleanup_done_so_drop_is_silent` | Stale-summary refresh terminal reporting: finish marks cleanup done so drop is silent |
+| `full_disabled_walkthrough_writes_nothing` | Stale-summary refresh terminal reporting: full disabled walkthrough writes nothing |
+
+**`crates/harvester_batch/src/summary_refresh.rs` (4)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `summary_refresh_exit_code_is_zero_for_partial_success` | Stale-summary refresh mode: summary refresh exit code is zero for partial success |
+| `summary_refresh_exit_code_is_nonzero_when_all_attempts_fail` | Stale-summary refresh mode: summary refresh exit code is nonzero when all attempts fail |
+| `select_stale_summary_targets_prefers_missing_current_cache_key_and_respects_limit` | Stale-summary refresh mode: select stale summary targets prefers missing current cache key and respects limit |
+| `select_stale_summary_targets_deduplicates_by_content_hash` | Stale-summary refresh mode: select stale summary targets deduplicates by content hash |
+
+**`crates/harvester_core/src/briefing.rs` (17)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `can_generate_allows_streaming_but_can_start_does_not` | Aggregate briefing, stream or history: can generate allows streaming but can start does not |
+| `restart_bumps_epoch_and_clears_stream` | Aggregate briefing, stream or history: restart bumps epoch and clears stream |
+| `append_and_exhaust_stream_items` | Aggregate briefing, stream or history: append and exhaust stream items |
+| `stream_preview_has_exec_summary_numbered_items_and_session_info` | Aggregate briefing, stream or history: stream preview has exec summary numbered items and session info |
+| `stream_preview_indents_multiline_item_body_under_list_item` | Aggregate briefing, stream or history: stream preview indents multiline item body under list item |
+| `stream_preview_session_info_reports_truncation_and_dropped` | Aggregate briefing, stream or history: stream preview session info reports truncation and dropped |
+| `stream_preview_shows_exhausted_note` | Aggregate briefing, stream or history: stream preview shows exhausted note |
+| `stream_preview_none_before_exec_summary` | Aggregate briefing, stream or history: stream preview none before exec summary |
+| `briefing_format_preview_none_when_not_complete` | Aggregate briefing, stream or history: briefing format preview none when not complete |
+| `briefing_format_preview_shows_failure_reason` | Aggregate briefing, stream or history: briefing format preview shows failure reason |
+| `briefing_format_preview_truncates_at_limit` | Aggregate briefing, stream or history: briefing format preview truncates at limit |
+| `format_briefing_time_window_label_formats_checkpoint_and_all_time` | Aggregate briefing, stream or history: format briefing time window label formats checkpoint and all time |
+| `format_empty_history_returns_sentinel` | Aggregate briefing, stream or history: format empty history returns sentinel |
+| `format_single_entry_contains_timestamp_summary_and_top_stories` | Aggregate briefing, stream or history: format single entry contains timestamp summary and top stories |
+| `format_three_entries_all_present` | Aggregate briefing, stream or history: format three entries all present |
+| `from_result_rejects_empty_summary` | Aggregate briefing, stream or history: from result rejects empty summary |
+| `truncation_is_safe_on_multibyte_characters` | Aggregate briefing, stream or history: truncation is safe on multibyte characters |
+
+**`crates/harvester_core/src/briefing_snapshot.rs` (9)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `includes_duplicates_in_corpus_order_with_stable_labels` | Aggregate briefing, stream or history: includes duplicates in corpus order with stable labels |
+| `skips_in_window_articles_without_summary` | Aggregate briefing, stream or history: skips in window articles without summary |
+| `excludes_articles_before_coverage_window` | Aggregate briefing, stream or history: excludes articles before coverage window |
+| `malformed_or_missing_fetched_utc_is_included` | Aggregate briefing, stream or history: malformed or missing fetched utc is included |
+| `drops_whole_entries_over_budget_and_marks_truncated` | Aggregate briefing, stream or history: drops whole entries over budget and marks truncated |
+| `exact_fit_budget_includes_separator_bytes` | Aggregate briefing, stream or history: exact fit budget includes separator bytes |
+| `utf8_multibyte_entries_are_never_split` | Aggregate briefing, stream or history: utf8 multibyte entries are never split |
+| `oversized_first_entry_is_emitted_whole_and_marked_truncated` | Aggregate briefing, stream or history: oversized first entry is emitted whole and marked truncated |
+| `empty_when_no_completed_summaries` | Aggregate briefing, stream or history: empty when no completed summaries |
+
+**`crates/harvester_core/src/state/briefing_snapshot_access.rs` (1)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `snapshot_uses_full_base_corpus_including_duplicates` | Aggregate briefing, stream or history: snapshot uses full base corpus including duplicates |
+
+**`crates/harvester_core/src/state/tests/mod.rs` (3)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `starts_empty` | Aggregate briefing, stream or history: starts empty |
+| `push_adds_newest_first` | Aggregate briefing, stream or history: push adds newest first |
+| `push_caps_at_three` | Aggregate briefing, stream or history: push caps at three |
+
+**`crates/harvester_core/src/update/tests/archive_tests.rs` (4)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `briefing_generate_readiness_triage_or_corpus_not_ready_when_empty` | Aggregate briefing, stream or history: briefing generate readiness triage or corpus not ready when empty |
+| `briefing_generate_readiness_summaries_not_settled` | Aggregate briefing, stream or history: briefing generate readiness summaries not settled |
+| `briefing_generate_readiness_ready_when_failed_summary_does_not_block` | Aggregate briefing, stream or history: briefing generate readiness ready when failed summary does not block |
+| `briefing_generate_readiness_signal_scoring_in_progress` | Aggregate briefing, stream or history: briefing generate readiness signal scoring in progress |
+
+**`crates/harvester_core/src/update/tests/briefing_history_tests.rs` (7)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `briefing_aggregate_not_dispatched_until_all_articles_settled` | Aggregate briefing, stream or history: briefing aggregate not dispatched until all articles settled |
+| `startup_hydration_emits_load_briefing_history` | Aggregate briefing, stream or history: startup hydration emits load briefing history |
+| `briefing_history_loaded_sets_state` | Aggregate briefing, stream or history: briefing history loaded sets state |
+| `briefing_completion_appends_history_and_emits_save` | Aggregate briefing, stream or history: briefing completion appends history and emits save |
+| `format_block_contains_history_content` | Aggregate briefing, stream or history: format block contains history content |
+| `aggregate_briefing_effect_includes_previous_briefings_extra_var` | Aggregate briefing, stream or history: aggregate briefing effect includes previous briefings extra var |
+| `aggregate_briefing_effect_includes_checkpoint_time_window_extra_var` | Aggregate briefing, stream or history: aggregate briefing effect includes checkpoint time window extra var |
+
+**`crates/harvester_core/src/update/tests/briefing_stream_tests.rs` (9)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `generate_without_hydration_defers_then_dispatches_after_hydration` | Aggregate briefing, stream or history: generate without hydration defers then dispatches after hydration |
+| `next_item_clicked_before_exec_summary_is_noop` | Aggregate briefing, stream or history: next item clicked before exec summary is noop |
+| `exec_completion_enters_streaming_and_writes_no_history` | Aggregate briefing, stream or history: exec completion enters streaming and writes no history |
+| `next_item_emits_item_call_with_already_shown_suffix` | Aggregate briefing, stream or history: next item emits item call with already shown suffix |
+| `item_completion_appends_then_exhausts` | Aggregate briefing, stream or history: item completion appends then exhausts |
+| `item_failure_keeps_next_enabled_and_does_not_append` | Aggregate briefing, stream or history: item failure keeps next enabled and does not append |
+| `stale_next_item_completion_from_discarded_stream_is_ignored` | Aggregate briefing, stream or history: stale next item completion from discarded stream is ignored |
+| `streaming_with_item_in_flight_counts_as_active_work` | Aggregate briefing, stream or history: streaming with item in flight counts as active work |
+| `view_exposes_next_item_enabled_and_keeps_generate_enabled_mid_stream` | Aggregate briefing, stream or history: view exposes next item enabled and keeps generate enabled mid stream |
+
+**`crates/harvester_core/src/update/tests/delta_tests.rs` (1)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `imported_corpus_clear_emits_index_reset` | Unreachable corpus-clear message: emitted index reset |
+
+**`crates/harvester_core/src/update/tests/import_tests.rs` (1)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `imported_corpus_cleared_resets_state` | Unreachable corpus-clear message: reset imported corpus state |
+
+**`crates/harvester_core/src/update/tests/mod.rs` (3)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `generate_briefing_defensive_fail_when_summaries_not_settled` | Aggregate briefing, stream or history: generate briefing defensive fail when summaries not settled |
+| `generate_briefing_defensive_fail_when_signal_scoring_in_progress` | Aggregate briefing, stream or history: generate briefing defensive fail when signal scoring in progress |
+| `aggregate_briefing_failure_records_reason_in_session_phase` | Aggregate briefing, stream or history: aggregate briefing failure records reason in session phase |
+
+**`crates/harvester_core/src/update/tests/provider_alert_tests.rs` (1)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `generate_briefing_start_clears_provider_alert` | Aggregate briefing, stream or history: generate briefing start clears provider alert |
+
+**`crates/harvester_core/src/update/tests/triage_tests.rs` (2)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `briefing_blocked_when_triage_in_progress` | Aggregate briefing, stream or history: briefing blocked when triage in progress |
+| `triage_click_blocked_when_briefing_owns_triage` | Aggregate briefing, stream or history: triage click blocked when briefing owns triage |
+
+**`crates/harvester_core/src/update/tests/ui_state_tests.rs` (1)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `briefing_generate_enabled_false_while_briefing_is_running` | Aggregate briefing, stream or history: briefing generate enabled false while briefing is running |
+
+**`crates/harvester_core/src/working_corpus.rs` (9)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `pre_triage_ready_wins_over_stale_triage` | Retired pre-triage-first corpus selector: pre triage ready wins over stale triage |
+| `pre_triage_ready_wins_over_empty_triage` | Retired pre-triage-first corpus selector: pre triage ready wins over empty triage |
+| `pre_triage_reviewing_takes_precedence_over_complete_triage` | Retired pre-triage-first corpus selector: pre triage reviewing takes precedence over complete triage |
+| `pre_triage_loading_falls_through_to_triage_complete` | Retired pre-triage-first corpus selector: pre triage loading falls through to triage complete |
+| `triage_complete_used_when_pre_triage_unavailable` | Retired pre-triage-first corpus selector: triage complete used when pre triage unavailable |
+| `both_unavailable_yields_unavailable` | Retired pre-triage-first corpus selector: both unavailable yields unavailable |
+| `failed_pre_triage_and_idle_triage_yields_unavailable` | Retired pre-triage-first corpus selector: failed pre triage and idle triage yields unavailable |
+| `loaded_empty_pre_triage_yields_unavailable` | Retired pre-triage-first corpus selector: loaded empty pre triage yields unavailable |
+| `reviewing_phase_all_excluded_still_reports_pre_triage_reviewing` | Retired pre-triage-first corpus selector: reviewing phase all excluded still reports pre triage reviewing |
+
+**`crates/harvester_core/tests/jobs.rs` (4)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `link_toggle_requested_emits_download_effect` | Unreachable per-link toggle action: link toggle requested emits download effect |
+| `link_toggle_unchecked_emits_delete_effect_when_downloaded` | Unreachable per-link toggle action: link toggle unchecked emits delete effect when downloaded |
+| `link_toggle_unchecked_can_delete_during_stop_drain` | Unreachable per-link toggle action: link toggle unchecked can delete during stop drain |
+| `link_toggle_unchecked_without_download_generates_no_effect` | Unreachable per-link toggle action: link toggle unchecked without download generates no effect |
+
+**`crates/harvester_engine/src/llm/dto.rs` (1)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `next_item_variants_constructable` | Aggregate briefing, stream or history: next item variants constructable |
+
+**`crates/harvester_engine/src/llm/handle.rs` (3)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `validate_model_override_rejects_wrong_provider_with_small_error_type` | Prompt Lab overrides or replay lookup: validate model override rejects wrong provider with small error type |
+| `validate_model_override_rejects_unknown_model_name_with_small_error_type` | Prompt Lab overrides or replay lookup: validate model override rejects unknown model name with small error type |
+| `briefing_stream_ids_resolve_to_briefing_model` | Prompt Lab overrides or replay lookup: briefing stream ids resolve to briefing model |
+
+**`crates/harvester_engine/src/llm/prompt.rs` (1)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `briefing_stream_prompt_ids_round_trip` | Aggregate briefing, stream or history: briefing stream prompt ids round trip |
+
+**`crates/harvester_engine/src/llm/prompts/briefing.rs` (6)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `v5_template_validates_briefing_variables` | Aggregate briefing, stream or history: v5 template validates briefing variables |
+| `v6_template_validates_briefing_variables` | Aggregate briefing, stream or history: v6 template validates briefing variables |
+| `v7_template_validates_briefing_variables` | Aggregate briefing, stream or history: v7 template validates briefing variables |
+| `v7_expected_format_captures_top_story_schema` | Aggregate briefing, stream or history: v7 expected format captures top story schema |
+| `v8_template_validates_briefing_variables` | Aggregate briefing, stream or history: v8 template validates briefing variables |
+| `v8_expected_format_captures_top_story_schema` | Aggregate briefing, stream or history: v8 expected format captures top story schema |
+
+**`crates/harvester_engine/src/llm/prompts/briefing_stream.rs` (4)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `both_templates_validate` | Aggregate briefing, stream or history: both templates validate |
+| `ids_and_versions_are_set` | Aggregate briefing, stream or history: ids and versions are set |
+| `rendered_system_prefix_is_byte_identical` | Aggregate briefing, stream or history: rendered system prefix is byte identical |
+| `next_item_user_template_carries_suffix_only_vars` | Aggregate briefing, stream or history: next item user template carries suffix only vars |
+
+**`crates/harvester_engine/src/llm/template_validation.rs` (2)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `aggregate_briefing_supports_briefing_specific_variables` | Aggregate briefing, stream or history: aggregate briefing supports briefing specific variables |
+| `briefing_stream_templates_validate_with_synthetic_vars` | Aggregate briefing, stream or history: briefing stream templates validate with synthetic vars |
+
+**`crates/harvester_engine/src/llm/validation.rs` (7)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `validate_executive_summary_accepts_valid` | Aggregate briefing, stream or history: validate executive summary accepts valid |
+| `validate_executive_summary_rejects_blank` | Aggregate briefing, stream or history: validate executive summary rejects blank |
+| `validate_next_item_accepts_item` | Aggregate briefing, stream or history: validate next item accepts item |
+| `validate_next_item_accepts_exhausted_and_ignores_extra_fields` | Aggregate briefing, stream or history: validate next item accepts exhausted and ignores extra fields |
+| `validate_next_item_rejects_blank_headline_or_body` | Aggregate briefing, stream or history: validate next item rejects blank headline or body |
+| `validate_next_item_fails_closed_on_unknown_status` | Aggregate briefing, stream or history: validate next item fails closed on unknown status |
+| `validate_next_item_truncates_long_body_to_word_limit` | Aggregate briefing, stream or history: validate next item truncates long body to word limit |
+
+**`crates/harvester_engine/tests/briefing_loader_integration.rs` (4)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `collection_text_respects_collection_budget` | Aggregate collection-text loader: collection text respects collection budget |
+| `collection_limits_articles_when_budget_tight` | Aggregate collection-text loader: collection limits articles when budget tight |
+| `filtered_loader_budget_trimming_drops_tail_only` | Aggregate collection-text loader: filtered loader budget trimming drops tail only |
+| `filtered_loader_single_selection_ignores_unrelated_invalid_markdown` | Retired selected-URL loader: skipped unreadable unselected Markdown before loading |
+
+**`crates/harvester_engine/tests/llm_handle.rs` (7)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `llm_handle_skips_provider_when_cache_hit` | Prompt Lab overrides or replay lookup: llm handle skips provider when cache hit |
+| `llm_handle_inserts_cache_after_successful_response` | Prompt Lab overrides or replay lookup: llm handle inserts cache after successful response |
+| `override_model_wins_over_stage_and_default` | Prompt Lab overrides or replay lookup: override model wins over stage and default |
+| `unsupported_model_wrong_provider_fires_before_provider_call` | Prompt Lab overrides or replay lookup: unsupported model wrong provider fires before provider call |
+| `unsupported_model_unknown_name_fires_before_provider_call` | Prompt Lab overrides or replay lookup: unsupported model unknown name fires before provider call |
+| `valid_override_cache_miss_records_override_in_metadata` | Prompt Lab overrides or replay lookup: valid override cache miss records override in metadata |
+| `valid_override_cache_hit_records_override_in_metadata` | Prompt Lab overrides or replay lookup: valid override cache hit records override in metadata |
+
+**`crates/harvester_engine/tests/llm_prompt.rs` (1)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `briefing_stream_ids_have_active_default_prompts` | Aggregate briefing, stream or history: briefing stream ids have active default prompts |
+
+**`crates/harvester_engine/tests/llm_replay.rs` (1)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `replay_provider_loads_and_finds_record` | Replay provider lookup: replay provider loads and finds record |
+
+**`crates/harvester_engine/tests/llm_validation.rs` (3)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `executive_summary_over_limit_is_truncated_with_notice` | Aggregate briefing, stream or history: executive summary over limit is truncated with notice |
+| `briefing_story_body_is_truncated_to_150_words` | Aggregate briefing, stream or history: briefing story body is truncated to 150 words |
+| `legacy_theme_briefing_is_mapped_to_story_schema` | Aggregate briefing, stream or history: legacy theme briefing is mapped to story schema |
+
+**`crates/harvester_engine/tests/output.rs` (4)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `concatenated_export_builds_delimited_output_and_manifest` | Concatenated export and manifest: concatenated export builds delimited output and manifest |
+| `concatenated_export_creates_missing_output_dir` | Concatenated export and manifest: concatenated export creates missing output dir |
+| `concatenated_export_includes_linked_pages_and_dedupes_urls` | Concatenated export and manifest: concatenated export includes linked pages and dedupes urls |
+| `concatenated_export_ignores_custom_archive_artifacts_by_content` | Concatenated export and manifest: concatenated export ignores custom archive artifacts by content |
+
+**`crates/harvester_io/src/effect_helpers.rs` (1)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `briefing_stream_ids_reuse_aggregate_context_file` | Aggregate briefing, stream or history: briefing stream ids reuse aggregate context file |
+
+**`crates/harvester_io/src/effect_runner/tests.rs` (2)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `load_articles_for_briefing_with_empty_ordered_urls_dispatches_empty_articles_loaded` | Aggregate loader or Prompt Lab override error: load articles for briefing with empty ordered urls dispatches empty articles loaded |
+| `map_llm_event_unsupported_model_has_none_metadata` | Aggregate loader or Prompt Lab override error: map llm event unsupported model has none metadata |
+
+**`crates/harvester_io/src/persistence.rs` (4)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `round_trip_empty` | Briefing history persistence: round trip empty |
+| `round_trip_three_entries` | Briefing history persistence: round trip three entries |
+| `missing_file_returns_empty` | Briefing history persistence: missing file returns empty |
+| `malformed_ron_returns_empty` | Briefing history persistence: malformed ron returns empty |
+
+**`crates/harvester_io/src/runtime_paths.rs` (1)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `briefing_history_path_is_in_output_dir` | Briefing history persistence: briefing history path is in output dir |
+
+
 ## Open questions
 
 None open. The two questions from the first draft (going back to an older build after the

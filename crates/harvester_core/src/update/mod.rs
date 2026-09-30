@@ -104,7 +104,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             vec![
                 Effect::LoadPromptContexts,
                 Effect::LoadLlmMetadata,
-                Effect::LoadBriefingHistory,
                 Effect::LoadBriefingCheckpoint,
             ]
         }
@@ -175,40 +174,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             Vec::new()
         }
-        Msg::LinkToggleRequested {
-            job_id,
-            link_index,
-            checked,
-        } => {
-            let mut effects = Vec::new();
-            if !checked
-                || (state.pipeline_run_phase() != crate::PipelineRunPhase::Stopping
-                    && state.session() != SessionState::Finishing)
-            {
-                if let Some((url, downloaded_path)) = state.link_metadata(job_id, link_index) {
-                    if checked && state.mark_link_download_requested(job_id, link_index) {
-                        effects.push(Effect::DownloadLinkedPage {
-                            job_id,
-                            link_index,
-                            url,
-                        });
-                    } else if !checked && state.mark_link_deleted(job_id, link_index) {
-                        if let Some(path) = downloaded_path {
-                            effects.push(Effect::DeleteLinkedPage {
-                                job_id,
-                                link_index,
-                                path,
-                            });
-                        }
-                    }
-                }
-            }
-            effects
-        }
-        Msg::LinkDownloadStarted { job_id, link_index } => {
-            state.mark_link_download_requested(job_id, link_index);
-            Vec::new()
-        }
+
         Msg::LinkDownloadCompleted {
             job_id,
             link_index,
@@ -297,27 +263,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 height: inner_height,
             }]
         }
-        Msg::RequestLlmCompletion {
-            prompt_id,
-            prompt_version,
-            model_override,
-            input_content,
-            context,
-            template_override,
-        } => {
-            let request_id = state.allocate_next_llm_request_id();
-            state.record_pending_llm_request(request_id, prompt_id);
-            vec![Effect::RequestLlmCompletion {
-                request_id,
-                prompt_id,
-                prompt_version,
-                model_override,
-                input_content,
-                context,
-                template_override,
-                extra_template_vars: vec![],
-            }]
-        }
+
         Msg::LlmCompleted {
             request_id,
             result,
@@ -334,11 +280,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             Vec::new()
         }
-        Msg::GenerateBriefingClicked => briefing::handle_generate_clicked(&mut state),
-        Msg::NextBriefingItemClicked => briefing::handle_next_item_clicked(&mut state),
-        Msg::BriefingHistoryLoaded { entries } => {
-            briefing::handle_history_loaded(&mut state, entries)
-        }
+
         Msg::BriefingCheckpointLoaded { since_utc } => {
             briefing::handle_checkpoint_loaded(&mut state, since_utc)
         }
@@ -410,13 +352,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             signal_candidate::handle_toggle_exclusion(&mut state, signal_key, &mut effects);
             effects
         }
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text,
-        } => briefing::handle_articles_loaded(&mut state, articles, collection_text),
-        Msg::ArticlesLoadFailed { reason } => {
-            briefing::handle_articles_load_failed(&mut state, reason)
-        }
+
         Msg::TriageArticlesLoaded { request_id, delta } => {
             triage::handle_articles_loaded(&mut state, request_id, delta)
         }
@@ -478,7 +414,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.set_prompt_contexts(contexts);
             state.mark_triage_metadata_ready();
             state.mark_dirty();
-            briefing::resume_deferred_exec_dispatch(&mut state)
+            Vec::new()
         }
         Msg::PromptContextsLoadFailed { reason } => {
             engine_warn!("[PromptContext] Failed to load contexts: {}", reason);
@@ -488,15 +424,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             Vec::new()
         }
         Msg::PromptTemplateFilesLoaded => {
-            engine_info!("[prompt-lab-template] Saved template overlays loaded");
+            engine_info!("[prompt-template] Saved template overlays loaded");
             state.mark_prompt_template_files_loaded();
             state.mark_dirty();
-            let mut effects = Vec::new();
-            if state.briefing().exec_dispatch_deferred() && !state.llm_metadata_loaded() {
-                effects.push(Effect::LoadLlmMetadata);
-            }
-            effects.extend(briefing::resume_deferred_exec_dispatch(&mut state));
-            effects
+            Vec::new()
         }
         Msg::LlmMetadataLoaded {
             active_versions,
@@ -511,9 +442,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_briefing_metadata_ready();
             state.mark_triage_metadata_ready();
             state.mark_dirty();
-            let mut effects = Vec::new();
-            effects.extend(briefing::resume_deferred_exec_dispatch(&mut state));
-            effects
+            Vec::new()
         }
         Msg::AiAvailabilityDetected { availability } => {
             state.set_ai_availability(availability);
@@ -561,13 +490,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             None => Vec::new(),
         },
-        Msg::PollSourcesClicked => {
-            let effects = polling::handle_poll_sources_clicked(&mut state);
-            if !effects.is_empty() {
-                pipeline_run::begin_run_if_needed(&mut state);
-            }
-            effects
-        }
+
         Msg::PollIndirectLinks => polling::handle_poll_indirect_links(&mut state),
         Msg::PollStarted { total } => polling::handle_poll_started(&mut state, total),
         Msg::SourcePollCompleted {
@@ -621,7 +544,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::ImportSavedWebpagesFailed { request_id, reason } => {
             import::handle_import_failed(&mut state, request_id, reason)
         }
-        Msg::ImportedCorpusCleared => import::handle_corpus_cleared(&mut state),
 
         Msg::FetchOutcomeClassified {
             job_id,
@@ -655,7 +577,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             let has_in_flight_jobs = state.batch_observation().jobs_in_flight > 0;
             triage::dispatch_pre_triage_if_due(&mut state, tick, has_in_flight_jobs)
         }
-        Msg::NoOp => Vec::new(),
     };
 
     model_dispatch::dispatch_model_work(&mut state, &mut effects);

@@ -20,15 +20,9 @@ fn summary_articles(count: usize) -> (Vec<crate::briefing::LoadedArticle>, Strin
 fn start_summary_run(count: usize, max_in_flight: usize) -> (AppState, Vec<u64>) {
     let mut state = AppState::new();
     state.set_llm_max_in_flight(max_in_flight);
-    let (articles, collection_text) = summary_articles(count);
+    let (articles, _collection_text) = summary_articles(count);
     let state = start_briefing_after_triage(state, articles.clone());
-    let (state, effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text,
-        },
-    );
+    let (state, effects) = crate::update::test_support::summarize(state, articles);
     let request_ids = effects
         .iter()
         .filter_map(|effect| match effect {
@@ -202,26 +196,12 @@ fn triage_start_clears_provider_alert() {
 }
 
 #[test]
-fn generate_briefing_start_clears_provider_alert() {
-    init_logging();
-    let mut state = complete_triage_state_for_test(2);
-    state = with_summary_metadata(state);
-    seed_summaries_for_triage_hashes(&mut state, 2);
-    state.note_provider_out_of_credits("provider quota exhausted: billing".to_string());
-
-    let (state, _) = update(state, Msg::GenerateBriefingClicked);
-
-    assert!(state.provider_alert().is_none());
-    assert!(state.view().ai_warning_banner.is_none());
-}
-
-#[test]
 fn stale_quota_completion_after_new_run_start_does_not_raise_banner() {
     init_logging();
     let (mut state, requests) = start_summary_run(3, 2);
     assert_eq!(requests.len(), 2);
     // Replacing the session leaves the old worker completion unowned.
-    state.set_briefing(crate::briefing::BriefingSession::new_loading(None));
+    state.set_briefing(crate::briefing::BriefingSession::new_loading());
     assert!(state.provider_alert().is_none());
     let (state, _) = deliver(state, requests[1], quota_result(QuotaOrigin::SessionBudget));
 

@@ -5,12 +5,12 @@ use crate::signal_candidate::{ArchiveSelectionSource, OverrideKey};
 use crate::LlmResultKind;
 use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
 use harvester_engine::llm::prompt::PromptId;
-use harvester_engine::llm::DEFAULT_BRIEFING_MODEL;
 
 mod support;
 use support::*;
 
 mod delta_tests;
+mod summary_settlement_tests;
 mod unfinished_work_tests;
 
 #[test]
@@ -91,22 +91,8 @@ fn complete_signal_candidate(state: &mut AppState, index: usize, score: u8, key:
         .complete(&url, signal_result(score, key));
 }
 
-fn briefing_exec_snapshot(effects: &[Effect]) -> String {
-    effects
-        .iter()
-        .find_map(|effect| match effect {
-            Effect::RequestLlmCompletion {
-                prompt_id: PromptId::BriefingExecutiveSummary,
-                input_content,
-                ..
-            } => Some(input_content.clone()),
-            _ => None,
-        })
-        .expect("expected BriefingExecutiveSummary request")
-}
-
 #[test]
-fn generate_briefing_loads_archive_final_selection() {
+fn archive_selection_loads_archive_final_selection() {
     init_logging();
     let mut state = complete_triage_state_for_test(2);
     state = with_summary_metadata(state);
@@ -117,23 +103,10 @@ fn generate_briefing_loads_archive_final_selection() {
         selection.source,
         ArchiveSelectionSource::FullCorpusSignalUnavailable
     );
-    let (state, effects) = update(state, Msg::GenerateBriefingClicked);
-    let snapshot = briefing_exec_snapshot(&effects);
-
-    assert!(snapshot.contains("[A1]"));
-    assert!(snapshot.contains("[A2]"));
-    assert_eq!(
-        state.briefing().snapshot_counts().0,
-        state.archive_corpus().ordered_urls().len()
-    );
-    assert_eq!(state.briefing().phase(), &BriefingPhase::GeneratingBriefing);
-    assert!(effects
-        .iter()
-        .all(|effect| { !matches!(effect, Effect::LoadArticlesForBriefing { .. }) }));
 }
 
 #[test]
-fn generate_briefing_loads_signal_filtered_archive_final_selection() {
+fn archive_selection_loads_signal_filtered_archive_final_selection() {
     init_logging();
     let mut state = complete_triage_state_for_test(2);
     state = with_summary_metadata(state);
@@ -152,22 +125,10 @@ fn generate_briefing_loads_signal_filtered_archive_final_selection() {
         ],
         "fixture must distinguish base corpus from signal-narrowed selection"
     );
-
-    let (state, effects) = update(state, Msg::GenerateBriefingClicked);
-
-    let snapshot = briefing_exec_snapshot(&effects);
-    assert!(snapshot.contains("[A1]"));
-    assert!(snapshot.contains("[A2]"));
-    assert_eq!(
-        state.briefing().snapshot_counts().0,
-        state.archive_corpus().ordered_urls().len(),
-        "briefing stream uses the full base corpus, not the signal-narrowed archive selection"
-    );
-    assert_eq!(state.briefing().phase(), &BriefingPhase::GeneratingBriefing);
 }
 
 #[test]
-fn generate_briefing_preserves_signal_order_and_honors_exclusions() {
+fn archive_selection_preserves_signal_order_and_honors_exclusions() {
     init_logging();
     let mut state = complete_triage_state_for_test(3);
     state = with_summary_metadata(state);
@@ -192,66 +153,10 @@ fn generate_briefing_preserves_signal_order_and_honors_exclusions() {
         ],
         "selection should keep score order after removing the excluded cluster"
     );
-
-    let (state, effects) = update(state, Msg::GenerateBriefingClicked);
-    let snapshot = briefing_exec_snapshot(&effects);
-
-    assert!(snapshot.contains("[A1]"));
-    assert!(snapshot.contains("[A2]"));
-    assert!(snapshot.contains("[A3]"));
-    assert_eq!(state.briefing().snapshot_counts().0, 3);
-    assert_ne!(
-        state.briefing().snapshot_counts().0,
-        expected.ordered_urls.len(),
-        "briefing stream intentionally ignores signal ordering/exclusions for its source pool"
-    );
 }
 
 #[test]
-fn generate_briefing_defensive_fail_when_summaries_not_settled() {
-    init_logging();
-    let state = complete_triage_state_for_test(2);
-    let state = with_summary_metadata(state);
-
-    let (state, effects) = update(state, Msg::GenerateBriefingClicked);
-
-    assert!(effects
-        .iter()
-        .all(|effect| !matches!(effect, Effect::LoadArticlesForBriefing { .. })));
-    assert!(matches!(
-        state.briefing().phase(),
-        BriefingPhase::Failed { reason }
-            if reason == "Summarize articles before generating a briefing."
-    ));
-}
-
-#[test]
-fn generate_briefing_defensive_fail_when_signal_scoring_in_progress() {
-    init_logging();
-    let mut state = complete_triage_state_for_test(2);
-    state = with_summary_metadata(state);
-    state = with_signal_candidate_metadata(state);
-    seed_summaries_for_triage_hashes(&mut state, 2);
-    let url = "https://triage-complete.com/0".to_string();
-    state
-        .signal_candidate_mut()
-        .enqueue(url.clone(), "fixture-input".to_string());
-    state.signal_candidate_mut().mark_scoring(&url, 99);
-
-    let (state, effects) = update(state, Msg::GenerateBriefingClicked);
-
-    assert!(effects
-        .iter()
-        .all(|effect| !matches!(effect, Effect::LoadArticlesForBriefing { .. })));
-    assert!(matches!(
-        state.briefing().phase(),
-        BriefingPhase::Failed { reason }
-            if reason == "Signal scoring still in progress. Wait for it to finish."
-    ));
-}
-
-#[test]
-fn generate_briefing_cache_hit_reuses_summary_for_aligned_selection() {
+fn archive_selection_reuses_cached_summaries_under_any_key() {
     init_logging();
     let mut state = complete_triage_state_for_test(2);
     state = with_summary_metadata(state);
@@ -260,22 +165,21 @@ fn generate_briefing_cache_hit_reuses_summary_for_aligned_selection() {
     complete_signal_candidate(&mut state, 0, 80, "cluster-a");
     complete_signal_candidate(&mut state, 1, 30, "cluster-b");
 
-    let (state, effects) = update(state, Msg::GenerateBriefingClicked);
-    let snapshot = briefing_exec_snapshot(&effects);
-    assert!(snapshot.contains("[A1]"));
-    assert!(snapshot.contains("[A2]"));
-    assert!(effects.iter().all(|effect| !matches!(
-        effect,
-        Effect::RequestLlmCompletion {
-            prompt_id: PromptId::ArticleSummary | PromptId::AggregateBriefing,
-            ..
-        }
-    )));
-    assert_eq!(state.briefing().snapshot_counts().0, 2);
+    let urls = state.archive_corpus().ordered_urls().to_vec();
+    assert_eq!(urls.len(), 2);
+    assert_eq!(state.archive_final_selection().ordered_urls.len(), 1);
+    for url in &urls {
+        assert!(state.summary_result_for_url(url).is_some());
+    }
+    assert_eq!(state.archive_token_estimates(&urls).summary_coverage, 2);
+    let (_, effects) = update(state, Msg::ArchiveClicked);
+    assert!(effects
+        .iter()
+        .all(|effect| !matches!(effect, Effect::RequestLlmCompletion { .. })));
 }
 
 #[test]
-fn prepare_summaries_loads_base_corpus_skip_aggregate() {
+fn prepare_summaries_loads_base_corpus() {
     init_logging();
     let state = complete_triage_state_for_test(2);
     let state = with_summary_metadata(state);
@@ -289,7 +193,7 @@ fn prepare_summaries_loads_base_corpus_skip_aggregate() {
 
     assert!(effects
         .iter()
-        .all(|e| !matches!(e, Effect::LoadArticlesForBriefing { .. })));
+        .all(|e| !matches!(e, Effect::LoadArticlesForTriage { .. })));
     assert_eq!(
         state
             .briefing()
@@ -299,7 +203,6 @@ fn prepare_summaries_loads_base_corpus_skip_aggregate() {
             .collect::<Vec<_>>(),
         state.archive_corpus().ordered_urls().to_vec()
     );
-    assert!(state.briefing_orchestration_skip_aggregate());
     assert!(matches!(
         state.briefing().phase(),
         BriefingPhase::Summarizing
@@ -311,15 +214,9 @@ fn articles_loaded_dispatches_first_summary() {
     init_logging();
     let state = AppState::new();
     let state = start_briefing_after_triage(state, loaded_articles().0.clone());
-    let (articles, collection_text) = loaded_articles();
+    let (articles, _collection_text) = loaded_articles();
 
-    let (state, effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text,
-        },
-    );
+    let (state, effects) = crate::update::test_support::summarize(state, articles);
 
     assert_eq!(effects.len(), 1);
     let summary_req_id =
@@ -329,10 +226,8 @@ fn articles_loaded_dispatches_first_summary() {
         Effect::RequestLlmCompletion {
             prompt_id: PromptId::ArticleSummary,
             prompt_version: None,
-            model_override: None,
             input_content,
             context,
-            template_override: None,
             ..
         } if input_content.starts_with("Article A text") && context.is_empty()
     ));
@@ -347,21 +242,15 @@ fn articles_loaded_dispatches_first_summary() {
 }
 
 #[test]
-fn summary_completion_advances_and_generates_briefing() {
+fn summary_completion_advances_and_saves_without_aggregate() {
     init_logging();
     let state = AppState::new();
     let state = start_briefing_after_triage(state, loaded_articles().0.clone());
-    let (articles, collection_text) = loaded_articles();
+    let (articles, _collection_text) = loaded_articles();
 
     // Capture the Article A summary request ID from the effect so the test
     // does not depend on prior allocation counts inside the setup helpers.
-    let (state, articles_effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text,
-        },
-    );
+    let (state, articles_effects) = crate::update::test_support::summarize(state, articles);
     let req_a = request_id_for_prompt(&articles_effects, PromptId::ArticleSummary)
         .expect("Article A summary request");
 
@@ -391,10 +280,8 @@ fn summary_completion_advances_and_generates_briefing() {
         Effect::RequestLlmCompletion {
             prompt_id: PromptId::ArticleSummary,
             prompt_version: None,
-            model_override: None,
             input_content,
             context,
-            template_override: None,
             ..
         } if input_content.starts_with("Article B text") && context.is_empty()
     ));
@@ -414,63 +301,15 @@ fn summary_completion_advances_and_generates_briefing() {
         },
     );
 
-    // effects[0] = SaveResults; effects[1] = UpsertEntityIndexEntry for Article B
-    // effects[2] = RequestLlmCompletion for AggregateBriefing
-    assert_eq!(effects.len(), 3);
-    let req_c = request_id_for_prompt(&effects, PromptId::AggregateBriefing)
-        .expect("aggregate briefing request");
-    assert_ne!(
-        req_c, req_b,
-        "briefing request must have a distinct id from last summary"
-    );
-    match &effects[2] {
-        Effect::RequestLlmCompletion {
-            prompt_id,
-            prompt_version,
-            model_override,
-            input_content,
-            context,
-            template_override,
-            extra_template_vars,
-            ..
-        } => {
-            assert_eq!(*prompt_id, PromptId::AggregateBriefing);
-            assert_eq!(*prompt_version, None);
-            assert_eq!(*model_override, None);
-            assert_eq!(input_content, "Collection text");
-            assert!(context.is_empty());
-            assert!(template_override.is_none());
-            assert!(extra_template_vars
-                .iter()
-                .any(|(k, v)| k == "previous_briefings" && v == "(none)"));
-            assert!(extra_template_vars.iter().any(|(k, v)| {
-                k == "briefing_time_window" && v.contains("All available articles")
-            }));
-        }
-        other => panic!("expected aggregate briefing request, got {other:?}"),
-    }
-
-    let (state, effects) = update(
-        state,
-        Msg::LlmCompleted {
-            request_id: req_c,
-            result: LlmResultKind::Success {
-                output_json: briefing_json(2),
-                input_tokens: 20,
-                output_tokens: 8,
-                prompt_version: 1,
-                resolved_model: "test-model".to_string(),
-            },
-            metadata: None,
-        },
-    );
-
     assert!(effects.iter().any(|e| matches!(e, Effect::FlushResults)));
     assert!(effects
         .iter()
-        .any(|e| matches!(e, Effect::SaveBriefingHistory { .. })));
+        .any(|e| matches!(e, Effect::SaveResults { records } if records.len() == 1)));
+    assert!(effects
+        .iter()
+        .all(|e| !matches!(e, Effect::RequestLlmCompletion { .. })));
+    assert_eq!(state.summary_cache().len(), 2);
     assert_eq!(state.briefing().phase(), &BriefingPhase::Complete);
-    assert!(state.briefing().briefing_result().is_some());
 }
 
 #[test]
@@ -478,14 +317,8 @@ fn summary_store_uses_run_frozen_metadata_when_completion_model_differs() {
     init_logging();
     let state = AppState::new();
     let state = start_briefing_after_triage(state, loaded_single_article().0.clone());
-    let (articles, collection_text) = loaded_single_article();
-    let (state, effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text,
-        },
-    );
+    let (articles, _collection_text) = loaded_single_article();
+    let (state, effects) = crate::update::test_support::summarize(state, articles);
     let summary_request_id =
         request_id_for_prompt(&effects, PromptId::ArticleSummary).expect("summary request");
 
@@ -519,14 +352,8 @@ fn summary_persisted_with_dated_model_variant_is_cache_hit_after_reload() {
     // Session 1: provider returns a dated model variant; cache must store with canonical alias.
     init_logging();
     let state = start_briefing_after_triage(AppState::new(), loaded_single_article().0.clone());
-    let (articles, collection_text) = loaded_single_article();
-    let (state, effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles: articles.clone(),
-            collection_text: collection_text.clone(),
-        },
-    );
+    let (articles, _collection_text) = loaded_single_article();
+    let (state, effects) = crate::update::test_support::summarize(state, articles.clone());
     let summary_request_id = request_id_for_prompt(&effects, PromptId::ArticleSummary)
         .expect("summary request in session 1");
 
@@ -559,13 +386,7 @@ fn summary_persisted_with_dated_model_variant_is_cache_hit_after_reload() {
             cache: persisted_cache,
         },
     );
-    let (_state, effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text,
-        },
-    );
+    let (_state, effects) = crate::update::test_support::summarize(state, articles);
 
     assert!(
         effects.iter().all(|e| !matches!(
@@ -580,18 +401,12 @@ fn summary_persisted_with_dated_model_variant_is_cache_hit_after_reload() {
 }
 
 #[test]
-fn aggregate_briefing_failure_records_reason_in_session_phase() {
+fn summary_success_records_usage_for_status_bar() {
     init_logging();
     let state = AppState::new();
     let state = start_briefing_after_triage(state, loaded_single_article().0.clone());
-    let (articles, collection_text) = loaded_single_article();
-    let (state, effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text,
-        },
-    );
+    let (articles, _collection_text) = loaded_single_article();
+    let (state, effects) = crate::update::test_support::summarize(state, articles);
     let summary_request_id =
         request_id_for_prompt(&effects, PromptId::ArticleSummary).expect("summary request");
 
@@ -601,87 +416,22 @@ fn aggregate_briefing_failure_records_reason_in_session_phase() {
             request_id: summary_request_id,
             result: LlmResultKind::Success {
                 output_json: summary_json("Article A"),
-                input_tokens: 10,
-                output_tokens: 5,
-                prompt_version: 1,
-                resolved_model: "test-model".to_string(),
-            },
-            metadata: None,
-        },
-    );
-
-    let aggregate_request_id = request_id_for_prompt(&effects, PromptId::AggregateBriefing)
-        .expect("aggregate briefing request");
-    let (state, _) = update(
-        state,
-        Msg::LlmCompleted {
-            request_id: aggregate_request_id,
-            result: LlmResultKind::Failed {
-                reason: "request timed out".to_string(),
-            },
-            metadata: None,
-        },
-    );
-
-    assert_eq!(
-        state.briefing().phase(),
-        &BriefingPhase::Failed {
-            reason: "request timed out".to_string()
-        }
-    );
-}
-
-#[test]
-fn aggregate_briefing_success_records_usage_for_status_bar() {
-    init_logging();
-    let state = AppState::new();
-    let state = start_briefing_after_triage(state, loaded_single_article().0.clone());
-    let (articles, collection_text) = loaded_single_article();
-    let (state, effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text,
-        },
-    );
-    let summary_request_id =
-        request_id_for_prompt(&effects, PromptId::ArticleSummary).expect("summary request");
-
-    let (state, effects) = update(
-        state,
-        Msg::LlmCompleted {
-            request_id: summary_request_id,
-            result: LlmResultKind::Success {
-                output_json: summary_json("Article A"),
-                input_tokens: 10,
-                output_tokens: 5,
-                prompt_version: 1,
-                resolved_model: "test-model".to_string(),
-            },
-            metadata: None,
-        },
-    );
-
-    let aggregate_request_id = request_id_for_prompt(&effects, PromptId::AggregateBriefing)
-        .expect("aggregate briefing request");
-    let (state, _) = update(
-        state,
-        Msg::LlmCompleted {
-            request_id: aggregate_request_id,
-            result: LlmResultKind::Success {
-                output_json: briefing_json(1),
                 input_tokens: 123,
                 output_tokens: 45,
                 prompt_version: 1,
-                resolved_model: DEFAULT_BRIEFING_MODEL.to_string(),
+                resolved_model: "test-model".to_string(),
             },
-            metadata: Some(aggregate_briefing_metadata(DEFAULT_BRIEFING_MODEL, 123, 45)),
+            metadata: Some(summary_metadata("test-model", 123, 45)),
         },
     );
 
+    assert_eq!(state.briefing().phase(), &BriefingPhase::Complete);
+    assert!(effects
+        .iter()
+        .all(|e| !matches!(e, Effect::RequestLlmCompletion { .. })));
     let view = state.view();
     assert_eq!(view.llm_usage_by_model.len(), 1);
-    assert_eq!(view.llm_usage_by_model[0].model, DEFAULT_BRIEFING_MODEL);
+    assert_eq!(view.llm_usage_by_model[0].model, "test-model");
     assert_eq!(view.llm_usage_by_model[0].input_tokens, 123);
     assert_eq!(view.llm_usage_by_model[0].output_tokens, 45);
 }
@@ -691,14 +441,8 @@ fn second_run_reuses_cached_summary_with_configured_model_key() {
     init_logging();
     let state = AppState::new();
     let state = start_briefing_after_triage(state, loaded_single_article().0.clone());
-    let (articles, collection_text) = loaded_single_article();
-    let (state, effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text,
-        },
-    );
+    let (articles, _collection_text) = loaded_single_article();
+    let (state, effects) = crate::update::test_support::summarize(state, articles);
     let summary_request_id =
         request_id_for_prompt(&effects, PromptId::ArticleSummary).expect("summary request");
     let (state, effects) = update(
@@ -715,67 +459,15 @@ fn second_run_reuses_cached_summary_with_configured_model_key() {
             metadata: None,
         },
     );
-    // effects[0] = SaveResults; effects[1] = UpsertEntityIndexEntry for Article A
-    // effects[2] = RequestLlmCompletion for AggregateBriefing
-    assert_eq!(effects.len(), 3);
-    let aggregate_request_id =
-        request_id_for_prompt(&effects, PromptId::AggregateBriefing).expect("aggregate request");
-    match &effects[2] {
-        Effect::RequestLlmCompletion {
-            request_id,
-            prompt_id,
-            prompt_version,
-            model_override,
-            input_content,
-            context,
-            template_override,
-            extra_template_vars,
-        } => {
-            assert_eq!(*request_id, aggregate_request_id);
-            assert_eq!(*prompt_id, PromptId::AggregateBriefing);
-            assert_eq!(*prompt_version, None);
-            assert_eq!(*model_override, None);
-            assert_eq!(input_content, "Collection text");
-            assert!(context.is_empty());
-            assert!(template_override.is_none());
-            assert!(extra_template_vars
-                .iter()
-                .any(|(k, v)| k == "previous_briefings" && v == "(none)"));
-            assert!(extra_template_vars.iter().any(|(k, v)| {
-                k == "briefing_time_window" && v.contains("All available articles")
-            }));
-        }
-        other => panic!("expected aggregate briefing request, got {other:?}"),
-    }
-    let aggregate_request_id =
-        request_id_for_prompt(&effects, PromptId::AggregateBriefing).expect("aggregate request");
-    let (state, _) = update(
-        state,
-        Msg::LlmCompleted {
-            request_id: aggregate_request_id,
-            result: LlmResultKind::Success {
-                output_json: briefing_json(1),
-                input_tokens: 10,
-                output_tokens: 4,
-                prompt_version: 1,
-                resolved_model: "test-model".to_string(),
-            },
-            metadata: None,
-        },
-    );
-
-    let (state, effects) = update(state, Msg::GenerateBriefingClicked);
-    let snapshot = briefing_exec_snapshot(&effects);
-    assert!(snapshot.contains("[A1]"));
-    assert!(effects.iter().all(|effect| !matches!(
-        effect,
-        Effect::LoadArticlesForBriefing { .. }
-            | Effect::RequestLlmCompletion {
-                prompt_id: PromptId::ArticleSummary | PromptId::AggregateBriefing,
-                ..
-            }
-    )));
-    assert_eq!(state.briefing().phase(), &BriefingPhase::GeneratingBriefing);
+    assert!(effects
+        .iter()
+        .all(|e| !matches!(e, Effect::RequestLlmCompletion { .. })));
+    let (state, effects) = super::test_support::summarize(state, loaded_single_article().0);
+    assert_eq!(state.briefing().phase(), &BriefingPhase::Complete);
+    assert!(effects
+        .iter()
+        .all(|e| !matches!(e, Effect::RequestLlmCompletion { .. })));
+    assert_eq!(state.summary_cache().len(), 1);
 }
 
 #[test]
@@ -823,8 +515,7 @@ fn open_in_browser_with_no_selection_emits_nothing() {
 
 mod archive_tests;
 mod blacklist_tests;
-mod briefing_history_tests;
-mod briefing_stream_tests;
+
 mod entity_index_tests;
 mod import_tests;
 mod pre_triage_refresh_tests;
@@ -835,15 +526,9 @@ mod ui_state_tests;
 
 #[test]
 fn summary_completion_emits_exact_record_before_settlement() {
-    let (articles, collection_text) = loaded_articles();
+    let (articles, _collection_text) = loaded_articles();
     let state = start_briefing_after_triage(AppState::new(), articles.clone());
-    let (state, effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text,
-        },
-    );
+    let (state, effects) = crate::update::test_support::summarize(state, articles);
     let request_id = request_id_for_prompt(&effects, PromptId::ArticleSummary).unwrap();
     let (state, effects) = crate::update(
         state,

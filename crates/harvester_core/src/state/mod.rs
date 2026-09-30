@@ -16,8 +16,8 @@ use std::path::PathBuf;
 
 mod ai_availability;
 mod batch;
-mod briefing_orchestration;
-mod briefing_snapshot_access;
+mod briefing_access;
+
 mod cache_state;
 mod indirect_links;
 mod ingest;
@@ -40,7 +40,6 @@ mod view_builder;
 #[cfg(test)]
 mod tests;
 
-use briefing_orchestration::BriefingOrchestration;
 use cache_state::{
     MetadataLoadState, SummaryCacheMetadataSnapshot, SummaryCacheMetrics,
     TriageCacheMetadataSnapshot, TriageCacheRunMetrics,
@@ -62,7 +61,7 @@ use indirect_links::IndirectLink;
 use job_state::PreviewQuality;
 
 pub use provider_alert::ProviderAlert;
-pub(crate) use signal_candidate_access::BriefingGenerateReadiness;
+
 pub use unfinished_work::{
     evaluate_reprocess_notice, UnfinishedStageVerdict, UnfinishedStageVerdicts, UnfinishedWork,
     UnfinishedWorkClass, UnfinishedWorkSummary, DEFAULT_REPROCESS_NOTICE_ARTICLE_THRESHOLD,
@@ -306,7 +305,6 @@ pub struct AppState {
         Option<crate::signal_candidate::SignalCandidateArchiveSelection>,
     llm_requests: LlmResultIndex,
     briefing: BriefingSession,
-    briefing_history: Vec<crate::briefing::BriefingHistoryEntry>,
     briefing_since_utc: Option<chrono::DateTime<chrono::Utc>>,
     pending_briefing_checkpoint_save: Option<PendingBriefingCheckpointSave>,
     briefing_checkpoint_status_message: Option<String>,
@@ -341,7 +339,6 @@ pub struct AppState {
     triage_cache_metadata_snapshot: Option<TriageCacheMetadataSnapshot>,
     triage_cache_run_metrics: TriageCacheRunMetrics,
     triage_cache_run_start_logged: bool,
-    briefing_orchestration: BriefingOrchestration,
     llm_max_in_flight: usize,
     model_dispatch_halt_reason: Option<llm::ModelDispatchHalt>,
     /// Session-scoped per-model token usage. Only CacheStatus::Miss runs are counted.
@@ -380,7 +377,6 @@ pub struct AppState {
     /// Configuration and preparation pending for a processing start.
     pub(crate) processing_start: Option<crate::update::processing::PendingStart>,
     pub(crate) processing_budget: Option<usize>,
-    pub(crate) summaries_follow_triage: bool,
     /// Reducer-owned coordinator for batching pre-triage refresh demand.
     pub(crate) pre_triage_coordinator: crate::pre_triage_coordinator::PreTriageRefreshCoordinator,
     /// True when app/batch loop should dispatch one `Msg::EvaluatePreTriageRefresh`.
@@ -425,7 +421,6 @@ impl Default for AppState {
             pinned_signal_candidate_selection: None,
             llm_requests: LlmResultIndex::new(),
             briefing: BriefingSession::default(),
-            briefing_history: vec![],
             briefing_since_utc: None,
             pending_briefing_checkpoint_save: None,
             briefing_checkpoint_status_message: None,
@@ -459,7 +454,6 @@ impl Default for AppState {
             triage_cache_metadata_snapshot: None,
             triage_cache_run_metrics: TriageCacheRunMetrics::default(),
             triage_cache_run_start_logged: false,
-            briefing_orchestration: BriefingOrchestration::default(),
             llm_max_in_flight: 1,
             model_dispatch_halt_reason: None,
             llm_usage_by_model: BTreeMap::new(),
@@ -483,7 +477,6 @@ impl Default for AppState {
             tick: 0,
             processing_start: None,
             processing_budget: None,
-            summaries_follow_triage: false,
             pre_triage_coordinator: crate::pre_triage_coordinator::PreTriageRefreshCoordinator::new(
             ),
             pre_triage_refresh_eval_pending: false,

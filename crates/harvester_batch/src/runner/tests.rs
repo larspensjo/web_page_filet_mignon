@@ -37,7 +37,6 @@ fn create_test_args(temp_dir: &TempDir) -> Args {
         clear_briefing_since: false,
         show_briefing_since: false,
         import_saved_web_dir: None,
-        refresh_stale_summaries_limit: None,
         signal_candidate_threshold: None,
     }
 }
@@ -114,17 +113,13 @@ fn fake_full_cycle_runner(
         triage_model: Some(model.clone()),
         summary_model: Some(model.clone()),
         signal_candidate_model: Some(model.clone()),
-        briefing_model: Some(model),
         registry: registry.clone(),
         quotas: LlmQuotas::default(),
         output_dir: paths.output_dir.clone(),
         pricing: PricingRegistry::with_defaults(),
         max_input_bytes: 100_000,
-        #[allow(deprecated)]
-        max_input_chars: 0,
         timestamp_utc: Arc::new(|| "2026-09-27T00:00:00Z".into()),
         session_id: "fake-full-cycle".into(),
-        replay_cache: None,
         replay_write_observer: None,
         max_concurrent_requests: 1,
     };
@@ -450,7 +445,13 @@ fn synchronous_staggered_downloads_dispatch_triage_and_settle_once() {
         },
     );
     state.set_llm_max_in_flight(2);
-    state = harvester_core::update(state, Msg::PollSourcesClicked).0;
+    let (next, configuration_effects) = harvester_core::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: PipelineRunScope::Full,
+        },
+    );
+    state = next;
     let (state, _) = harvester_core::update(state, Msg::PollStarted { total: 1 });
     let (mut state, source_effects) = harvester_core::update(
         state,
@@ -483,15 +484,12 @@ fn synchronous_staggered_downloads_dispatch_triage_and_settle_once() {
         )
         .0;
     }
-    let (state, effects) = harvester_core::update(
-        state,
-        Msg::PipelineRunRequested {
-            scope: PipelineRunScope::Full,
-        },
-    );
     let (state, _) = harvester_core::update(state, Msg::AllSourcesPollEnded);
-    let (mut state, _) =
-        harvester_core::fixture_support::complete_processing_configuration(state, effects, 100_000);
+    let (mut state, _) = harvester_core::fixture_support::complete_processing_configuration(
+        state,
+        configuration_effects,
+        100_000,
+    );
 
     state = harvester_core::update(
         state,
@@ -716,7 +714,7 @@ fn test_should_log_batch_msg_filters_downloading_progress() {
 }
 
 #[test]
-fn test_dispatch_loop_reduces_queued_poll_before_settling() {
+fn test_dispatch_loop_drains_full_run_poll_effects_before_settling() {
     engine_logging::initialize_for_tests();
     let temp_dir = TempDir::new().unwrap();
     let output_dir = temp_dir.path().join("output");
@@ -742,7 +740,14 @@ fn test_dispatch_loop_reduces_queued_poll_before_settling() {
     );
     let shutdown_flag = Arc::new(AtomicBool::new(false));
 
-    msg_tx.send(Msg::PollSourcesClicked).unwrap();
+    let (next, effects) = harvester_core::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Full,
+        },
+    );
+    state = next;
+    effect_runner.enqueue(effects);
 
     let outcome = run_dispatch_loop(
         &mut state,

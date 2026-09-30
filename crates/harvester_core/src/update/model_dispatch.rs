@@ -40,7 +40,6 @@ pub(super) fn dispatch_model_work(state: &mut AppState, effects: &mut Vec<Effect
                     PromptId::ArticleSignalCandidate => dispatch_scoring(state, effects),
                     PromptId::ArticleSummary => dispatch_summary(state, effects),
                     PromptId::ArticleTriage => dispatch_triage(state, effects),
-                    _ => unreachable!(),
                 });
                 if !progressed {
                     break;
@@ -97,10 +96,8 @@ fn dispatch_scoring(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
         request_id,
         prompt_id: PromptId::ArticleSignalCandidate,
         prompt_version: Some(snapshot.prompt_version),
-        model_override: None,
         input_content: render_input_content(&url, &snapshot),
         context: snapshot.context.clone(),
-        template_override: None,
         extra_template_vars: render_extra_template_vars(&url, &snapshot),
     });
     engine_info!(
@@ -217,10 +214,8 @@ fn dispatch_triage(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
         request_id,
         prompt_id: PromptId::ArticleTriage,
         prompt_version: None,
-        model_override: None,
         input_content: prepared_text,
         context,
-        template_override: None,
         extra_template_vars: vec![],
     });
     state.mark_dirty();
@@ -313,10 +308,8 @@ fn dispatch_summary(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
                 request_id,
                 prompt_id: PromptId::ArticleSummary,
                 prompt_version: None,
-                model_override: None,
                 input_content: prepared_text,
                 context,
-                template_override: None,
                 extra_template_vars: vec![],
             });
             state.mark_dirty();
@@ -352,10 +345,8 @@ fn dispatch_summary(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
                 request_id,
                 prompt_id: PromptId::ArticleSummary,
                 prompt_version: None,
-                model_override: None,
                 input_content: prepared_text,
                 context,
-                template_override: None,
                 extra_template_vars: vec![],
             });
             state.mark_dirty();

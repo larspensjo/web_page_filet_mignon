@@ -534,24 +534,6 @@ fn view_model_stale_triage_url_ignored() {
 }
 
 #[test]
-fn resume_run_enters_the_pipeline_after_briefing_readiness_failure() {
-    init_logging();
-    let (state, _) = completed_state_with_jobs(&["https://one.example"]);
-    let state = with_triage_metadata_ready(state);
-    let state = simulate_triage_loaded(state, sample_articles(&["https://one.example"]));
-    let (state, _) = update(state, Msg::GenerateBriefingClicked);
-    let (state, effects) = request_resume(state, sample_articles(&["https://one.example"]));
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        Effect::RequestLlmCompletion {
-            prompt_id: PromptId::ArticleTriage,
-            ..
-        }
-    )));
-    assert!(!state.view().run_enabled);
-}
-
-#[test]
 fn run_is_enabled_without_completed_jobs() {
     init_logging();
     let state = AppState::new();
@@ -782,4 +764,22 @@ fn current_triage_survives_resume_and_departed_members_leave_the_session() {
         .iter()
         .all(|e| !matches!(e, Effect::RequestLlmCompletion { .. })));
     assert!(state.pipeline_activity().is_settled());
+}
+
+#[test]
+fn resume_run_enters_the_pipeline_with_retired_briefing_controls_disabled() {
+    init_logging();
+    let (state, _) = completed_state_with_jobs(&["https://one.example"]);
+    let state = with_triage_metadata_ready(state);
+    let state = simulate_triage_loaded(state, sample_articles(&["https://one.example"]));
+    assert!(!state.view().briefing_generate_enabled);
+    let (state, effects) = request_resume(state, sample_articles(&["https://one.example"]));
+    assert!(effects.iter().any(|e| matches!(
+        e,
+        Effect::RequestLlmCompletion {
+            prompt_id: PromptId::ArticleTriage,
+            ..
+        }
+    )));
+    assert!(!state.view().run_enabled);
 }

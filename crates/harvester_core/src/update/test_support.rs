@@ -56,5 +56,38 @@ pub(crate) fn arm_admitted(state: &mut AppState) {
     run.fresh_load = false;
     run.intake_open = false;
     state.pipeline_admission = Some(run);
-    state.set_pipeline_run_phase(crate::PipelineRunPhase::AwaitingSettle);
+    state.set_pipeline_run_phase(crate::PipelineRunPhase::Requested);
+}
+
+/// Seed completed triage results, then release the triage wave through the live
+/// downstream scheduler. No retired loader or aggregate orchestration is involved.
+pub(crate) fn summarize(
+    mut state: AppState,
+    articles: Vec<LoadedArticle>,
+) -> (AppState, Vec<Effect>) {
+    if !state.pipeline_ready() {
+        arm_admitted(&mut state);
+    }
+    let mut triage = crate::TriageSession::new_loading(None);
+    let mut members = Vec::new();
+    for (index, article) in articles.into_iter().enumerate() {
+        let key = state.current_triage_cache_key(&article.content_hash);
+        members.push((article.url.clone(), article.content_hash.clone()));
+        triage.admit(article, key, Some(100_000));
+        triage.complete_article(
+            index,
+            crate::ArticleTriageResult {
+                category: "tech".into(),
+                priority: 3,
+                tags: vec![],
+                rationale: "fixture".into(),
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+        );
+    }
+    triage.complete();
+    state.set_triage(triage);
+    super::waves::release(&mut state, crate::PipelineStage::Triaging, members);
+    crate::update(state, Msg::PipelineRunAdvance)
 }

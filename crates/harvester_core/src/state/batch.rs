@@ -2,6 +2,8 @@ use super::{
     AppState, ArchiveTokenEstimates, BatchObservation, BatchStatus, JobResultKind, TriagePhase,
 };
 use crate::archive_display::{ArchiveDisplayCounts, CacheDerivedArchive};
+#[cfg(test)]
+use crate::fixture_support::ManualPreTriageDecisions;
 use crate::working_corpus::CurrentWorkingCorpus;
 #[cfg(test)]
 use crate::PreTriagePhase;
@@ -97,14 +99,6 @@ impl AppState {
                 == crate::import_session::ImportPhase::Importing,
             source_poll_stats: self.source_states.last_completed_poll_stats().to_vec(),
         }
-    }
-
-    pub fn current_working_corpus(&self) -> CurrentWorkingCorpus {
-        CurrentWorkingCorpus::select(
-            self.pre_triage(),
-            self.triage(),
-            self.briefing_triage_policy(),
-        )
     }
 
     pub fn batch_status(&self) -> BatchStatus {
@@ -617,7 +611,11 @@ mod tests {
             return;
         }
 
-        let included = state.pre_triage().tentative_included_urls();
+        let included = state
+            .pre_triage()
+            .tentative_included_url_refs()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
         let scored = included
             .iter()
             .filter_map(|url| {

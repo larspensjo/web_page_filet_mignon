@@ -63,19 +63,9 @@ pub(super) fn with_summary_metadata(state: AppState) -> AppState {
     let mut active_versions = HashMap::new();
     active_versions.insert(PromptId::ArticleTriage, 1);
     active_versions.insert(PromptId::ArticleSummary, 1);
-    active_versions.insert(PromptId::BriefingExecutiveSummary, 1);
-    active_versions.insert(PromptId::BriefingNextItem, 1);
     let mut effective_models = HashMap::new();
     effective_models.insert(PromptId::ArticleTriage, "test-triage-model".to_string());
     effective_models.insert(PromptId::ArticleSummary, "test-model".to_string());
-    effective_models.insert(
-        PromptId::BriefingExecutiveSummary,
-        "test-briefing-model".to_string(),
-    );
-    effective_models.insert(
-        PromptId::BriefingNextItem,
-        "test-briefing-model".to_string(),
-    );
     let (state, _) = update(
         state,
         Msg::LlmMetadataLoaded {
@@ -84,15 +74,7 @@ pub(super) fn with_summary_metadata(state: AppState) -> AppState {
         },
     );
     let (state, _) = update(state, Msg::PromptTemplateFilesLoaded);
-    let mut contexts = HashMap::new();
-    contexts.insert(
-        PromptId::BriefingExecutiveSummary,
-        vec![("policy".to_string(), "briefing context".to_string())],
-    );
-    contexts.insert(
-        PromptId::BriefingNextItem,
-        vec![("policy".to_string(), "briefing context".to_string())],
-    );
+    let contexts = HashMap::new();
     let (mut state, _) = update(state, Msg::PromptContextsLoaded { contexts });
     seed_current_triage_cache(&mut state);
     state
@@ -103,22 +85,12 @@ pub(super) fn with_signal_candidate_metadata(mut state: AppState) -> AppState {
     active_versions.insert(PromptId::ArticleTriage, 1);
     active_versions.insert(PromptId::ArticleSummary, 1);
     active_versions.insert(PromptId::ArticleSignalCandidate, 1);
-    active_versions.insert(PromptId::BriefingExecutiveSummary, 1);
-    active_versions.insert(PromptId::BriefingNextItem, 1);
     let mut effective_models = HashMap::new();
     effective_models.insert(PromptId::ArticleTriage, "test-triage-model".to_string());
     effective_models.insert(PromptId::ArticleSummary, "test-summary-model".to_string());
     effective_models.insert(
         PromptId::ArticleSignalCandidate,
         "test-signal-model".to_string(),
-    );
-    effective_models.insert(
-        PromptId::BriefingExecutiveSummary,
-        "test-briefing-model".to_string(),
-    );
-    effective_models.insert(
-        PromptId::BriefingNextItem,
-        "test-briefing-model".to_string(),
     );
     state.set_llm_metadata(active_versions, effective_models);
     state.reconcile_ai_availability_from_metadata();
@@ -132,19 +104,13 @@ pub(super) fn summary_json(title: &str) -> String {
     format!("{{\"title\":\"{title}\",\"summary\":\"Summary\",\"key_points\":[\"p1\"]}}")
 }
 
-pub(super) fn briefing_json(article_count: u32) -> String {
-    format!(
-        "{{\"executive_summary\":\"Exec\",\"top_stories\":[{{\"headline\":\"Story\",\"body\":\"Desc\"}}],\"article_count\":{article_count}}}"
-    )
-}
-
-pub(super) fn aggregate_briefing_metadata(
+pub(super) fn summary_metadata(
     model: &str,
     input_tokens: u32,
     output_tokens: u32,
 ) -> LlmRunMetadata {
     LlmRunMetadata::new(LlmRunMetadataInit {
-        prompt_id: PromptId::AggregateBriefing,
+        prompt_id: PromptId::ArticleSummary,
         prompt_version: 1,
         resolved_model: model.to_string(),
         input_bytes: 100,
@@ -257,10 +223,9 @@ pub(super) fn start_briefing_after_triage(
     }
     triage.complete();
     state.set_triage(triage);
-    state.request_briefing_orchestration();
     state.start_summary_cache_run();
     state.mark_briefing_metadata_ready();
-    state.set_briefing(BriefingSession::new_loading(None));
+    state.set_briefing(BriefingSession::new_loading());
     crate::update::test_support::arm_admitted(&mut state);
     state
 }
@@ -276,17 +241,14 @@ pub(super) fn make_state_with_summarized_job_for_update() -> AppState {
         links: vec![],
         fetched_utc: None,
     }]);
-    let mut briefing = crate::briefing::BriefingSession::new_loading(None);
-    briefing.set_articles(
-        vec![LoadedArticle {
-            url: url.clone(),
-            source_title: None,
-            prepared_text: "text".to_string(),
-            content_hash: "hash".to_string(),
-            fetched_utc: None,
-        }],
-        "collection".to_string(),
-    );
+    let mut briefing = crate::briefing::BriefingSession::new_loading();
+    briefing.set_articles(vec![LoadedArticle {
+        url: url.clone(),
+        source_title: None,
+        prepared_text: "text".to_string(),
+        content_hash: "hash".to_string(),
+        fetched_utc: None,
+    }]);
     briefing.transition_to_summarizing();
     briefing.start_article(0, 1);
     briefing.complete_article(

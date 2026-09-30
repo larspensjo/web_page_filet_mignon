@@ -1,17 +1,9 @@
 pub mod article_signal_candidate;
-pub mod briefing;
-pub mod briefing_stream;
 pub mod summary;
 pub mod triage;
 
 use super::PromptId;
 
-pub use briefing::BRIEFING_PROMPT_V8 as BRIEFING_PROMPT;
-pub use briefing::{
-    BRIEFING_PROMPT_V1, BRIEFING_PROMPT_V2, BRIEFING_PROMPT_V3, BRIEFING_PROMPT_V4,
-    BRIEFING_PROMPT_V5, BRIEFING_PROMPT_V6, BRIEFING_PROMPT_V7, BRIEFING_PROMPT_V8,
-};
-pub use briefing_stream::{BRIEFING_EXECUTIVE_SUMMARY_PROMPT, BRIEFING_NEXT_ITEM_PROMPT};
 pub use summary::SUMMARY_PROMPT_V6 as SUMMARY_PROMPT;
 pub use summary::{
     SUMMARY_PROMPT_V1, SUMMARY_PROMPT_V2, SUMMARY_PROMPT_V3, SUMMARY_PROMPT_V4, SUMMARY_PROMPT_V5,
@@ -37,28 +29,6 @@ pub fn register_defaults(registry: &mut super::PromptRegistry) {
     registry.set_active(
         PromptId::ArticleSignalCandidate,
         article_signal_candidate::ARTICLE_SIGNAL_CANDIDATE_PROMPT_V1.version,
-    );
-    registry.register(briefing::BRIEFING_PROMPT_V1);
-    registry.register(briefing::BRIEFING_PROMPT_V2);
-    registry.register(briefing::BRIEFING_PROMPT_V3);
-    registry.register(briefing::BRIEFING_PROMPT_V4);
-    registry.register(briefing::BRIEFING_PROMPT_V5);
-    registry.register(briefing::BRIEFING_PROMPT_V6);
-    registry.register(briefing::BRIEFING_PROMPT_V7);
-    registry.register(briefing::BRIEFING_PROMPT_V8);
-    registry.set_active(
-        PromptId::AggregateBriefing,
-        briefing::BRIEFING_PROMPT_V8.version,
-    );
-    registry.register(briefing_stream::BRIEFING_EXECUTIVE_SUMMARY_PROMPT);
-    registry.set_active(
-        PromptId::BriefingExecutiveSummary,
-        briefing_stream::BRIEFING_EXECUTIVE_SUMMARY_PROMPT.version,
-    );
-    registry.register(briefing_stream::BRIEFING_NEXT_ITEM_PROMPT);
-    registry.set_active(
-        PromptId::BriefingNextItem,
-        briefing_stream::BRIEFING_NEXT_ITEM_PROMPT.version,
     );
 }
 
@@ -92,34 +62,13 @@ mod tests {
                 .version,
             article_signal_candidate::ARTICLE_SIGNAL_CANDIDATE_PROMPT_V1.version
         );
-        assert_eq!(
-            registry
-                .active(PromptId::AggregateBriefing)
-                .expect("active AggregateBriefing prompt")
-                .version,
-            BRIEFING_PROMPT.version
-        );
-        assert_eq!(
-            registry
-                .active(PromptId::BriefingExecutiveSummary)
-                .expect("active BriefingExecutiveSummary prompt")
-                .version,
-            BRIEFING_EXECUTIVE_SUMMARY_PROMPT.version
-        );
-        assert_eq!(
-            registry
-                .active(PromptId::BriefingNextItem)
-                .expect("active BriefingNextItem prompt")
-                .version,
-            BRIEFING_NEXT_ITEM_PROMPT.version
-        );
     }
 
     #[test]
     fn register_defaults_keeps_older_exported_versions_addressable() {
         let mut registry = PromptRegistry::new();
         register_defaults(&mut registry);
-        for template in [TRIAGE_PROMPT_V1, SUMMARY_PROMPT_V1, BRIEFING_PROMPT_V1] {
+        for template in [TRIAGE_PROMPT_V1, SUMMARY_PROMPT_V1] {
             let registered = registry
                 .get(template.id, template.version)
                 .expect("older exported template should remain registered");

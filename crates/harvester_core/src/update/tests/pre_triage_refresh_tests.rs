@@ -1,5 +1,15 @@
 use super::*;
 
+// This module tests the refresh coordinator independently of processing admission.
+// The containing test module is #[cfg(test)]; no production fixture is exported.
+fn isolated_poll(mut state: AppState) -> (AppState, Vec<Effect>) {
+    let effects = crate::update::polling::handle_poll_sources_clicked(&mut state);
+    if !effects.is_empty() {
+        crate::update::pipeline_run::begin_run_if_needed(&mut state);
+    }
+    (state, effects)
+}
+
 fn count_triage_loads(effects: &[Effect]) -> usize {
     effects
         .iter()
@@ -322,7 +332,7 @@ fn poll_burst_multiple_job_dones_yields_exactly_one_triage_load() {
     init_logging();
 
     let state = AppState::new();
-    let (state, _) = update(state, Msg::PollSourcesClicked);
+    let (state, _) = isolated_poll(state);
 
     // Complete 3 jobs during the burst (immediately done, so jobs_in_flight=0 between calls).
     let state = add_completed_job_for_test(state, "https://example.com/1");
@@ -371,7 +381,7 @@ fn poll_burst_waits_for_engine_jobs_to_drain_before_dispatching() {
     );
 
     // Start the poll burst.
-    let (state, _) = update(state, Msg::PollSourcesClicked);
+    let (state, _) = isolated_poll(state);
 
     // Complete job1 — demand is scheduled, job2 still in flight.
     let state = complete_job_for_test(state, job_id1);
@@ -412,7 +422,7 @@ fn poll_burst_zero_urls_no_triage_load_dispatched() {
     init_logging();
 
     let state = AppState::new();
-    let (state, _) = update(state, Msg::PollSourcesClicked);
+    let (state, _) = isolated_poll(state);
     let (state, _) = update(state, Msg::AllSourcesPollEnded);
 
     // No jobs → no demand → no dispatch.

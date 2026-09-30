@@ -198,7 +198,7 @@ fn failed_triage_is_requested_in_the_next_run_without_an_advance_message() {
     assert!(state.run_progress().unwrap().terminal);
     let previous_id = state.run_progress().unwrap().run_id;
     let notice = state.run_completion_notice().cloned();
-    let (state, _) = crate::update(state, Msg::NoOp);
+    let (state, _) = crate::update(state, Msg::PipelineRunAdvance);
     assert_eq!(state.run_completion_notice(), notice.as_ref());
     let (state, effects) = start_resume(state, vec![article]);
     assert_ne!(state.run_progress().unwrap().run_id, previous_id);
@@ -431,7 +431,7 @@ fn hydration_with_eligible_scoring_is_settled_and_unadmitted() {
         },
     );
     seed_cached_summary(&mut state, &article);
-    (state, _) = crate::update(state, Msg::NoOp); // Persist the fixture seeds before hydration.
+    (state, _) = crate::update(state, Msg::PipelineRunAdvance); // Persist the fixture seeds before hydration.
     let id = state.alloc_triage_request_id();
     state.set_triage_in_flight(id);
     let (state, effects) = crate::update(
@@ -453,7 +453,12 @@ fn hydration_with_eligible_scoring_is_settled_and_unadmitted() {
 fn run_requested_during_continuous_downloads_starts_triage_before_downloads_end() {
     let mut state = add_metadata(AppState::new());
     state.set_llm_max_in_flight(3);
-    let (state, _) = crate::update(state, Msg::PollSourcesClicked);
+    let (state, configuration_effects) = crate::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
     let (state, _) = crate::update(state, Msg::PollStarted { total: 1 });
     let articles: Vec<_> = (0..6).map(loaded_article).collect();
     let (mut state, effects) = crate::update(
@@ -499,14 +504,17 @@ fn run_requested_during_continuous_downloads_starts_triage_before_downloads_end(
         .0
     };
     state = finish_download(state, 0);
-    let (next, effects) = crate::update(
+    let (next, _) = crate::update(
         state,
         Msg::PipelineRunRequested {
             scope: PipelineRunScope::Resume,
         },
     );
-    let (next, mut effects) =
-        crate::fixture_support::complete_processing_configuration(next, effects, 100_000);
+    let (next, mut effects) = crate::fixture_support::complete_processing_configuration(
+        next,
+        configuration_effects,
+        100_000,
+    );
     state = next;
     let mut triage_requested = request_id(&effects, PromptId::ArticleTriage).is_some();
     let mut tick = 0;
@@ -573,7 +581,12 @@ fn run_requested_during_continuous_downloads_starts_triage_before_downloads_end(
 fn three_download_bursts_release_overlapping_waves_and_monotonic_totals() {
     let mut state = add_metadata(AppState::new());
     state.set_llm_max_in_flight(3);
-    let (state, _) = crate::update(state, Msg::PollSourcesClicked);
+    let (state, configuration_effects) = crate::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
     let (state, _) = crate::update(state, Msg::PollStarted { total: 1 });
     let articles: Vec<_> = (0..3).map(loaded_article).collect();
     let (state, effects) = crate::update(
@@ -597,14 +610,17 @@ fn three_download_bursts_release_overlapping_waves_and_monotonic_totals() {
         })
         .collect();
     let (state, _) = crate::update(state, Msg::AllSourcesPollEnded);
-    let (state, effects) = crate::update(
+    let (state, _) = crate::update(
         state,
         Msg::PipelineRunRequested {
             scope: PipelineRunScope::Full,
         },
     );
-    let (mut state, _effects) =
-        crate::fixture_support::complete_processing_configuration(state, effects, 100_000);
+    let (mut state, _effects) = crate::fixture_support::complete_processing_configuration(
+        state,
+        configuration_effects,
+        100_000,
+    );
     let mut progress = progress_snapshot(&state);
     for burst in 0..3 {
         let (next, _) = crate::update(

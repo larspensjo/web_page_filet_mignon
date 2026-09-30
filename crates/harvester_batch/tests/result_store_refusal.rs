@@ -55,7 +55,7 @@ fn cli_names_refused_store_at_start_and_finish_polls_and_exits_nonzero() {
 }
 
 #[test]
-fn cli_summary_refresh_refuses_any_damaged_store_before_model_setup() {
+fn cli_one_cycle_refuses_any_damaged_store_before_model_setup() {
     for kind in ["triage", "summary", "signal_candidate"] {
         let dir = tempfile::tempdir().unwrap();
         let output = dir.path().join("output");
@@ -66,7 +66,7 @@ fn cli_summary_refresh_refuses_any_damaged_store_before_model_setup() {
         let result = Command::new(env!("CARGO_BIN_EXE_harvester_batch"))
             .current_dir(dir.path())
             .env_remove("OPENAI_API_KEY")
-            .args(["--refresh-stale-summaries-limit", "1", "--output-dir"])
+            .arg("--output-dir")
             .arg(&output)
             .output()
             .unwrap();

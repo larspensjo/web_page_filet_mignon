@@ -72,7 +72,6 @@ enum EngineCommand {
     Enqueue { job_id: JobId, url: String },
     Stop { immediate: bool },
     Resume,
-    Export,
 }
 
 #[derive(Clone)]
@@ -106,10 +105,6 @@ impl EngineHandle {
 
     pub fn resume(&self) {
         let _ = self.cmd_tx.send(EngineCommand::Resume);
-    }
-
-    pub fn request_export(&self) {
-        let _ = self.cmd_tx.send(EngineCommand::Export);
     }
 
     pub fn try_recv(&self) -> Option<EngineEvent> {
@@ -162,10 +157,7 @@ fn worker_loop(
                         });
                     }
                 }
-                EngineCommand::Export => {
-                    // Export happens when queue is empty / idle; stash command for later processing.
-                    queue.push_front((0, "__EXPORT__".to_string()));
-                }
+
                 EngineCommand::Resume => {
                     cancel_token = CancellationToken::new();
                     accept_new = true;
@@ -174,24 +166,6 @@ fn worker_loop(
         }
 
         if let Some((job_id, url)) = queue.pop_front() {
-            if url == "__EXPORT__" {
-                if queue.is_empty() {
-                    // Only export when no active jobs; run synchronously.
-                    if let Err(_err) = crate::export::build_concatenated_export(
-                        &config.output_dir,
-                        crate::export::ExportOptions::default(),
-                    ) {
-                        let _ = event_tx.send(EngineEvent::JobCompleted {
-                            job_id: 0,
-                            result: Err(FailureKind::ProcessingError),
-                        });
-                    }
-                } else {
-                    // Re-enqueue to try later.
-                    queue.push_back((job_id, url));
-                }
-                continue;
-            }
             if let Err(failure) = quota_tracker.check_url() {
                 let _ = event_tx.send(EngineEvent::JobCompleted {
                     job_id,
@@ -240,9 +214,7 @@ fn worker_loop(
                                 });
                             }
                         }
-                        EngineCommand::Export => {
-                            queue.push_front((0, "__EXPORT__".to_string()));
-                        }
+
                         EngineCommand::Resume => {
                             cancel_token = CancellationToken::new();
                             accept_new = true;

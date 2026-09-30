@@ -186,16 +186,6 @@ fn import_failed_sets_failed_phase() {
 }
 
 #[test]
-fn imported_corpus_cleared_resets_state() {
-    init();
-    let state = AppState::new();
-    let (state, _) = start_import(state);
-    let (state, _) = update(state, Msg::ImportedCorpusCleared);
-    assert_eq!(state.import_session.phase, ImportPhase::Idle);
-    assert!(state.import_session.source_dir.is_none());
-}
-
-#[test]
 fn window_resize_completed_emits_persist_effect() {
     let state = AppState::default();
     let (_, effects) = update(
@@ -272,16 +262,28 @@ fn source_poll_completed_emitted_reflects_ingest_dedup() {
 
 #[test]
 fn poll_stats_cleared_when_new_poll_starts() {
-    let state = AppState::new();
+    let (state, _) = crate::update(
+        AppState::new(),
+        Msg::AiAvailabilityDetected {
+            availability: crate::AiAvailability::Unavailable {
+                reason: crate::AiUnavailableReason::MissingApiKey,
+            },
+        },
+    );
     let source_id = harvester_engine::SourceId::new("rss").unwrap();
 
     // First poll cycle: accumulate a stat.
-    let (state, _) = update(state, Msg::PollSourcesClicked);
+    let (state, _) = crate::update::test_support::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
     let (state, _) = update(
         state,
         Msg::SourcePollCompleted {
             source_id: source_id.clone(),
-            urls: vec!["https://example.com/1".to_string()],
+            urls: vec![],
             kind: harvester_engine::SourceKind::Rss,
             parsed: 1,
             dedup_filtered: 0,
@@ -289,12 +291,17 @@ fn poll_stats_cleared_when_new_poll_starts() {
     );
     assert_eq!(state.source_states().poll_stats().len(), 1);
 
-    // Simulate poll ended so a second PollSourcesClicked is accepted.
+    // Settle the first empty Full Run before starting the next poll.
     let (state, _) = update(state, Msg::AllSourcesPollEnded);
     assert!(!state.is_poll_in_progress());
 
     // Second poll cycle: stats should be cleared.
-    let (state, _) = update(state, Msg::PollSourcesClicked);
+    let (state, _) = crate::update::test_support::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
     assert!(
         state.source_states().poll_stats().is_empty(),
         "poll_stats must be cleared when a new poll starts"
@@ -304,7 +311,12 @@ fn poll_stats_cleared_when_new_poll_starts() {
 #[test]
 fn poll_started_sets_total() {
     let state = AppState::new();
-    let (state, _) = update(state, Msg::PollSourcesClicked);
+    let (state, _) = crate::update::test_support::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
     let (state, _) = update(state, Msg::PollStarted { total: 5 });
     assert_eq!(state.source_states().poll_progress(), Some((0, 5)));
 }
@@ -313,7 +325,12 @@ fn poll_started_sets_total() {
 fn poll_complete_increments_progress() {
     let state = AppState::new();
     let source_id = harvester_engine::SourceId::new("rss").unwrap();
-    let (state, _) = update(state, Msg::PollSourcesClicked);
+    let (state, _) = crate::update::test_support::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
     let (state, _) = update(state, Msg::PollStarted { total: 2 });
     let (state, _) = update(
         state,
@@ -332,7 +349,12 @@ fn poll_complete_increments_progress() {
 fn poll_failed_increments_progress() {
     let state = AppState::new();
     let source_id = harvester_engine::SourceId::new("rss").unwrap();
-    let (state, _) = update(state, Msg::PollSourcesClicked);
+    let (state, _) = crate::update::test_support::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
     let (state, _) = update(state, Msg::PollStarted { total: 2 });
     let (state, _) = update(
         state,
@@ -347,7 +369,12 @@ fn poll_failed_increments_progress() {
 #[test]
 fn poll_ended_preserves_the_current_desktop_workspace() {
     let state = AppState::new();
-    let (state, _) = update(state, Msg::PollSourcesClicked);
+    let (state, _) = crate::update::test_support::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
     let (state, _) = update(state, Msg::AllSourcesPollEnded);
     assert_eq!(state.workspace_view(), crate::WorkspaceView::Review);
 }

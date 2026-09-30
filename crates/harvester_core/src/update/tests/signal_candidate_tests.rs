@@ -61,8 +61,8 @@ fn seed_completed_summary_state() -> AppState {
         fetched_utc: Some("2026-05-25T12:00:00Z".to_string()),
     };
 
-    let mut briefing = BriefingSession::new_loading(None);
-    briefing.set_articles(vec![article.clone()], "collection".to_string());
+    let mut briefing = BriefingSession::new_loading();
+    briefing.set_articles(vec![article.clone()]);
     briefing.transition_to_summarizing();
     briefing.start_article(0, 11);
     briefing.complete_article(0, sample_summary_result());
@@ -505,15 +505,9 @@ fn triage_cache_hit_enqueues_signal_candidate_scoring() {
 fn summary_completion_enqueues_signal_scoring() {
     let state = start_briefing_after_triage(AppState::new(), loaded_single_article().0.clone());
     let state = with_signal_candidate_metadata(state);
-    let (articles, collection_text) = loaded_single_article();
+    let (articles, _collection_text) = loaded_single_article();
 
-    let (state, effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text,
-        },
-    );
+    let (state, effects) = crate::update::test_support::summarize(state, articles);
     let summary_request_id =
         request_id_for_prompt(&effects, PromptId::ArticleSummary).expect("summary request");
 
@@ -560,15 +554,9 @@ fn summary_cache_hit_reuses_signal_candidate_cache_without_snapshot_leak() {
     prewarm_summary_cache_for_single_article(&mut state, &summary_model);
     let (articles, _) = loaded_single_article();
     prewarm_signal_candidate_cache(&mut state, &articles[0], 3);
-    let (articles, collection_text) = loaded_single_article();
+    let (articles, _collection_text) = loaded_single_article();
 
-    let (state, effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text,
-        },
-    );
+    let (state, effects) = crate::update::test_support::summarize(state, articles);
 
     assert!(effects.iter().all(|effect| !matches!(
         effect,

@@ -61,18 +61,6 @@ pub struct Args {
     #[arg(long, value_name = "PATH")]
     pub import_saved_web_dir: Option<PathBuf>,
 
-    /// Refresh up to N article summaries that are missing the current summary prompt/model/context cache key
-    #[arg(
-        long,
-        value_name = "N",
-        conflicts_with = "import_saved_web_dir",
-        conflicts_with = "set_briefing_since",
-        conflicts_with = "set_briefing_since_now",
-        conflicts_with = "clear_briefing_since",
-        conflicts_with = "show_briefing_since"
-    )]
-    pub refresh_stale_summaries_limit: Option<usize>,
-
     /// Minimum signal_score (0..=100) for inclusion. Default 60.
     #[arg(long, value_parser = clap::value_parser!(u8).range(0..=100), value_name = "0..=100")]
     pub signal_candidate_threshold: Option<u8>,
@@ -283,12 +271,6 @@ mod tests {
 
         let args = Args::parse_from(&["harvester_batch", "--llm-concurrency", "0"]);
         assert_eq!(args.llm_concurrency, 1);
-    }
-
-    #[test]
-    fn refresh_stale_summaries_limit_is_parsed() {
-        let args = Args::parse_from(&["harvester_batch", "--refresh-stale-summaries-limit", "100"]);
-        assert_eq!(args.refresh_stale_summaries_limit, Some(100));
     }
 
     #[test]

@@ -302,3 +302,15 @@ Decision: The Batch API and the batch-only modes (drain, dry-run, recurring, sin
 Context: The owner approved the synchronous path and its approximate $5/month additional cost. The read-only reconciliation confirmed all 33 successful collected signal-candidate records, with nothing missing, invalid or outstanding.
 Consequences: The command-line host always runs one poll-download-process cycle and exits; the Batch launch policy supplies no runtime arguments. This retires the "Batch API buffering has its own allowance" clause of 2026-09-27. The dry-run no-op sink recorded on 2026-09-18 is gone with dry-run. The shared synchronous request budget, scoring-first priority, configuration frozen per run, append-only result sink, output-folder lock and Stop drain semantics remain. Replay records stay as forensics and are written only by the synchronous path.
 Refs: docs/plans/Plan.Simplification.md, docs/Architecture.md, crates/harvester_batch/src/runner.rs, crates/harvester_core/src/update/waves.rs, crates/harvester_engine/src/llm/handle.rs, scripts/lib/HarvesterLaunch.psm1
+
+## 2026-09-30 - The aggregate briefing is removed
+Decision: Remove the aggregate executive briefing, its streaming variant and briefing history outright.
+Context: The owner retired this product capability. This supersedes the briefing half of the 2026-09-18 "Prompt Lab is deleted while briefing domain state remains" commitment.
+Consequences: Per-article triage, summaries and scoring remain. Summary settlement saves completed results without an aggregate request. Persisted AggregateBriefing summary entries are skipped with an engine_logging warning naming the store file and count; other entries load through JSONL and RON migration. Existing history files are untouched. The desktop view fields remain false or empty, with IPC schema 12 unchanged. Replay records remain write-only forensics, and saved prompt overlays still load.
+Refs: crates/harvester_core/src/update/briefing.rs, crates/harvester_io/src/result_store.rs, crates/harvester_io/tests/retired_summary_entries.rs, docs/Architecture.md
+
+## 2026-09-30 - Retired generated artifacts leave the corpus marker without a schema bump
+Decision: Remove export.txt, manifest.json, summary_refresh_reports/ and .summary_refresh_last.json from generated_artifacts without changing CORPUS_SCHEMA_VERSION.
+Context: The concatenated export and stale-summary refresh mode are retired. None of these patterns can match an article record under the root or linked Markdown patterns, so article classification is unchanged under the CorpusFormat Versioning Rules.
+Consequences: The marker lists exactly archive.md and archive-*.md as generated artifacts. Existing files on disk are untouched. Archive bytes, summary resolution and archive-predicting estimates remain unchanged.
+Refs: docs/CorpusFormat.md, crates/harvester_engine/src/corpus_manifest.rs, crates/harvester_engine/src/export.rs, crates/harvester_engine/tests/fixtures/archive_export/

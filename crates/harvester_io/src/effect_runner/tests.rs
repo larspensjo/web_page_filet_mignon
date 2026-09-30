@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use harvester_core::{AppState, Effect, JobResultKind, LlmResultKind, Msg, PersistenceSnapshot};
+use harvester_core::{AppState, Effect, JobResultKind, Msg, PersistenceSnapshot};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI;
 use harvester_engine::llm::{LlmCompletionError, LlmEvent};
@@ -28,7 +28,6 @@ fn make_test_runtime_paths(base: &Path) -> RuntimePaths {
         signal_candidate_cache_path: base.join(".signal_candidate_cache.ron"),
         signal_candidate_overrides_path: base.join(".signal_candidate_overrides.ron"),
         state_path: base.join("state.json"),
-        briefing_history_path: base.join(".briefing_history.ron"),
         briefing_checkpoint_path: base.join(".briefing_checkpoint.ron"),
         entity_index_path: base.join(".entity_index.ron"),
         brave_seen_set_path: base.join(".brave_seen_set.ron"),
@@ -579,31 +578,6 @@ fn load_articles_for_triage_respects_since_utc_filter() {
     }
 }
 
-#[test]
-fn load_articles_for_briefing_with_empty_ordered_urls_dispatches_empty_articles_loaded() {
-    let temp = tempdir().expect("tempdir");
-    write_markdown(temp.path(), "a.md", "https://example.com/a");
-    let (runner, rx) = runner_with_receiver(temp.path());
-    runner.enqueue(vec![Effect::LoadArticlesForBriefing {
-        ordered_urls: Vec::new(),
-        since_utc: None,
-    }]);
-
-    let msg = rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("expected articles loaded message");
-    match msg {
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text,
-        } => {
-            assert!(articles.is_empty());
-            assert!(collection_text.is_empty());
-        }
-        other => panic!("unexpected message: {:?}", other),
-    }
-}
-
 // --- map_llm_event failure metadata propagation tests ---
 
 fn make_failure_metadata() -> harvester_engine::llm::run_metadata::LlmFailureMetadata {
@@ -679,31 +653,6 @@ fn map_llm_event_persistence_failed_with_metadata_propagates_it() {
             metadata.is_some(),
             "PersistenceFailed with metadata should propagate it"
         );
-    } else {
-        panic!("expected LlmCompleted");
-    }
-}
-
-#[test]
-fn map_llm_event_unsupported_model_has_none_metadata() {
-    use harvester_engine::llm::types::{ModelId, ProviderKind};
-    let event = LlmEvent::Completed {
-        request_id: 1,
-        result: Err(LlmCompletionError::UnsupportedModel {
-            model: ModelId::new(ProviderKind::OpenAi, "bad-model"),
-            reason: "unknown".to_string(),
-        }),
-    };
-    let msg = map_llm_event(event);
-    if let Msg::LlmCompleted {
-        metadata, result, ..
-    } = msg
-    {
-        assert!(
-            metadata.is_none(),
-            "UnsupportedModel is pre-flight so metadata=None"
-        );
-        assert!(matches!(result, LlmResultKind::Failed { .. }));
     } else {
         panic!("expected LlmCompleted");
     }

@@ -1,4 +1,4 @@
-//! Stdout progress reporter for the --refresh-stale-summaries-limit mode.
+//! Terminal progress surfaces for article processing and import.
 //!
 //! Activated only when both stdout and stderr are terminals; otherwise every
 //! method is a no-op.
@@ -22,10 +22,6 @@ pub use projection::{
     BatchDisplayPhase, BatchProgressProjection, BatchProgressSnapshot, BatchRunBaseline,
     IntakeProgress, ProgressClock, ProjectionContext, StageProgress, SystemProgressClock,
 };
-mod stale_reporter;
-#[allow(unused_imports)]
-pub use stale_reporter::{format_eta, ProgressReporter};
-
 /// Cursor-managed stdout surface. It owns only terminal control and a caller
 /// supplied writer; its input remains the pure dashboard frame above.
 pub struct TerminalProgressSurface<W: Write> {

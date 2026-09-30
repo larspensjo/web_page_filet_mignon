@@ -1,3 +1,6 @@
+#[cfg(test)]
+use crate::fixture_support::ManualPreTriageDecisions;
+pub(crate) mod test_support;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -394,57 +397,6 @@ impl PreTriageSession {
         self.refresh_loaded_lifecycle("no articles passed pre-triage filters");
     }
 
-    pub fn set_manual_decision(
-        &mut self,
-        key: &ArticleFilterKey,
-        decision: ManualDecision,
-    ) -> Result<(), &'static str> {
-        if !self.is_interactive() {
-            return Err("manual decisions are only allowed while reviewing");
-        }
-        let Some(entry) = self.entries.iter_mut().find(|entry| &entry.key == key) else {
-            return Err("filter key not found");
-        };
-        entry.manual_decision = Some(decision);
-        self.refresh_unresolved_review_count();
-        self.refresh_loaded_lifecycle("no included articles after manual decisions");
-        Ok(())
-    }
-
-    pub fn clear_manual_decisions(&mut self) {
-        for entry in &mut self.entries {
-            entry.manual_decision = None;
-        }
-        self.refresh_unresolved_review_count();
-        self.refresh_loaded_lifecycle("no articles passed pre-triage filters");
-    }
-
-    pub fn apply_manual_overrides(
-        &mut self,
-        overrides: &HashMap<ArticleFilterKey, ManualDecision>,
-    ) {
-        if overrides.is_empty() {
-            self.refresh_loaded_lifecycle("no articles passed pre-triage filters");
-            return;
-        }
-        for entry in &mut self.entries {
-            entry.manual_decision = overrides.get(&entry.key).copied();
-        }
-        self.refresh_unresolved_review_count();
-        self.refresh_loaded_lifecycle("no articles passed pre-triage filters");
-    }
-
-    pub fn manual_overrides(&self) -> HashMap<ArticleFilterKey, ManualDecision> {
-        self.entries
-            .iter()
-            .filter_map(|entry| {
-                entry
-                    .manual_decision
-                    .map(|decision| (entry.key.clone(), decision))
-            })
-            .collect()
-    }
-
     /// Returns the committed included URL set.
     ///
     /// This is intentionally available only in `ReadyToTriage`: during `Reviewing`, unresolved
@@ -454,16 +406,6 @@ impl PreTriageSession {
         if !matches!(self.phase(), PreTriagePhase::ReadyToTriage) {
             return Vec::new();
         }
-        self.resolved_included_urls_internal()
-    }
-
-    /// Returns the URLs that would be included based on current auto-verdicts and manual
-    /// decisions, without requiring the session to be in `ReadyToTriage` phase.
-    ///
-    /// Used during the `Reviewing` phase to show a provisional corpus before all review
-    /// items are settled. Manual decisions override auto-verdicts; `HardExclude` auto-verdicts
-    /// without a manual override are excluded; everything else is tentatively included.
-    pub(crate) fn tentative_included_urls(&self) -> Vec<String> {
         self.resolved_included_urls_internal()
     }
 
@@ -664,7 +606,10 @@ mod tests {
     }
 
     fn assert_borrowed_includes_match_materialized_values(session: &PreTriageSession) {
-        let materialized = session.tentative_included_urls();
+        let materialized = session
+            .tentative_included_url_refs()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
         let borrowed = session.tentative_included_url_refs().collect::<Vec<_>>();
         assert_eq!(
             borrowed,
@@ -735,7 +680,13 @@ mod tests {
             &PreTriagePolicy::default(),
         );
         assert_borrowed_includes_match_materialized_values(&session);
-        assert_eq!(session.tentative_included_urls(), vec![url_b.to_string()]);
+        assert_eq!(
+            session
+                .tentative_included_url_refs()
+                .map(str::to_owned)
+                .collect::<Vec<_>>(),
+            vec![url_b.to_string()]
+        );
         assert!(session.has_resolved_included_article());
 
         session.merge_delta(

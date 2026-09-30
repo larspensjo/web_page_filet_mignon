@@ -349,24 +349,21 @@ fn all_three_stores_keep_more_than_ten_thousand_entries_and_later_lines_win() {
 }
 
 #[test]
-fn retired_aggregate_briefing_summary_entries_still_migrate() {
+fn retired_aggregate_briefing_summary_entries_are_skipped_during_migration() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(".summary_cache.ron");
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../harvester_batch/tests/fixtures/carry_over/.summary_cache.ron");
-    let ron = fs::read_to_string(fixture)
-        .unwrap()
-        .replace("ArticleSummary", "AggregateBriefing");
+    let ron =
+        fs::read_to_string(fixture)
+            .unwrap()
+            .replacen("ArticleSummary", "AggregateBriefing", 1);
     fs::write(&path, &ron).unwrap();
     let before = crate::summary_cache_store::legacy(&path).unwrap();
     let after = crate::load_summary_cache(&path).unwrap();
-    assert!(!after.is_empty());
+    assert_eq!(after.len(), 2);
     assert_eq!(after.len(), before.len());
     for (key, entry) in before {
-        assert_eq!(
-            key.prompt_id,
-            harvester_engine::llm::PromptId::AggregateBriefing
-        );
         assert_eq!(after.lookup(&key), Some(&entry));
     }
     assert_eq!(fs::read_to_string(path).unwrap(), ron);

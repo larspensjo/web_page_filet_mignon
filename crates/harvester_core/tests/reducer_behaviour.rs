@@ -319,16 +319,52 @@ fn archive_click_emits_effect_without_state_change() {
 }
 
 fn send_llm_request_with_context(state: AppState) -> (AppState, Vec<Effect>) {
-    update(
+    let (state, _) = update(
         state,
-        Msg::RequestLlmCompletion {
-            prompt_id: PromptId::ArticleTriage,
-            prompt_version: Some(1),
-            model_override: None,
-            input_content: "llm input".to_string(),
-            context: vec![("key".to_string(), "value".to_string())],
-            template_override: None,
+        Msg::LlmMetadataLoaded {
+            active_versions: [(PromptId::ArticleTriage, 1)].into(),
+            effective_models: [(PromptId::ArticleTriage, "test-model".into())].into(),
         },
+    );
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Resume,
+        },
+    );
+    let (state, effects) =
+        harvester_core::fixture_support::complete_processing_configuration(state, effects, 100_000);
+    let request_id = effects
+        .iter()
+        .find_map(|e| match e {
+            Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+            _ => None,
+        })
+        .expect("preparation request");
+    let articles = (0..2)
+        .map(|index| harvester_core::LoadedArticle {
+            url: format!("https://example.com/{index}"),
+            source_title: None,
+            prepared_text: std::iter::repeat_n("content", 220)
+                .collect::<Vec<_>>()
+                .join(" "),
+            content_hash: format!("hash-{index}"),
+            fetched_utc: None,
+        })
+        .collect();
+    let (state, effects) = update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
+        },
+    );
+    (
+        state,
+        effects
+            .into_iter()
+            .filter(|e| matches!(e, Effect::RequestLlmCompletion { .. }))
+            .collect(),
     )
 }
 
@@ -359,7 +395,7 @@ fn llm_completed_success_updates_state() {
     init_logging();
     let (state, effects) = send_llm_request_with_context(AppState::new());
     let request_id = extract_request_id(&effects[0]);
-    let json = "{\"ok\":true}".to_string();
+    let json = r#"{"category":"news","priority":1,"tags":[],"rationale":"ok"}"#.to_string();
     let (state, effects) = update(
         state,
         Msg::LlmCompleted {
@@ -374,7 +410,9 @@ fn llm_completed_success_updates_state() {
             metadata: None,
         },
     );
-    assert!(effects.is_empty());
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, Effect::SaveResults { .. })));
     assert_eq!(
         state.llm_request_state(request_id),
         Some(&LlmRequestState::Completed {
@@ -407,7 +445,16 @@ fn request_ids_monotonically_increase() {
     init_logging();
     let (state, effects_a) = send_llm_request_with_context(AppState::new());
     let request_id_a = extract_request_id(&effects_a[0]);
-    let (_state, effects_b) = send_llm_request_with_context(state);
+    let (_state, effects_b) = update(
+        state,
+        Msg::LlmCompleted {
+            request_id: request_id_a,
+            result: LlmResultKind::Failed {
+                reason: "fixture".into(),
+            },
+            metadata: None,
+        },
+    );
     let request_id_b = extract_request_id(&effects_b[0]);
     assert!(request_id_b > request_id_a);
 }

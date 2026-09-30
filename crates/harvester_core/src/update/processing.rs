@@ -12,7 +12,6 @@ pub(super) fn begin(state: &mut AppState) -> Vec<Effect> {
         return Vec::new();
     }
     let reuse = state.pipeline_ready() && state.processing_budget.is_some();
-    state.summaries_follow_triage = true;
     let configuration_request = if reuse {
         None
     } else {
@@ -42,7 +41,6 @@ pub(super) fn fail(state: &mut AppState, reason: String) {
         if !matches!(state.triage().phase(), crate::TriagePhase::Complete) {
             state.triage_mut().fail(reason)
         }
-        state.summaries_follow_triage = false;
         if let Some(run) = state.pipeline_admission.as_mut() {
             run.armed = false;
             run.fresh_load = false;

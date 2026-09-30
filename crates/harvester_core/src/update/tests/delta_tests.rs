@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::fixture_support::ManualPreTriageDecisions;
 use crate::update as reduce;
 use harvester_engine::{TriageArticleDelta, WindowArticle};
 
@@ -266,9 +268,8 @@ fn triage_waits_for_matching_budget_then_summaries_reuse_snapshot_and_prepared_t
     assert!(duplicate_effects.is_empty());
     assert!(effects.iter().all(|e| !matches!(
         e,
-        Effect::LoadArticlesForBriefing { .. }
+        Effect::LoadArticlesForTriage { .. }
             | Effect::LoadProcessingConfiguration { .. }
-            | Effect::LoadArticlesForTriage { .. }
             | Effect::LoadPromptContexts
             | Effect::LoadPromptTemplateFiles
             | Effect::LoadLlmMetadata
@@ -557,12 +558,4 @@ fn failed_processing_start_keeps_completed_triage_available_for_archive() {
         crate::TriagePhase::Complete
     ));
     assert_eq!(state.archive_corpus().ordered_urls().len(), 1);
-}
-
-#[test]
-fn imported_corpus_clear_emits_index_reset() {
-    let (_, effects) = reduce(AppState::new(), Msg::ImportedCorpusCleared);
-    assert!(effects
-        .iter()
-        .any(|e| matches!(e, Effect::ResetCorpusScanIndex)));
 }

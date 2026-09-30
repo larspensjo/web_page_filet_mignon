@@ -28,11 +28,7 @@ pub fn build_corpus_manifest(written_at_utc: &str) -> Value {
             "articles": ["*.md", "linked/*.md"],
             "generated_artifacts": [
                 "archive.md",
-                "archive-*.md",
-                "export.txt",
-                "manifest.json",
-                "summary_refresh_reports/",
-                ".summary_refresh_last.json"
+                "archive-*.md"
             ],
             "internal_state": [
                 ".*.ron",
@@ -61,6 +57,11 @@ mod tests {
             manifest["layout"]["articles"].as_array().unwrap(),
             &vec![json!("*.md"), json!("linked/*.md")]
         );
+        assert_eq!(
+            manifest["layout"]["generated_artifacts"],
+            json!(["archive.md", "archive-*.md"])
+        );
+        assert_eq!(CORPUS_SCHEMA_VERSION, 1);
         assert!(manifest["layout"]["internal_state"]
             .as_array()
             .unwrap()

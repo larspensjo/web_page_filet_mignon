@@ -64,7 +64,6 @@ pub(super) fn truncate_for_log(input: &str, max_len: usize) -> String {
 
 pub(crate) fn summarize_batch_msg(msg: &Msg) -> String {
     match msg {
-        Msg::PollSourcesClicked => "PollSourcesClicked".to_string(),
         Msg::PollStarted { total } => format!("PollStarted(total={total})"),
         Msg::AllSourcesPollEnded => "AllSourcesPollEnded".to_string(),
         Msg::SourcePollCompleted {
@@ -101,9 +100,7 @@ pub(crate) fn summarize_batch_msg(msg: &Msg) -> String {
                 delta.members.len()
             )
         }
-        Msg::ArticlesLoaded { articles, .. } => {
-            format!("ArticlesLoaded {{ articles: {} }}", articles.len())
-        }
+
         Msg::PromptContextsLoaded { contexts } => {
             format!("PromptContextsLoaded {{ prompts: {} }}", contexts.len())
         }

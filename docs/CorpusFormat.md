@@ -24,11 +24,7 @@ Current marker shape:
     "articles": ["*.md", "linked/*.md"],
     "generated_artifacts": [
       "archive.md",
-      "archive-*.md",
-      "export.txt",
-      "manifest.json",
-      "summary_refresh_reports/",
-      ".summary_refresh_last.json"
+      "archive-*.md"
     ],
     "internal_state": [".*.ron", ".*.jsonl", "llm_results/", "logs/"]
   }
@@ -52,7 +48,7 @@ Schema version 1 exposes harvested articles as Markdown files:
 - The Markdown body starts after the closing `---` delimiter and following blank
   space.
 
-Generated archive/export files are not article records even when they use
+Generated archive files are not article records even when they use
 Markdown extensions. Readers should ignore files listed in
 `layout.generated_artifacts`.
 
@@ -63,7 +59,7 @@ signature `===== ARCHIVE INDEX =====`.
 
 ## Private Files
 
-Hidden `.ron` and `.jsonl` files, `llm_results/`, `logs/`, and refresh reports are outside the
+Hidden `.ron` and `.jsonl` files, `llm_results/`, and `logs/` are outside the
 public corpus contract. External readers must not depend on them. The
 `.sources.ron` file is the user-editable source registry; it lives in the output
 folder so corpus backups preserve ingestion configuration as well as state.
@@ -79,6 +75,11 @@ unterminated tails are preserved in sidecars before truncation. These are privat
 state artifacts, never corpus articles. Adding their marker pattern is compatible
 and does not change `CORPUS_SCHEMA_VERSION`.
 
+Harvester no longer reads or writes aggregate briefing history, stale-summary refresh reports,
+`export.txt`, or `manifest.json`. Existing files remain untouched. Summary stores skip retired
+`AggregateBriefing` entries with a warning identifying the store and skipped count, while
+loading all supported entries through both JSONL and RON migration.
+
 ## Versioning Rules
 
 Bump `CORPUS_SCHEMA_VERSION` when a reader might need to change its parser, for
@@ -93,7 +94,12 @@ Do not bump the version for compatible additions, for example:
 
 - adding optional frontmatter keys;
 - adding new internal cache files;
-- adding generated artifacts that readers can ignore by consulting the marker.
+- adding generated artifacts that readers can ignore by consulting the marker;
+- removing retired generated artifacts whose patterns cannot match article records.
+
+The retired `export.txt`, `manifest.json`, `summary_refresh_reports/` and
+`.summary_refresh_last.json` patterns cannot match root or linked Markdown articles.
+Removing them leaves article classification unchanged and keeps schema version 1.
 
 When bumping the corpus schema:
 

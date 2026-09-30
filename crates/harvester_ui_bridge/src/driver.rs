@@ -513,7 +513,7 @@ mod tests {
             )
         });
 
-        sender.send(Msg::NoOp).unwrap();
+        sender.send(Msg::PipelineRunAdvance).unwrap();
         let first = signal_receiver
             .recv_timeout(Duration::from_millis(20))
             .unwrap();

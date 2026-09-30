@@ -62,15 +62,7 @@ pub(crate) fn read_ron<
         let key = match serde_json::from_value(key_value.clone()) {
             Ok(key) => key,
             Err(e) => {
-                let unknown_prompt = key_value
-                    .get("prompt_id")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|id| {
-                        serde_json::from_value::<harvester_engine::llm::PromptId>(
-                            serde_json::Value::String(id.to_owned()),
-                        )
-                        .is_err()
-                    });
+                let unknown_prompt = unknown_prompt_id(&key_value);
                 if !unknown_prompt {
                     return Err(error(path, "decode RON key", e));
                 }
@@ -90,6 +82,17 @@ pub(crate) fn read_ron<
         );
     }
     Ok(records)
+}
+
+fn unknown_prompt_id(key: &serde_json::Value) -> bool {
+    key.get("prompt_id")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|id| {
+            serde_json::from_value::<harvester_engine::llm::PromptId>(serde_json::Value::String(
+                id.to_owned(),
+            ))
+            .is_err()
+        })
 }
 
 fn artifact_path(path: &Path, operation: &str) -> PathBuf {
@@ -147,10 +150,18 @@ fn parse_lines<
 ) -> (Vec<(K, E)>, usize) {
     let mut records = Vec::new();
     let mut skipped = 0;
+    let mut retired = 0;
     for (index, line) in bytes.split_inclusive(|b| *b == b'\n').enumerate() {
-        let parsed = serde_json::from_slice::<(DK, DE)>(line).and_then(transcode::<_, (K, E)>);
+        let parsed = serde_json::from_slice::<(DK, DE)>(line).and_then(|record| {
+            let key = serde_json::to_value(&record.0)?;
+            if unknown_prompt_id(&key) {
+                return Ok(None);
+            }
+            transcode::<_, (K, E)>(record).map(Some)
+        });
         match parsed {
-            Ok(record) => records.push(record),
+            Ok(Some(record)) => records.push(record),
+            Ok(None) => retired += 1,
             Err(e) => {
                 skipped += 1;
                 engine_warn!(
@@ -172,7 +183,16 @@ fn parse_lines<
             records.len()
         );
     }
-    (records, skipped)
+    if retired > 0 {
+        engine_warn!(
+            "[results] store={} path={} skipped {} entries with retired/unknown prompt id; loaded {} records",
+            path.file_stem().unwrap_or_default().to_string_lossy(),
+            path.display(),
+            retired,
+            records.len()
+        );
+    }
+    (records, skipped + retired)
 }
 
 fn write_records<

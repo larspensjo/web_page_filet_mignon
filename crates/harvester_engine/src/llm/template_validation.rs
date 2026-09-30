@@ -20,20 +20,6 @@ fn synthetic_vars(prompt_id: PromptId) -> HashMap<String, String> {
     let mut vars = TemplateVars::new();
     vars.insert("context", "Sample context value");
     match prompt_id {
-        PromptId::AggregateBriefing => {
-            vars.set_document("collection", "Doc A\nDoc B");
-            vars.insert("previous_briefings", "(none)");
-            vars.insert("briefing_time_window", "All available articles");
-        }
-        PromptId::BriefingExecutiveSummary => {
-            vars.set_document("content", "[A1] Sample Title\nSample summary.");
-            vars.insert("briefing_time_window", "All available articles");
-        }
-        PromptId::BriefingNextItem => {
-            vars.set_document("content", "[A1] Sample Title\nSample summary.");
-            vars.insert("briefing_time_window", "All available articles");
-            vars.insert("already_shown", "(none)");
-        }
         PromptId::ArticleSignalCandidate => {
             vars.set_document("content", "Sample article text");
             vars.insert("url", "https://example.com/article");
@@ -138,18 +124,6 @@ mod tests {
     }
 
     #[test]
-    fn both_fields_reported_independently() {
-        let errors = validate_template(
-            PromptId::AggregateBriefing,
-            "System {{missing}}",
-            "User {{unknown}}",
-        );
-        assert_eq!(errors.len(), 2);
-        assert!(errors.iter().any(|e| e.field == TemplateField::System));
-        assert!(errors.iter().any(|e| e.field == TemplateField::User));
-    }
-
-    #[test]
     fn valid_template_produces_no_errors() {
         let errors = validate_template(
             PromptId::ArticleTriage,
@@ -158,23 +132,20 @@ mod tests {
         );
         assert!(errors.is_empty());
     }
+}
 
+#[cfg(test)]
+mod independent_field_tests {
+    use super::*;
     #[test]
-    fn aggregate_briefing_supports_briefing_specific_variables() {
+    fn both_fields_reported_independently() {
         let errors = validate_template(
-            PromptId::AggregateBriefing,
-            "System {{context}} {{previous_briefings}} {{briefing_time_window}}",
-            "User {{collection}}",
+            PromptId::ArticleSummary,
+            "System {{missing}}",
+            "User {{unknown}}",
         );
-        assert!(errors.is_empty());
-    }
-
-    #[test]
-    fn briefing_stream_templates_validate_with_synthetic_vars() {
-        use crate::llm::prompts::{BRIEFING_EXECUTIVE_SUMMARY_PROMPT, BRIEFING_NEXT_ITEM_PROMPT};
-        for tpl in [BRIEFING_EXECUTIVE_SUMMARY_PROMPT, BRIEFING_NEXT_ITEM_PROMPT] {
-            let errors = validate_template(tpl.id, tpl.system_template, tpl.user_template);
-            assert!(errors.is_empty(), "{:?}: {:?}", tpl.id, errors);
-        }
+        assert_eq!(errors.len(), 2);
+        assert!(errors.iter().any(|e| e.field == TemplateField::System));
+        assert!(errors.iter().any(|e| e.field == TemplateField::User));
     }
 }

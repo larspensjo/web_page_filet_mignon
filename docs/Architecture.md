@@ -139,7 +139,7 @@ Key rules:
 - **State management:** a single authoritative state tracks session, work items, progress, and UI-facing snapshots.
 - **Content pipeline:** downloading, extraction, conversion, safety checks, budgeting, and persistence are executed as effects.
 - **Corpus contract:** output folders publish `harvester-corpus.json` with a `schema_version`; external readers may depend on the documented Markdown article layout, not on hidden cache/state files.
-- **LLM workflow:** request orchestration, validation, and replay are executed as effects with results fed back into state.
+- **LLM workflow:** request orchestration and validation are executed as effects with results fed back into state. The synchronous path writes replay records for forensic review; it never reads them to satisfy requests.
 - **Rendering:** UI is a projection of state, designed for fast updates and clear feedback.
 
 ## Incremental corpus preparation
@@ -176,8 +176,7 @@ an already completed session.
 Before either stage dispatches, the reducer checks the stored preparation budget against
 the snapshot budget and requests a delta load when necessary. A failed or mismatched
 preparation cannot dispatch model work. Summaries take their text directly from the triage
-session. `LoadArticlesForBriefing` remains available for the aggregate-briefing domain
-path.
+session. Summary settlement saves per-article results and completes without another model request.
 
 ## Shared article-model request budget
 
@@ -282,7 +281,6 @@ unfinished count. A host prints the reducer-recorded notice after initial admiss
 
 ## Planned evolution (aligned with current plans)
 - **Preview flow:** deliver extracted content through the message pipeline for in-session inspection, with a fallback to on-demand loading after restart.
-- **Executive briefing:** a multi-step, message-driven workflow that loads completed content, summarizes it, and produces an aggregate briefing with partial-failure tolerance; its domain state remains tested, but the desktop UI no longer exposes an entry point.
 - **Automation path:** future input sources (such as feeds) and scheduled runs remain subject to the same unidirectional flow and security boundaries.
 
 ## Crates and purposes
@@ -334,4 +332,4 @@ unfinished count. A host prints the reducer-recorded notice after initial admiss
 - **State:** the single source of truth for application behavior.
 - **View snapshot:** a read-only projection of state for rendering.
 - **Pipeline:** the ordered stages that transform external content into outputs.
-- **Replay:** cached model inputs and outputs used for auditability and cost control.
+- **Replay:** write-only model request and response records retained for forensic review.

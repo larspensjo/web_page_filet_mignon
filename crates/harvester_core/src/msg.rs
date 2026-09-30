@@ -2,14 +2,12 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
-use harvester_engine::llm::prompt::{PromptId, PromptTemplateOwned, PromptVersion};
+use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::llm::run_metadata::LlmRunMetadata;
-use harvester_engine::llm::types::ModelId;
 use harvester_engine::llm::QuotaOrigin;
 use harvester_engine::ExtractedLink;
 use serde::{Deserialize, Serialize};
 
-use crate::briefing::LoadedArticle;
 use crate::state::{AiAvailability, ArchiveTokenEstimates};
 use crate::tabs::TrendCategory;
 
@@ -133,15 +131,6 @@ pub enum Msg {
     BlacklistHydrated {
         state: crate::blacklist::BlacklistState,
     },
-    LinkToggleRequested {
-        job_id: crate::JobId,
-        link_index: u32,
-        checked: bool,
-    },
-    LinkDownloadStarted {
-        job_id: crate::JobId,
-        link_index: u32,
-    },
     LinkDownloadCompleted {
         job_id: crate::JobId,
         link_index: u32,
@@ -162,18 +151,6 @@ pub enum Msg {
     WindowResizeCompleted { outer_width: i32, outer_height: i32 },
     /// Tauri desktop window resize debounce completed. Carries logical inner dimensions.
     DesktopWindowResizeCompleted { inner_width: i32, inner_height: i32 },
-    /// Fallback for placeholder wiring.
-    NoOp,
-    /// User requested an LLM completion.
-    RequestLlmCompletion {
-        prompt_id: PromptId,
-        prompt_version: Option<PromptVersion>,
-        /// Per-run model override; `None` means use the stage/default model.
-        model_override: Option<ModelId>,
-        input_content: String,
-        context: Vec<(String, String)>,
-        template_override: Option<PromptTemplateOwned>,
-    },
     /// A completion result came back from the worker.
     LlmCompleted {
         request_id: u64,
@@ -186,12 +163,6 @@ pub enum Msg {
     LlmQuotaConfigured { limits: crate::LlmQuotaLimits },
     /// Authoritative session LLM quota usage snapshot from the worker.
     LlmQuotaUsageUpdated { usage: crate::LlmQuotaUsage },
-    /// User requested generation of a briefing.
-    GenerateBriefingClicked,
-    /// User requested the next item in the active briefing stream.
-    NextBriefingItemClicked,
-    /// User requested polling all configured sources.
-    PollSourcesClicked,
     /// User requested polling the indirect-link pool.
     PollIndirectLinks,
     /// Effect runner reports the total number of enabled sources to poll.
@@ -213,13 +184,6 @@ pub enum Msg {
     },
     /// All configured sources finished polling.
     AllSourcesPollEnded,
-    /// Articles prepared by the loader.
-    ArticlesLoaded {
-        articles: Vec<LoadedArticle>,
-        collection_text: String,
-    },
-    /// Loader failed.
-    ArticlesLoadFailed { reason: String },
     /// Triage-specific articles prepared by the loader.
     TriageArticlesLoaded {
         request_id: u64,
@@ -233,12 +197,6 @@ pub enum Msg {
     },
     /// Loader failed for triage.
     TriageArticlesLoadFailed { request_id: u64, reason: String },
-    /// Briefing history loaded from disk at startup.
-    /// On IO or parse failure, the effect runner sends this with an empty Vec
-    /// rather than a separate failure message — keeps the reducer simple and avoids dead variants.
-    BriefingHistoryLoaded {
-        entries: Vec<crate::briefing::BriefingHistoryEntry>,
-    },
     /// Briefing time checkpoint loaded from disk at startup.
     /// Raw wire type; the reducer parses the string into `DateTime<Utc>`.
     BriefingCheckpointLoaded { since_utc: Option<String> },
@@ -314,8 +272,6 @@ pub enum Msg {
     },
     /// Import batch failed at the directory level (scan or setup failure).
     ImportSavedWebpagesFailed { request_id: u64, reason: String },
-    /// Clear / reset the current imported corpus session.
-    ImportedCorpusCleared,
 }
 
 impl Msg {
@@ -352,33 +308,23 @@ impl Msg {
             Self::JobDone { .. } => "JobDone",
             Self::FetchOutcomeClassified { .. } => "FetchOutcomeClassified",
             Self::BlacklistHydrated { .. } => "BlacklistHydrated",
-            Self::LinkToggleRequested { .. } => "LinkToggleRequested",
-            Self::LinkDownloadStarted { .. } => "LinkDownloadStarted",
             Self::LinkDownloadCompleted { .. } => "LinkDownloadCompleted",
             Self::LinkDownloadFailed { .. } => "LinkDownloadFailed",
             Self::LinkDeleted { .. } => "LinkDeleted",
             Self::JobSelected { .. } => "JobSelected",
             Self::WindowResizeCompleted { .. } => "WindowResizeCompleted",
             Self::DesktopWindowResizeCompleted { .. } => "DesktopWindowResizeCompleted",
-            Self::NoOp => "NoOp",
-            Self::RequestLlmCompletion { .. } => "RequestLlmCompletion",
             Self::LlmCompleted { .. } => "LlmCompleted",
             Self::LlmQuotaConfigured { .. } => "LlmQuotaConfigured",
             Self::LlmQuotaUsageUpdated { .. } => "LlmQuotaUsageUpdated",
-            Self::GenerateBriefingClicked => "GenerateBriefingClicked",
-            Self::NextBriefingItemClicked => "NextBriefingItemClicked",
-            Self::PollSourcesClicked => "PollSourcesClicked",
             Self::PollIndirectLinks => "PollIndirectLinks",
             Self::PollStarted { .. } => "PollStarted",
             Self::SourcePollCompleted { .. } => "SourcePollCompleted",
             Self::SourcePollFailed { .. } => "SourcePollFailed",
             Self::AllSourcesPollEnded => "AllSourcesPollEnded",
-            Self::ArticlesLoaded { .. } => "ArticlesLoaded",
-            Self::ArticlesLoadFailed { .. } => "ArticlesLoadFailed",
             Self::TriageArticlesLoaded { .. } => "TriageArticlesLoaded",
             Self::TriageArticlesLoadProgress { .. } => "TriageArticlesLoadProgress",
             Self::TriageArticlesLoadFailed { .. } => "TriageArticlesLoadFailed",
-            Self::BriefingHistoryLoaded { .. } => "BriefingHistoryLoaded",
             Self::BriefingCheckpointLoaded { .. } => "BriefingCheckpointLoaded",
             Self::BriefingCheckpointSaveSucceeded { .. } => "BriefingCheckpointSaveSucceeded",
             Self::BriefingCheckpointSaveFailed { .. } => "BriefingCheckpointSaveFailed",
@@ -403,7 +349,6 @@ impl Msg {
             Self::ImportSavedWebpagesRequested { .. } => "ImportSavedWebpagesRequested",
             Self::ImportSavedWebpagesCompleted { .. } => "ImportSavedWebpagesCompleted",
             Self::ImportSavedWebpagesFailed { .. } => "ImportSavedWebpagesFailed",
-            Self::ImportedCorpusCleared => "ImportedCorpusCleared",
         }
     }
 

@@ -11,7 +11,7 @@ use std::collections::HashMap;
 const PREPARATION_BUDGET: usize = 100_000;
 
 fn reduce(state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
-    crate::update::update(state, msg)
+    crate::update::test_support::update(state, msg)
 }
 
 fn configured_state(state: AppState, version: u32, model: &str, context: &str) -> AppState {
@@ -24,19 +24,9 @@ fn configured_state(state: AppState, version: u32, model: &str, context: &str) -
     ] {
         active_versions.insert(prompt_id, version);
     }
-    active_versions.insert(PromptId::BriefingExecutiveSummary, 1);
-    active_versions.insert(PromptId::BriefingNextItem, 1);
     effective_models.insert(PromptId::ArticleTriage, format!("{model}-triage"));
     effective_models.insert(PromptId::ArticleSummary, format!("{model}-summary"));
     effective_models.insert(PromptId::ArticleSignalCandidate, format!("{model}-scoring"));
-    effective_models.insert(
-        PromptId::BriefingExecutiveSummary,
-        "test-briefing-model".to_string(),
-    );
-    effective_models.insert(
-        PromptId::BriefingNextItem,
-        "test-briefing-model".to_string(),
-    );
 
     let (state, _) = reduce(
         state,
@@ -218,7 +208,7 @@ fn known(state: &AppState) -> &crate::UnfinishedWorkSummary {
 }
 
 fn start_triage(state: AppState) -> (AppState, u64) {
-    let (state, effects) = reduce(
+    let (state, effects) = crate::update(
         state,
         Msg::PipelineRunRequested {
             scope: crate::PipelineRunScope::Resume,
@@ -240,22 +230,12 @@ fn start_triage(state: AppState) -> (AppState, u64) {
     ] {
         active_versions.insert(prompt_id, 1);
     }
-    active_versions.insert(PromptId::BriefingExecutiveSummary, 1);
-    active_versions.insert(PromptId::BriefingNextItem, 1);
     let mut effective_models = HashMap::new();
     effective_models.insert(PromptId::ArticleTriage, "model-old-triage".to_string());
     effective_models.insert(PromptId::ArticleSummary, "model-old-summary".to_string());
     effective_models.insert(
         PromptId::ArticleSignalCandidate,
         "model-old-scoring".to_string(),
-    );
-    effective_models.insert(
-        PromptId::BriefingExecutiveSummary,
-        "test-briefing-model".to_string(),
-    );
-    effective_models.insert(
-        PromptId::BriefingNextItem,
-        "test-briefing-model".to_string(),
     );
     let (state, effects) = reduce(
         state,
@@ -429,13 +409,7 @@ fn admitted_pending_and_active_summaries_are_in_progress() {
         },
     )
     .0;
-    let (state, effects) = reduce(
-        state,
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text: "summary test collection".to_string(),
-        },
-    );
+    let (state, effects) = crate::update::test_support::summarize(state, articles);
     assert_eq!(known(&state).in_progress, 3);
     assert!(effects.iter().any(|e| matches!(
         e,
@@ -582,7 +556,7 @@ fn views_and_persistence_snapshots_leave_the_stored_summary_unchanged() {
 }
 
 #[test]
-fn briefing_quota_exhaustion_reclassifies_all_pending_article_work() {
+fn triage_quota_exhaustion_reclassifies_all_pending_article_work() {
     let articles = (0..3)
         .map(|index| {
             article(
@@ -595,13 +569,23 @@ fn briefing_quota_exhaustion_reclassifies_all_pending_article_work() {
         configured_state(AppState::new(), 1, "model-old", "old-context"),
         articles,
     );
-    let (mut state, _) = start_triage(state);
+    let mut state = state;
+    state.set_llm_max_in_flight(2);
+    let (state, _) = start_triage(state);
     assert_eq!(known(&state).in_progress, 3);
-    state.briefing_mut().set_briefing_request_id(9_999);
+    let request_id = state
+        .triage()
+        .articles()
+        .iter()
+        .find_map(|a| match a.triage_state {
+            ArticleTriageState::InProgress { request_id } => Some(request_id),
+            _ => None,
+        })
+        .unwrap();
     let (state, _) = reduce(
         state,
         Msg::LlmCompleted {
-            request_id: 9_999,
+            request_id,
             result: crate::LlmResultKind::QuotaExhausted {
                 reason: "session quota exhausted".to_string(),
                 origin: harvester_engine::llm::QuotaOrigin::SessionBudget,

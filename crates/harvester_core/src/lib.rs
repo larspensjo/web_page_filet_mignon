@@ -2,7 +2,7 @@
 mod archive_display;
 pub mod blacklist;
 mod briefing;
-pub mod briefing_snapshot;
+
 mod cache_utils;
 mod effect;
 pub mod entity_index;
@@ -32,13 +32,10 @@ mod view_model;
 pub mod working_corpus;
 
 pub use briefing::{
-    format_previous_briefings_block, ArticleSummaryResult, BriefingArticle, BriefingArticleId,
-    BriefingHistoryEntry, BriefingHistoryStory, BriefingItem, BriefingPhase, BriefingResult,
-    BriefingSession, BriefingStoryResult, LoadedArticle, TriageSelectionPolicy,
+    ArticleSummaryResult, BriefingArticle, BriefingArticleId, BriefingPhase, BriefingSession,
+    LoadedArticle, TriageSelectionPolicy,
 };
-pub use briefing_snapshot::{
-    build_briefing_snapshot, BriefingSnapshot, SnapshotArticle, BRIEFING_SNAPSHOT_BUDGET_BYTES,
-};
+
 pub use cache_utils::model_ids_compatible;
 pub use effect::{Effect, PersistenceSnapshot, StopPolicy};
 pub use entity_index::{EntityIndex, EntityIndexEntry};

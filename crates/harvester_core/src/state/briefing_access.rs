@@ -1,70 +1,18 @@
+#[cfg(test)]
+use super::PendingBriefingCheckpointSaveSnapshot;
 use super::{AppState, PendingBriefingCheckpointSave, CHECKPOINT_SAVING_STATUS_MESSAGE};
-use crate::briefing::{BriefingHistoryEntry, BriefingSession};
+use crate::briefing::BriefingSession;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
-#[cfg(test)]
-use super::PendingBriefingCheckpointSaveSnapshot;
-
-#[derive(Debug, Clone, PartialEq)]
-pub(super) struct BriefingOrchestration {
-    skip_aggregate_briefing: bool,
-    priority_cutoff_exclusive: u8,
-}
-
-impl Default for BriefingOrchestration {
-    fn default() -> Self {
-        Self {
-            skip_aggregate_briefing: false,
-            priority_cutoff_exclusive: 1,
-        }
-    }
-}
-
-impl BriefingOrchestration {
-    fn request(&mut self, skip_aggregate_briefing: bool) {
-        self.skip_aggregate_briefing = skip_aggregate_briefing;
-    }
-
-    fn clear(&mut self) {
-        self.skip_aggregate_briefing = false;
-    }
-
-    fn policy(&self) -> crate::briefing::TriageSelectionPolicy {
+impl AppState {
+    pub(crate) fn briefing_triage_policy(&self) -> crate::briefing::TriageSelectionPolicy {
         crate::briefing::TriageSelectionPolicy {
-            cutoff_exclusive: self.priority_cutoff_exclusive,
+            cutoff_exclusive: 1,
             exclude_untriaged: true,
         }
     }
-
-    fn skip_aggregate_briefing(&self) -> bool {
-        self.skip_aggregate_briefing
-    }
 }
-
-impl AppState {
-    #[cfg(test)]
-    pub(crate) fn request_briefing_orchestration(&mut self) {
-        self.briefing_orchestration.request(false);
-    }
-
-    pub(crate) fn request_summary_preparation(&mut self) {
-        self.briefing_orchestration.request(true);
-    }
-
-    pub(crate) fn clear_briefing_orchestration(&mut self) {
-        self.briefing_orchestration.clear()
-    }
-
-    pub(crate) fn briefing_triage_policy(&self) -> crate::briefing::TriageSelectionPolicy {
-        self.briefing_orchestration.policy()
-    }
-
-    pub(crate) fn briefing_orchestration_skip_aggregate(&self) -> bool {
-        self.briefing_orchestration.skip_aggregate_briefing()
-    }
-}
-
 impl AppState {
     pub(crate) fn allocate_next_briefing_checkpoint_save_id(&mut self) -> u64 {
         let save_id = self.next_briefing_checkpoint_save_id;
@@ -86,20 +34,6 @@ impl AppState {
         self.note_unfinished_inputs_changed();
         self.briefing = briefing;
         self.dirty = true;
-    }
-
-    pub fn briefing_history(&self) -> &[BriefingHistoryEntry] {
-        &self.briefing_history
-    }
-
-    /// Prepends `entry` (newest first) and caps the list at 3 entries.
-    pub fn push_briefing_history(&mut self, entry: BriefingHistoryEntry) {
-        self.briefing_history.insert(0, entry);
-        self.briefing_history.truncate(3);
-    }
-
-    pub fn set_briefing_history(&mut self, entries: Vec<BriefingHistoryEntry>) {
-        self.briefing_history = entries;
     }
 
     pub fn briefing_since_utc(&self) -> Option<DateTime<Utc>> {

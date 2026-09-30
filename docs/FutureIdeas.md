@@ -50,6 +50,7 @@ Maintained manually in this repository.
 | Security  | SourceTrust         | Trust tiers for URL policies                     |
 | Storage   | BriefingHistory     | Persist and browse briefing history              |
 | Storage   | CleanTextCache      | Cache derived clean text artifacts               |
+| Storage   | CorpusScanning     | Tolerant article scanning and diagnostics       |
 | Storage   | ContentFingerprinting | Dedup and near-duplicate detection             |
 | Storage   | ExportArtifacts     | Export briefings and triage outputs              |
 | Storage   | NormalizationVersioning | Replay safety via versioned normalization   |
@@ -267,7 +268,7 @@ SuccessCriteria:
 ### UiFramework
 
 #### [FI-Architecture-UiFramework-0007] Typed selection mapping helpers for UI controls
-Status: Candidate
+Status: Retired
 TopLevel: Architecture
 SubLevel: UiFramework
 Priority: P2
@@ -284,6 +285,8 @@ SuccessCriteria:
 - Shared helpers cover both `domain -> combo index` and `combo index -> domain` mapping.
 - Prompt Lab model selection uses shared helpers instead of inline offset logic.
 - Unit tests cover empty catalogs, default-item offsets, and out-of-range indices.
+
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.
 
 #### [FI-Architecture-UiFramework-0008] Strategy map for `WM_CTLCOLOR*` paint routing
 Status: Candidate
@@ -522,7 +525,7 @@ SuccessCriteria:
 ### Briefing
 
 #### [FI-LLM-Briefing-0001] Summary-of-summaries briefing mode
-Status: Candidate
+Status: Retired
 TopLevel: LLM
 SubLevel: Briefing
 Priority: P2
@@ -539,8 +542,10 @@ SuccessCriteria:
 - Users can choose between raw-article and summary-of-summaries briefing modes.
 - Token usage drops substantially in summary-of-summaries mode.
 
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.
+
 #### [FI-LLM-Briefing-0002] Triage-informed briefing selection
-Status: Candidate
+Status: Retired
 TopLevel: LLM
 SubLevel: Briefing
 Priority: P2
@@ -562,8 +567,10 @@ SuccessCriteria:
 - Lower-priority items are excluded from the briefing input set.
 - Eligible article ordering can be configured (for example, by priority or recency) while remaining deterministic.
 
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.
+
 #### [FI-LLM-Briefing-0003] Minimum-eligible fallback for sparse triage days
-Status: Candidate
+Status: Retired
 TopLevel: LLM
 SubLevel: Briefing
 Priority: P2
@@ -580,8 +587,10 @@ SuccessCriteria:
 - Briefing supports a configurable minimum eligible floor used only when cutoff-filtered results are empty.
 - Fallback selection remains deterministic and auditable.
 
+Retirement: 2026-09-30. The aggregate briefing is removed; its minimum-eligible fallback is no longer planned.
+
 #### [FI-LLM-Briefing-0004] Briefing explainability block for triage filtering
-Status: Candidate
+Status: Retired
 TopLevel: LLM
 SubLevel: Briefing
 Priority: P2
@@ -598,8 +607,10 @@ SuccessCriteria:
 - Briefing output reports included count, excluded low-priority count, and excluded untriaged count.
 - Explainability counts match the triage selection inputs used for the run.
 
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.
+
 #### [FI-LLM-Briefing-0005] Manual pre-triage review in briefing prereq path
-Status: Candidate
+Status: Retired
 TopLevel: LLM
 SubLevel: Briefing
 Priority: P2
@@ -617,8 +628,10 @@ SuccessCriteria:
 - Resolved include/exclude decisions are applied before triage work starts in briefing orchestration.
 - Tests cover parity between the standard triage flow and briefing-prereq triage flow.
 
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.
+
 #### [FI-LLM-Briefing-0006] Typed briefing preview document model
-Status: Candidate
+Status: Retired
 TopLevel: LLM
 SubLevel: Briefing
 Priority: P2
@@ -637,8 +650,10 @@ SuccessCriteria:
 - Unit tests validate section assembly without relying on monolithic string snapshots.
 Related: [FI-Storage-ExportArtifacts-0001]
 
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.
+
 #### [FI-LLM-Briefing-0007] Configurable theme ordering in briefing preview
-Status: Candidate
+Status: Retired
 TopLevel: LLM
 SubLevel: Briefing
 Priority: P3
@@ -656,8 +671,10 @@ SuccessCriteria:
 - Selected ordering mode is visible in run metadata or UI state.
 - Ordering behavior is covered by unit tests.
 
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.
+
 #### [FI-LLM-Briefing-0008] Re-enable a briefing surface
-Status: Candidate
+Status: Retired
 TopLevel: LLM
 SubLevel: Briefing
 Priority: P2
@@ -672,6 +689,8 @@ Summary: Re-enable a product briefing surface using the retained compiled domain
 Rationale: This is re-enablement, not re-implementation.
 SuccessCriteria:
 - A supported host exposes the retained briefing workflow deliberately.
+
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.
 
 ### Budgeting
 
@@ -730,7 +749,7 @@ SuccessCriteria:
 - Retry outcomes are recorded with the adjusted budget.
 
 #### [FI-LLM-Budgeting-0004] Pre-dispatch cost estimate line item
-Status: Candidate
+Status: Retired
 TopLevel: LLM
 SubLevel: Budgeting
 Priority: P3
@@ -746,6 +765,8 @@ Rationale: Helps operators compare prompt/context/model variants before spending
 SuccessCriteria:
 - Prompt Lab displays an estimated cost line before dispatch.
 - Estimate updates when stage, model override, or context draft changes.
+
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.
 
 ### Caching
 
@@ -886,7 +907,7 @@ SuccessCriteria:
 - Reloads do not require application restart.
 
 #### [FI-LLM-PromptContext-0002] Inline diff for production vs draft context
-Status: Candidate
+Status: Retired
 TopLevel: LLM
 SubLevel: PromptContext
 Priority: P2
@@ -903,8 +924,10 @@ SuccessCriteria:
 - Diff view highlights key/value additions, removals, and modifications.
 - Diff stays in sync as draft text changes.
 
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.
+
 #### [FI-LLM-PromptContext-0003] Persist per-stage last-used draft
-Status: Candidate
+Status: Retired
 TopLevel: LLM
 SubLevel: PromptContext
 Priority: P2
@@ -921,8 +944,10 @@ SuccessCriteria:
 - Stage-specific drafts are restored after Prompt Lab close/reopen.
 - Reload/revert operations remain explicit and deterministic.
 
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.
+
 #### [FI-LLM-PromptContext-0004] Context presets with import/export
-Status: Candidate
+Status: Retired
 TopLevel: LLM
 SubLevel: PromptContext
 Priority: P3
@@ -938,6 +963,8 @@ Rationale: Speeds up repeated experiments across runs and machines.
 SuccessCriteria:
 - Operators can save and apply named presets from Prompt Lab.
 - Presets can be exported and imported in a stable file format.
+
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.
 
 #### [FI-LLM-PromptContext-0005] Save conflict detection for context files
 Status: Candidate
@@ -996,7 +1023,7 @@ SuccessCriteria:
 - Provider selection is configurable without code changes.
 
 #### [FI-LLM-Providers-0002] Provider capability metadata for model filtering
-Status: Candidate
+Status: Retired
 TopLevel: LLM
 SubLevel: Providers
 Priority: P2
@@ -1013,6 +1040,8 @@ SuccessCriteria:
 - Provider model listing includes capability tags in a normalized structure.
 - Prompt Lab model filtering uses capability requirements rather than hard-coded name patterns.
 - Unknown capabilities degrade safely with deterministic fallback behavior.
+
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.
 
 ### Replay
 
@@ -1345,7 +1374,8 @@ Rationale: Reduces end-to-end latency for large batches.
 SuccessCriteria:
 - LLM dispatch runs up to a configurable concurrency limit.
 - Session state correctly tracks multiple in-flight requests.
-- Aggregate briefing dispatch waits for all summary requests to settle.
+- Per-article summaries complete and are saved independently of any aggregate.
+
 
 #### [FI-Performance-LlmProcessing-0002] Adaptive concurrency cap from provider pressure
 Status: Candidate
@@ -1472,7 +1502,7 @@ SuccessCriteria:
 ### BriefingHistory
 
 #### [FI-Storage-BriefingHistory-0001] Persist and browse briefing history
-Status: Candidate
+Status: Retired
 TopLevel: Storage
 SubLevel: BriefingHistory
 Priority: P2
@@ -1488,6 +1518,8 @@ Rationale: Supports trend analysis and repeat review.
 SuccessCriteria:
 - Multiple briefing sessions can be listed and opened.
 - Each session includes metadata for date, model, and prompt versions.
+
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.
 
 ### CleanTextCache
 
@@ -1532,7 +1564,7 @@ SuccessCriteria:
 ### ExportArtifacts
 
 #### [FI-Storage-ExportArtifacts-0001] Export briefing and triage artifacts
-Status: Candidate
+Status: Retired
 TopLevel: Storage
 SubLevel: ExportArtifacts
 Priority: P2
@@ -1549,6 +1581,8 @@ SuccessCriteria:
 - Briefing output is written to a markdown file in the output directory.
 - Briefing output can optionally be written as `.rtf` suitable for rich-text consumers.
 - Triage results are exported as structured JSON with provenance fields.
+
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.
 
 #### [FI-Storage-ExportArtifacts-0002] Token-budgeted chunked export for LLM handoff
 Status: Candidate
@@ -1581,13 +1615,33 @@ Origin:
 - SourceSection: Future extensions (post-Phase 7)
 - Captured: 2026-02-17
 Tags: [batch, export, json, observability]
-Summary: Emit a machine-readable JSON summary after each batch cycle containing poll results, triage outcomes, and briefing metadata.
+Summary: Emit a machine-readable JSON summary after each batch cycle containing poll results and per-article triage, summary and scoring outcomes.
 Rationale: Enables external tooling, dashboards, and compliance pipelines to consume cycle results without parsing logs.
 SuccessCriteria:
 - Each completed cycle writes a structured JSON artifact to the output directory.
-- Artifact includes poll counts, triage decision counts, and briefing metadata.
+- Artifact includes poll counts and per-article triage, summary and scoring counts.
 - Artifact schema is stable and documented.
-Related: [FI-Storage-ExportArtifacts-0001]
+
+### CorpusScanning
+
+#### [FI-Storage-CorpusScanning-0001] Skip unreadable articles without failing the corpus scan
+Status: Candidate
+TopLevel: Storage
+SubLevel: CorpusScanning
+Priority: P2
+Effort: S
+Risk: L
+Origin:
+- SourceDoc: Plan.Simplification.md
+- SourceSection: Phase 5 review follow-up
+- Captured: 2026-09-30
+Tags: [corpus, scanning, tolerance, logging]
+Summary: Let CorpusScanIndex::load_delta skip an unreadable article and warn with its file path instead of failing the whole scan.
+Rationale: The owner prefers tolerance over refusal. A single Markdown file containing invalid UTF-8 currently fails the live scan through briefing.rs and corpus_index.rs, preventing readable articles from loading. This pre-existing weakness stays unchanged during the approved removal scope.
+SuccessCriteria:
+- An unreadable article, including invalid UTF-8, is skipped while readable articles still load.
+- engine_logging warns with the article file path and read failure; the original file stays untouched.
+- Regression coverage includes readable and unreadable articles in the same corpus and repeated delta scans.
 
 ### NormalizationVersioning
 
@@ -1738,7 +1792,7 @@ SuccessCriteria:
 ### BriefingOptions
 
 #### [FI-UX-BriefingOptions-0001] Include linked pages in briefing
-Status: Candidate
+Status: Retired
 TopLevel: UX
 SubLevel: BriefingOptions
 Priority: P3
@@ -1754,6 +1808,8 @@ Rationale: Improves briefing coverage for linked sources when desired.
 SuccessCriteria:
 - Inclusion profiles control whether linked pages are added.
 - Briefing input list reflects the selected inclusion profile.
+
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.
 
 ### DiscardWorkflow
 
@@ -1956,7 +2012,7 @@ SuccessCriteria:
 Related: [FI-UX-PreviewRich-0001]
 
 #### [FI-UX-PreviewRich-0004] Copy briefing preview as markdown
-Status: Candidate
+Status: Retired
 TopLevel: UX
 SubLevel: PreviewRich
 Priority: P3
@@ -1974,8 +2030,10 @@ SuccessCriteria:
 - Copied content preserves markdown section structure used by preview formatting.
 - Action outcome is visible to the user (success/failure feedback).
 
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.
+
 #### [FI-UX-PreviewRich-0005] Per-section collapse controls for briefing preview
-Status: Candidate
+Status: Retired
 TopLevel: UX
 SubLevel: PreviewRich
 Priority: P3
@@ -2034,7 +2092,7 @@ SuccessCriteria:
 - UI shows side-by-side outputs with metadata.
 
 #### [FI-UX-PromptComparison-0002] Re-implement prompt comparison tooling
-Status: Candidate
+Status: Retired
 TopLevel: UX
 SubLevel: PromptComparison
 Priority: P2
@@ -2050,6 +2108,8 @@ Rationale: Prompt Lab state machinery was deleted; prompt and context files rema
 hand-editable under git.
 SuccessCriteria:
 - The new implementation owns fresh state and does not revive retired machinery.
+
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.
 
 ### SessionControls
 
@@ -2091,7 +2151,7 @@ SuccessCriteria:
 - Indicator updates on each LLM completion event.
 
 #### [FI-UX-SessionControls-0003] Retriage override when briefing would reuse prior triage
-Status: Candidate
+Status: Retired
 TopLevel: UX
 SubLevel: SessionControls
 Priority: P3
@@ -2107,6 +2167,8 @@ Rationale: Gives operators explicit control when they suspect stale or low-quali
 SuccessCriteria:
 - UI exposes a retriage override action in the briefing flow.
 - Using the override bypasses reuse checks and runs triage against the current corpus.
+
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.
 
 #### [FI-UX-SessionControls-0004] Confirm guard before clearing briefing checkpoint in TUI launcher
 Status: Obsolete
@@ -2366,7 +2428,7 @@ SuccessCriteria:
 ### WorkflowAutomation
 
 #### [FI-UX-WorkflowAutomation-0001] One-click triage + briefing workflow
-Status: Candidate
+Status: Retired
 TopLevel: UX
 SubLevel: WorkflowAutomation
 Priority: P2
@@ -2383,8 +2445,10 @@ SuccessCriteria:
 - One action triggers triage followed by briefing using a priority threshold.
 - Workflow progress is visible in the UI.
 
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.
+
 #### [FI-UX-WorkflowAutomation-0002] Apply and run triage-summary-briefing trio
-Status: Candidate
+Status: Retired
 TopLevel: UX
 SubLevel: WorkflowAutomation
 Priority: P2
@@ -2400,3 +2464,5 @@ Rationale: Removes repetitive manual orchestration during prompt tuning.
 SuccessCriteria:
 - One action dispatches the three stage runs with clear per-stage status.
 - Failure in one stage is surfaced without obscuring outcomes of completed stages.
+
+Retirement: 2026-09-30. The aggregate briefing and Prompt Lab workflows are removed; this idea is no longer planned.

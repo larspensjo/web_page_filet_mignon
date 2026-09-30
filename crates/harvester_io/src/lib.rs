@@ -26,10 +26,10 @@ pub use entity_index_store::{
     load_entity_index, save_entity_index, upsert_entry, EntityIndexPatch,
 };
 pub use persistence::{
-    load_briefing_checkpoint, load_briefing_history, load_completed_jobs, load_desktop_window_size,
-    load_pending_intake, load_window_size, persist_completed_jobs, persist_desktop_window_size,
-    persist_runtime_state, persist_window_size, save_briefing_checkpoint, save_briefing_history,
-    try_persist_runtime_state, try_persist_runtime_state_with_pending,
+    load_briefing_checkpoint, load_completed_jobs, load_desktop_window_size, load_pending_intake,
+    load_window_size, persist_completed_jobs, persist_desktop_window_size, persist_runtime_state,
+    persist_window_size, save_briefing_checkpoint, try_persist_runtime_state,
+    try_persist_runtime_state_with_pending,
 };
 pub use persistence_worker::PersistenceWorker;
 pub use prompt_template_store::load_prompt_templates;

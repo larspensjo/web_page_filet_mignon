@@ -1,19 +1,15 @@
 use super::summary_cache_support::{
     build_summary_cache_key, log_summary_cache_completion_metadata,
-    log_summary_cache_lookup_mismatch, log_summary_cache_run_summary, short_hash,
-    summary_cache_key_error_reason,
+    log_summary_cache_lookup_mismatch, short_hash, summary_cache_key_error_reason,
 };
-use crate::briefing::{ArticleSummaryResult, BriefingItem, BriefingResult, BriefingStoryResult};
+use crate::briefing::ArticleSummaryResult;
 use crate::state::ModelDispatchHalt;
 use crate::triage::ArticleTriageResult;
 use crate::update::signal_candidate::{handle_signal_candidate_completion, try_enqueue};
 use crate::{AppState, Effect, LlmRequestState, LlmResultKind};
 use engine_logging::{engine_info, engine_warn};
 use harvester_engine::llm::prompt::PromptId;
-use harvester_engine::llm::{
-    validate_briefing, validate_briefing_executive_summary, validate_briefing_next_item,
-    validate_summary, validate_triage, BriefingNextItem, LlmRunMetadata, QuotaOrigin,
-};
+use harvester_engine::llm::{validate_summary, validate_triage, LlmRunMetadata, QuotaOrigin};
 
 pub(super) fn handle(
     state: &mut AppState,
@@ -21,10 +17,6 @@ pub(super) fn handle(
     result: LlmResultKind,
     metadata: Option<LlmRunMetadata>,
 ) -> Vec<Effect> {
-    let request_prompt_id = match state.llm_request_state(request_id) {
-        Some(LlmRequestState::Pending { prompt_id }) => Some(*prompt_id),
-        _ => None,
-    };
     record_llm_result(state, request_id, &result);
     if let Some(run_metadata) = metadata.as_ref() {
         state.record_llm_usage_from_metadata(run_metadata);
@@ -47,28 +39,6 @@ pub(super) fn handle(
         let article = &state.triage().articles()[article_idx];
         let identity = (article.url.clone(), article.content_hash.clone());
         super::waves::triage_changed(state, &identity.0, &identity.1);
-    } else if state.briefing().is_briefing_request(request_id) {
-        note_owned_quota(state, &result);
-        match request_prompt_id {
-            Some(PromptId::BriefingExecutiveSummary) => {
-                handle_executive_summary_completion(state, &result);
-            }
-            Some(PromptId::AggregateBriefing) | None => {
-                // Retained for compatibility and reducer tests. The live Generate flow routes
-                // through BriefingExecutiveSummary + BriefingNextItem.
-                handle_aggregate_briefing_completion(state, &result, &mut effects);
-            }
-            Some(other) => {
-                engine_warn!(
-                    "[briefing] ignoring briefing request_id={} with unexpected prompt_id={:?}",
-                    request_id,
-                    other
-                );
-            }
-        }
-    } else if state.briefing().next_item_request_id() == Some(request_id) {
-        note_owned_quota(state, &result);
-        handle_next_item_completion(state, &result);
     }
 
     effects
@@ -338,135 +308,4 @@ fn handle_triage_completion(
             state.triage_mut().fail_article(article_idx, reason.clone());
         }
     }
-}
-
-fn handle_executive_summary_completion(state: &mut AppState, result: &LlmResultKind) {
-    match result {
-        LlmResultKind::Success { output_json, .. } => {
-            match validate_briefing_executive_summary(output_json) {
-                Ok(exec) => {
-                    state.briefing_mut().enter_streaming(exec.executive_summary);
-                }
-                Err(err) => {
-                    engine_warn!("[briefing-stream] exec summary validation failed: {err}");
-                    state
-                        .briefing_mut()
-                        .fail(format!("validation failed: {err}"));
-                }
-            }
-        }
-        LlmResultKind::QuotaExhausted { reason, .. } => {
-            state.briefing_mut().fail(reason.clone());
-        }
-        LlmResultKind::RateLimited { reason } | LlmResultKind::Failed { reason } => {
-            state.briefing_mut().fail(reason.clone());
-        }
-        LlmResultKind::ValidationFailed { reason, .. } => {
-            state
-                .briefing_mut()
-                .fail(format!("validation failed: {reason}"));
-        }
-    }
-
-    state.mark_dirty();
-}
-
-fn handle_aggregate_briefing_completion(
-    state: &mut AppState,
-    result: &LlmResultKind,
-    effects: &mut Vec<Effect>,
-) {
-    match result {
-        LlmResultKind::Success {
-            output_json,
-            input_tokens,
-            output_tokens,
-            ..
-        } => match validate_briefing(output_json) {
-            Ok(briefing) => {
-                let top_stories = briefing
-                    .top_stories
-                    .into_iter()
-                    .map(|story| BriefingStoryResult {
-                        headline: story.headline,
-                        body: story.body,
-                    })
-                    .collect();
-                let result = BriefingResult {
-                    executive_summary: briefing.executive_summary,
-                    top_stories,
-                    article_count: briefing.article_count,
-                    input_tokens: *input_tokens,
-                    output_tokens: *output_tokens,
-                };
-                state.briefing_mut().complete_briefing(result.clone());
-                let now = chrono::Utc::now().to_rfc3339();
-                if let Some(entry) =
-                    crate::briefing::BriefingHistoryEntry::from_result(&result, &now)
-                {
-                    state.push_briefing_history(entry);
-                    effects.push(Effect::SaveBriefingHistory {
-                        entries: state.briefing_history().to_vec(),
-                    });
-                }
-                effects.push(Effect::FlushResults);
-            }
-            Err(err) => {
-                engine_warn!("[briefing] briefing validation failed: {err}");
-                state
-                    .briefing_mut()
-                    .fail(format!("validation failed: {err}"));
-                effects.push(Effect::FlushResults);
-            }
-        },
-        LlmResultKind::QuotaExhausted { reason, .. }
-        | LlmResultKind::RateLimited { reason }
-        | LlmResultKind::Failed { reason } => {
-            state.briefing_mut().fail(reason.clone());
-            effects.push(Effect::FlushResults);
-        }
-        LlmResultKind::ValidationFailed { reason, .. } => {
-            state
-                .briefing_mut()
-                .fail(format!("validation failed: {reason}"));
-            effects.push(Effect::FlushResults);
-        }
-    }
-
-    log_summary_cache_run_summary(state);
-    state.mark_dirty();
-}
-
-fn handle_next_item_completion(state: &mut AppState, result: &LlmResultKind) {
-    match result {
-        LlmResultKind::Success { output_json, .. } => {
-            match validate_briefing_next_item(output_json) {
-                Ok(BriefingNextItem::Item { headline, body }) => {
-                    state
-                        .briefing_mut()
-                        .append_stream_item(BriefingItem { headline, body });
-                    state.briefing_mut().clear_next_item_request_id();
-                }
-                Ok(BriefingNextItem::Exhausted) => {
-                    state.briefing_mut().set_exhausted();
-                    state.briefing_mut().clear_next_item_request_id();
-                }
-                Err(err) => {
-                    engine_warn!("[briefing-stream] next item validation failed: {err}");
-                    state.briefing_mut().clear_next_item_request_id();
-                }
-            }
-        }
-        LlmResultKind::QuotaExhausted { reason, .. } => {
-            engine_warn!("[briefing-stream] next item call failed: {reason}");
-            state.briefing_mut().clear_next_item_request_id();
-        }
-        LlmResultKind::RateLimited { reason }
-        | LlmResultKind::Failed { reason }
-        | LlmResultKind::ValidationFailed { reason, .. } => {
-            engine_warn!("[briefing-stream] next item call failed: {reason}");
-            state.briefing_mut().clear_next_item_request_id();
-        }
-    }
-    state.mark_dirty();
 }

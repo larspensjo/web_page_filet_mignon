@@ -455,7 +455,6 @@ fn llm_event(state: &AppState, request_id: u64, result: &LlmResultKind) -> Progr
                 PromptId::ArticleTriage => Some(PipelineStage::Triaging),
                 PromptId::ArticleSummary => Some(PipelineStage::Summarizing),
                 PromptId::ArticleSignalCandidate => Some(PipelineStage::ScoringSignals),
-                _ => None,
             },
             LlmRequestState::Completed { .. } | LlmRequestState::Failed { .. } => None,
         });

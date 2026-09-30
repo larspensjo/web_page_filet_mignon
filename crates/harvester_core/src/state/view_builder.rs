@@ -81,7 +81,7 @@ impl AppState {
             .or_else(|| self.provider_alert_banner());
         let ai_unavailable_message = self.ai_unavailable_message();
         let triage_blocked_reason = self.triage_blocked_reason();
-        let briefing_blocked_reason = self.briefing_blocked_reason();
+
         let stop_finish_button = self.stop_finish_button_state();
         let archive_display = self.archive_display_counts();
         let full_filtered_count = archive_display.filtered_count();
@@ -145,20 +145,6 @@ impl AppState {
             } else {
                 (archive_estimates.summary_tokens, full_filtered_count)
             };
-        let briefing_generate_ready = archive_display.live_corpus().is_some_and(|corpus| {
-            let all_summarized = archive_estimates.summary_coverage == full_filtered_count;
-            matches!(
-                self.briefing_generate_readiness_for_corpus(corpus, |url| {
-                    all_summarized
-                        || summary_lookup.briefing_by_url.contains_key(url)
-                        || self.content_hash_for_url(url).is_some_and(|hash| {
-                            summary_lookup.summary_for_content_hash(hash).is_some()
-                        })
-                }),
-                crate::state::BriefingGenerateReadiness::Ready { .. }
-            )
-        }) && self.briefing.can_generate()
-            && self.briefing_ai_available();
         let run_state = self.run_state();
         let run_enabled = matches!(run_state, crate::RunState::Idle);
         let unfinished_work = self.unfinished_work().clone();
@@ -218,15 +204,15 @@ impl AppState {
             preview_context,
             ai_warning_banner,
             preview_source,
-            briefing_generate_enabled: briefing_generate_ready,
-            next_item_enabled: self.briefing.next_item_enabled() && self.briefing_ai_available(),
+            briefing_generate_enabled: false,
+            next_item_enabled: false,
             stop_finish_button,
             triage_results_reorder_suppressed: self.triage_reorder_suppressed(),
             signal_candidate_rows,
             signal_candidate_preview,
             ai_unavailable_message,
             triage_blocked_reason,
-            briefing_blocked_reason,
+            briefing_blocked_reason: None,
             run_progress: self
                 .run_progress
                 .as_ref()

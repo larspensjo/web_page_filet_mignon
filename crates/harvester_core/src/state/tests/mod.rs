@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(test)]
+use crate::fixture_support::ManualPreTriageDecisions;
 
 #[cfg(test)]
 mod app_state_tests {
@@ -199,7 +201,7 @@ mod app_state_tests {
     #[test]
     fn batch_status_is_running_when_summary_article_load_is_in_flight() {
         let mut state = AppState::new();
-        state.set_briefing(crate::briefing::BriefingSession::new_loading(None));
+        state.set_briefing(crate::briefing::BriefingSession::new_loading());
 
         assert_eq!(state.batch_status(), BatchStatus::Running);
     }
@@ -577,8 +579,8 @@ mod app_state_tests {
     }
 
     #[test]
-    fn briefing_complete_then_job_selected_shows_the_selected_summary() {
-        use crate::briefing::{ArticleSummaryResult, BriefingItem, LoadedArticle};
+    fn summaries_complete_then_job_selected_shows_the_selected_summary() {
+        use crate::briefing::{ArticleSummaryResult, LoadedArticle};
 
         let mut state = AppState::new();
         state.jobs.insert(
@@ -591,17 +593,14 @@ mod app_state_tests {
             },
         );
 
-        let mut briefing = crate::briefing::BriefingSession::new_loading(None);
-        briefing.set_articles(
-            vec![LoadedArticle {
-                url: "https://example.com/article".to_string(),
-                source_title: None,
-                prepared_text: "text".to_string(),
-                content_hash: "hash".to_string(),
-                fetched_utc: None,
-            }],
-            "collection".to_string(),
-        );
+        let mut briefing = crate::briefing::BriefingSession::new_loading();
+        briefing.set_articles(vec![LoadedArticle {
+            url: "https://example.com/article".to_string(),
+            source_title: None,
+            prepared_text: "text".to_string(),
+            content_hash: "hash".to_string(),
+            fetched_utc: None,
+        }]);
         briefing.transition_to_summarizing();
         briefing.start_article(0, 1);
         briefing.complete_article(
@@ -615,19 +614,7 @@ mod app_state_tests {
                 entities: Default::default(),
             },
         );
-        briefing.start_stream(
-            "[A1] Article Title\nArticle summary text".to_string(),
-            "win".to_string(),
-            1,
-            0,
-            0,
-            false,
-        );
-        briefing.enter_streaming("Executive summary".to_string());
-        briefing.append_stream_item(BriefingItem {
-            headline: "Story 1".to_string(),
-            body: "desc".to_string(),
-        });
+        briefing.complete_without_briefing();
         state.set_briefing(briefing);
 
         state.select_job(1);
@@ -722,17 +709,14 @@ mod app_state_tests {
                 ..Default::default()
             },
         );
-        let mut briefing = crate::briefing::BriefingSession::new_loading(None);
-        briefing.set_articles(
-            vec![LoadedArticle {
-                url: "https://summarized.example/article".to_string(),
-                source_title: None,
-                prepared_text: "text".to_string(),
-                content_hash: "hash".to_string(),
-                fetched_utc: None,
-            }],
-            "collection".to_string(),
-        );
+        let mut briefing = crate::briefing::BriefingSession::new_loading();
+        briefing.set_articles(vec![LoadedArticle {
+            url: "https://summarized.example/article".to_string(),
+            source_title: None,
+            prepared_text: "text".to_string(),
+            content_hash: "hash".to_string(),
+            fetched_utc: None,
+        }]);
         briefing.transition_to_summarizing();
         briefing.start_article(0, 1);
         briefing.complete_article(
@@ -847,16 +831,7 @@ mod app_state_tests {
     fn selecting_job_sets_preview_mode_to_selected_job_summary() {
         let mut state = make_state_with_summarized_job();
         state.select_job(10);
-        use crate::briefing::BriefingItem;
         let mut s2 = make_state_with_summarized_job();
-        s2.briefing_mut()
-            .start_stream("[A1] T\nd".to_string(), "win".to_string(), 1, 0, 0, false);
-        s2.briefing_mut()
-            .enter_streaming("Exec summary".to_string());
-        s2.briefing_mut().append_stream_item(BriefingItem {
-            headline: "T".to_string(),
-            body: "d".to_string(),
-        });
         s2.select_job(10);
         let view = s2.view();
         let text = view.preview_text.unwrap_or_default();
@@ -1046,10 +1021,7 @@ mod app_state_tests {
             view.triage_blocked_reason,
             Some("AI setup is incomplete because OPENAI_API_KEY is not set".to_string())
         );
-        assert_eq!(
-            view.briefing_blocked_reason,
-            Some("AI setup is incomplete because OPENAI_API_KEY is not set".to_string())
-        );
+        assert_eq!(view.briefing_blocked_reason, None);
         assert_eq!(
             view.right_pane.triage_markdown,
             Some(
@@ -1185,17 +1157,14 @@ mod app_state_tests {
         let mut state = AppState::new();
         let url = "https://test.example/article";
 
-        let mut briefing = crate::briefing::BriefingSession::new_loading(None);
-        briefing.set_articles(
-            vec![LoadedArticle {
-                url: url.to_string(),
-                source_title: None,
-                prepared_text: "text".to_string(),
-                content_hash: "hash".to_string(),
-                fetched_utc: None,
-            }],
-            "collection".to_string(),
-        );
+        let mut briefing = crate::briefing::BriefingSession::new_loading();
+        briefing.set_articles(vec![LoadedArticle {
+            url: url.to_string(),
+            source_title: None,
+            prepared_text: "text".to_string(),
+            content_hash: "hash".to_string(),
+            fetched_utc: None,
+        }]);
         briefing.transition_to_summarizing();
         briefing.start_article(0, 1);
         briefing.complete_article(
@@ -1341,17 +1310,14 @@ mod app_state_tests {
         let mut state = AppState::new();
         let url = "https://test.example/article";
 
-        let mut briefing = crate::briefing::BriefingSession::new_loading(None);
-        briefing.set_articles(
-            vec![LoadedArticle {
-                url: url.to_string(),
-                source_title: None,
-                prepared_text: "text".to_string(),
-                content_hash: "hash".to_string(),
-                fetched_utc: None,
-            }],
-            "collection".to_string(),
-        );
+        let mut briefing = crate::briefing::BriefingSession::new_loading();
+        briefing.set_articles(vec![LoadedArticle {
+            url: url.to_string(),
+            source_title: None,
+            prepared_text: "text".to_string(),
+            content_hash: "hash".to_string(),
+            fetched_utc: None,
+        }]);
         briefing.transition_to_summarizing();
         briefing.start_article(0, 1);
         briefing.complete_article(
@@ -1395,7 +1361,7 @@ mod app_state_tests {
     fn set_summary_titles(state: &mut AppState, titles: &[(&str, &str)]) {
         use crate::briefing::{ArticleSummaryResult, LoadedArticle};
 
-        let mut briefing = crate::briefing::BriefingSession::new_loading(None);
+        let mut briefing = crate::briefing::BriefingSession::new_loading();
         briefing.set_articles(
             titles
                 .iter()
@@ -1407,7 +1373,6 @@ mod app_state_tests {
                     fetched_utc: None,
                 })
                 .collect(),
-            "collection".to_string(),
         );
         briefing.transition_to_summarizing();
         for (idx, (_, title)) in titles.iter().enumerate() {
@@ -2645,55 +2610,6 @@ mod app_state_tests {
         assert_eq!(preview_context.source_label, "epochai.substack.com");
         assert_eq!(preview_context.status_label, "Done");
         assert_eq!(preview_context.attention_label, None);
-    }
-}
-
-#[cfg(test)]
-mod briefing_history_state_tests {
-    use super::*;
-    use crate::briefing::BriefingHistoryEntry;
-
-    fn entry(ts: &str) -> BriefingHistoryEntry {
-        BriefingHistoryEntry {
-            generated_at_utc: ts.to_string(),
-            executive_summary: format!("Summary {ts}"),
-            top_stories: vec![],
-            article_count: 1,
-        }
-    }
-
-    #[test]
-    fn starts_empty() {
-        let state = AppState::new();
-        assert!(state.briefing_history().is_empty());
-    }
-
-    #[test]
-    fn push_adds_newest_first() {
-        let mut state = AppState::new();
-        state.push_briefing_history(entry("2026-02-20T00:00:00Z"));
-        state.push_briefing_history(entry("2026-02-21T00:00:00Z"));
-        assert_eq!(
-            state.briefing_history()[0].generated_at_utc,
-            "2026-02-21T00:00:00Z"
-        );
-        assert_eq!(
-            state.briefing_history()[1].generated_at_utc,
-            "2026-02-20T00:00:00Z"
-        );
-    }
-
-    #[test]
-    fn push_caps_at_three() {
-        let mut state = AppState::new();
-        for i in 1..=4 {
-            state.push_briefing_history(entry(&format!("2026-02-2{}T00:00:00Z", i)));
-        }
-        assert_eq!(state.briefing_history().len(), 3);
-        assert_eq!(
-            state.briefing_history()[0].generated_at_utc,
-            "2026-02-24T00:00:00Z"
-        );
     }
 }
 

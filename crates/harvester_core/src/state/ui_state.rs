@@ -182,11 +182,8 @@ impl AppState {
             )
             || matches!(
                 self.briefing.phase(),
-                crate::BriefingPhase::LoadingArticles
-                    | crate::BriefingPhase::Summarizing
-                    | crate::BriefingPhase::GeneratingBriefing
-            )
-            || self.briefing.next_item_in_flight();
+                crate::BriefingPhase::LoadingArticles | crate::BriefingPhase::Summarizing
+            );
 
         let pipeline_active = self.run_progress_is_active();
         let already_stopping = self.pipeline_run_phase() == crate::PipelineRunPhase::Stopping

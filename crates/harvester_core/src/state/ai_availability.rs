@@ -138,19 +138,4 @@ impl AppState {
 
         None
     }
-
-    pub(super) fn briefing_blocked_reason(&self) -> Option<String> {
-        if self.result_store_failure.is_some() {
-            return self.ai_unavailable_message();
-        }
-        self.ai_unavailable_reason().map(|reason| match reason {
-            AiUnavailableReason::MissingApiKey => {
-                "AI setup is incomplete because OPENAI_API_KEY is not set".to_string()
-            }
-            AiUnavailableReason::ResultStoreUnavailable => {
-                self.ai_unavailable_message().unwrap_or_default()
-            }
-            AiUnavailableReason::NoTriageModel => "no triage model is available".to_string(),
-        })
-    }
 }

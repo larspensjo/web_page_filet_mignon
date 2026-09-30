@@ -13,9 +13,8 @@ use harvester_core::{update, AppState, CompletedJobSnapshot, Effect, JobResultKi
 use harvester_engine::llm::prompts::register_defaults;
 use harvester_engine::llm::{LlmProvider, PromptRegistry};
 use harvester_engine::{
-    load_and_prepare_articles_for_triage, normalize_url_for_dedupe, parse_frontmatter,
-    scan_archive_article_metadata, ArchiveArticleMeta, ExtractedLink, LinkKind, SourceId,
-    SourceKind, SourceType,
+    normalize_url_for_dedupe, parse_frontmatter, scan_archive_article_metadata, ArchiveArticleMeta,
+    ExtractedLink, LinkKind, SourceId, SourceKind, SourceType,
 };
 use harvester_io::{
     host_bootstrap::{build_effect_runner_with_provider, prepare_desktop_startup_state},
@@ -973,7 +972,6 @@ fn record_write_from_path(measurements: &Arc<Mutex<Measurements>>, path: &Path, 
 fn effect_kind(effect: &Effect) -> &'static str {
     match effect {
         Effect::EnqueueUrl { .. } => "EnqueueUrl",
-        Effect::LoadArticlesForBriefing { .. } => "LoadArticlesForBriefing",
         Effect::LoadProcessingConfiguration { .. } => "LoadProcessingConfiguration",
         Effect::ResetCorpusScanIndex => "ResetCorpusScanIndex",
         Effect::LoadArticlesForTriage { .. } => "LoadArticlesForTriage",
@@ -992,8 +990,6 @@ fn effect_kind(effect: &Effect) -> &'static str {
         Effect::SaveResults { .. } => "SaveResults",
         Effect::FlushResults => "FlushResults",
         Effect::PersistSignalCandidateOverrides { .. } => "PersistSignalCandidateOverrides",
-        Effect::LoadBriefingHistory => "LoadBriefingHistory",
-        Effect::SaveBriefingHistory { .. } => "SaveBriefingHistory",
         Effect::LoadBriefingCheckpoint => "LoadBriefingCheckpoint",
         Effect::SaveBriefingCheckpoint { .. } => "SaveBriefingCheckpoint",
         Effect::OpenUrlInBrowser { .. } => "OpenUrlInBrowser",
@@ -1319,7 +1315,17 @@ fn prepare_provider_routes(articles: &[HeldArticle]) -> Result<ProviderRoutes, S
     }
     let registry = prompt_registry();
     let guard = registry.read().expect("replay prompt registry");
-    let prepared = load_and_prepare_articles_for_triage(scratch.path(), MAX_INPUT_BYTES, &guard)?;
+    let urls = articles.iter().map(|a| a.url.clone()).collect::<Vec<_>>();
+    let (delta, _) = harvester_engine::CorpusScanIndex::default().load_delta(
+        scratch.path(),
+        MAX_INPUT_BYTES,
+        &guard,
+        &urls,
+        None,
+        &[],
+        |_| {},
+    )?;
+    let prepared = delta.articles;
     let mut routes = ProviderRoutes::default();
     for article in prepared {
         routes

@@ -70,8 +70,6 @@ fn add_metadata(state: AppState) -> AppState {
         (PromptId::ArticleTriage, 1),
         (PromptId::ArticleSummary, 1),
         (PromptId::ArticleSignalCandidate, 1),
-        (PromptId::BriefingExecutiveSummary, 1),
-        (PromptId::BriefingNextItem, 1),
     ]);
     let effective_models = HashMap::from([
         (PromptId::ArticleTriage, "test-triage-model".to_string()),
@@ -79,14 +77,6 @@ fn add_metadata(state: AppState) -> AppState {
         (
             PromptId::ArticleSignalCandidate,
             "test-signal-model".to_string(),
-        ),
-        (
-            PromptId::BriefingExecutiveSummary,
-            "test-briefing-model".to_string(),
-        ),
-        (
-            PromptId::BriefingNextItem,
-            "test-briefing-model".to_string(),
         ),
     ]);
     let (state, _) = crate::update::test_support::update(
@@ -264,8 +254,15 @@ fn prepare_pipeline(
 ) -> (AppState, Vec<LoadedArticle>) {
     let total = download_successes + download_failures;
     let state = tick(add_metadata(AppState::new()), 0);
-    let (state, effects) = crate::update::test_support::update(state, Msg::PollSourcesClicked);
-    assert_eq!(effects, vec![Effect::PollAllSources]);
+    let (state, effects) = crate::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
+    assert!(effects.contains(&Effect::PollAllSources));
+    let (state, _) =
+        crate::fixture_support::complete_processing_configuration(state, effects, 100_000);
     let (state, _) = crate::update::test_support::update(state, Msg::PollStarted { total: 1 });
     let urls = (0..total)
         .map(|index| format!("https://progress.invalid/article-{index}"))
@@ -393,10 +390,9 @@ fn run_to_completion(
         };
         let (next, effects) = crate::update(state, msg);
         state = next;
-        assert!(effects.iter().all(|e| !matches!(
-            e,
-            Effect::LoadArticlesForBriefing { .. } | Effect::LoadProcessingConfiguration { .. }
-        )));
+        assert!(effects
+            .iter()
+            .all(|e| !matches!(e, Effect::LoadProcessingConfiguration { .. })));
         assert_progress_does_not_regress(&mut previous, &state);
     }
     assert!(
@@ -837,7 +833,13 @@ fn partial_failures_finish_done_and_retain_failure_counts() {
 #[test]
 fn total_source_failure_marks_scanning_failed() {
     let state = tick(AppState::new(), 0);
-    let state = crate::update::test_support::update(state, Msg::PollSourcesClicked).0;
+    let state = crate::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    )
+    .0;
     let state = crate::update::test_support::update(state, Msg::PollStarted { total: 2 }).0;
     let source_id = SourceId::new("failed-source").expect("valid source id");
     let state = crate::update::test_support::update(
@@ -867,7 +869,20 @@ fn total_source_failure_marks_scanning_failed() {
 #[test]
 fn poll_only_run_becomes_terminal_when_source_poll_settles() {
     let state = tick(AppState::new(), 0);
-    let (state, effects) = crate::update::test_support::update(state, Msg::PollSourcesClicked);
+    let (state, _) = crate::update(
+        state,
+        Msg::AiAvailabilityDetected {
+            availability: crate::AiAvailability::Unavailable {
+                reason: crate::AiUnavailableReason::MissingApiKey,
+            },
+        },
+    );
+    let (state, effects) = crate::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
     assert_eq!(effects, vec![Effect::PollAllSources]);
     let state = crate::update::test_support::update(state, Msg::PollStarted { total: 1 }).0;
     let state = crate::update::test_support::update(
@@ -891,7 +906,13 @@ fn poll_only_run_becomes_terminal_when_source_poll_settles() {
 #[test]
 fn accepted_stop_during_poll_drains_the_poll_without_ingesting_its_urls() {
     let state = tick(AppState::new(), 0);
-    let state = crate::update::test_support::update(state, Msg::PollSourcesClicked).0;
+    let state = crate::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    )
+    .0;
     let state = crate::update::test_support::update(state, Msg::PollStarted { total: 1 }).0;
     assert!(state.stop_finish_button_state().is_enabled());
 
@@ -1321,7 +1342,13 @@ fn rerun_counts_current_triage_and_summary_hits_without_readmitting_scoring() {
 #[test]
 fn pipeline_request_joins_an_active_poll_run_without_resetting() {
     let state = tick(AppState::new(), 0);
-    let state = crate::update::test_support::update(state, Msg::PollSourcesClicked).0;
+    let state = crate::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    )
+    .0;
     let state = crate::update::test_support::update(state, Msg::PollStarted { total: 3 }).0;
     let run_id = state.run_progress().expect("poll run").run_id;
     let state = crate::update::test_support::update(

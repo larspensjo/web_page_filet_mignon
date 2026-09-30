@@ -120,7 +120,6 @@ fn admit_summary_wave(state: &mut AppState, articles: Vec<LoadedArticle>) {
     }
     let urls: Vec<_> = members.iter().map(|m| m.0.clone()).collect();
     if !members.is_empty() {
-        state.request_summary_preparation();
         state.mark_briefing_metadata_ready();
         release(state, Stage::Summarizing, members);
     }

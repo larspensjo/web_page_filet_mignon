@@ -59,7 +59,6 @@ impl AppState {
             + self.article_model_requests_in_flight()
             + usize::from(batch.poll_in_progress)
             + usize::from(self.pipeline_activity().intake_refresh_pending)
-            + usize::from(self.briefing.next_item_in_flight())
             + usize::from(batch.import_in_flight)
     }
 

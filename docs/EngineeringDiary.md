@@ -2647,3 +2647,17 @@ Change: Rewrote the mixed tests to pin the clamp and same-step release after eve
 Lessons Learned: Removing an execution path requires separating its feature-specific assertions from the shared contracts in mixed tests. Session usage must reach every progress refresh, including resumes after diagnostics.
 Prevention: Regressions cover zero-budget dispatch, both clamp limits, a two-member triage barrier, dashboard and heartbeat costs, and quiet imports past the former iteration cap. The launch test keeps its executable-with-spaces assertion while expecting the fixed policy's empty argument list.
 Refs: crates/harvester_core/src/update/model_dispatch_tests.rs, crates/harvester_core/src/update/pipeline_run/wave_tests.rs, crates/harvester_batch/src/runner/live_progress.rs, crates/harvester_batch/src/import_mode.rs, scripts/tests/HarvesterLaunch.Tests.ps1
+
+## 2026-09-30 - Retire aggregate briefing, stale-summary refresh and concatenated export
+Type: Implementation
+Context: The owner retained article processing and archive export while retiring unused aggregate and command-line workflows.
+Change: Removed aggregate/stream/history requests, stale-summary refresh, concatenated export, replay provider lookup and Prompt Lab overrides. Summary settlement retains paid results without issuing aggregate work. JSONL and RON migration skip retired prompt entries with a store/count warning. The corpus marker lists only archives; corpus schema 1 and IPC schema 12 remain. Live summary fixtures now enter through triage wave release, and manual pre-triage decisions live in fixture support. Existing disk artifacts are untouched.
+Refs: crates/harvester_core/src/update/test_support.rs, crates/harvester_core/src/update/tests/summary_settlement_tests.rs, crates/harvester_io/tests/retired_summary_entries.rs, crates/harvester_engine/src/corpus_manifest.rs, docs/plans/Plan.Simplification.md
+
+## 2026-09-30 - Preserve archive marker coverage and classify retired paid-result entries
+Type: Bug Fix
+Context: Review of the uncommitted feature removals found archive marker coverage lost with the concatenated exporter, and retired JSONL prompt entries misreported as malformed data.
+Change: Retargeted the marker regression to archive writes and refreshes, shared unknown-prompt detection between RON and JSONL, and asserted aggregated retirement warnings separately from malformed-line diagnostics. Polling tests use Full Run; unreachable corpus-clear fixtures/tests and obsolete deprecation allowances are removed. Added elapsed formatting coverage and reconciled the test ledger.
+Lessons Learned: Removing a feature's test can accidentally remove coverage of a surviving public output contract. Retired identifiers are an expected compatibility case, not malformed records.
+Prevention: Test the surviving output-producing path and assert warning classification with file/count context. Track the linked-page chain and retired snapshot workaround for the later desktop cleanup.
+Refs: crates/harvester_engine/tests/output.rs, crates/harvester_io/tests/retired_summary_entries.rs, docs/plans/Plan.Simplification.md

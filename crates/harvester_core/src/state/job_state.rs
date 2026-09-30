@@ -142,13 +142,6 @@ impl JobState {
     }
 
     #[allow(dead_code)]
-    pub(super) fn mark_link_download_requested(&mut self, link_index: u32) {
-        if let Some(record) = self.find_link_mut(link_index) {
-            record.download_state = LinkDownloadState::Downloading;
-        }
-    }
-
-    #[allow(dead_code)]
     pub(super) fn mark_link_download_completed(&mut self, link_index: u32, path: PathBuf) {
         if let Some(record) = self.find_link_mut(link_index) {
             record.download_state = LinkDownloadState::Downloaded { path };

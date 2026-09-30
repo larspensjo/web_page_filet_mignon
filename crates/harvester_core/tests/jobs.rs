@@ -216,33 +216,6 @@ fn job_done_attaches_link_records_and_dedupes() {
 }
 
 #[test]
-fn link_toggle_requested_emits_download_effect() {
-    init_logging();
-    let state = state_with_single_link();
-    let (state, effects) = update(
-        state,
-        Msg::LinkToggleRequested {
-            job_id: 1,
-            link_index: 0,
-            checked: true,
-        },
-    );
-    let link = state.job_links(1).unwrap().first().unwrap();
-    assert!(matches!(
-        link.download_state,
-        LinkDownloadState::Downloading
-    ));
-    assert_eq!(
-        effects,
-        vec![Effect::DownloadLinkedPage {
-            job_id: 1,
-            link_index: 0,
-            url: "http://example.com/".to_string(),
-        }]
-    );
-}
-
-#[test]
 fn link_download_completed_updates_state() {
     init_logging();
     let path = PathBuf::from("linked/example.md");
@@ -262,111 +235,18 @@ fn link_download_completed_updates_state() {
 }
 
 #[test]
-fn link_toggle_unchecked_emits_delete_effect_when_downloaded() {
-    init_logging();
-    let (state, _) = update(
-        state_with_single_link(),
-        Msg::LinkDownloadCompleted {
-            job_id: 1,
-            link_index: 0,
-            path: PathBuf::from("linked/example.md"),
-        },
-    );
-    let (state, effects) = update(
-        state,
-        Msg::LinkToggleRequested {
-            job_id: 1,
-            link_index: 0,
-            checked: false,
-        },
-    );
-    let link = state.job_links(1).unwrap().first().unwrap();
-    assert!(matches!(
-        link.download_state,
-        LinkDownloadState::NotDownloaded
-    ));
-    assert_eq!(
-        effects,
-        vec![Effect::DeleteLinkedPage {
-            job_id: 1,
-            link_index: 0,
-            path: PathBuf::from("linked/example.md"),
-        }]
-    );
-}
-
-#[test]
-fn link_toggle_unchecked_can_delete_during_stop_drain() {
-    init_logging();
-    let (state, _) = update(
-        state_with_single_link(),
-        Msg::LinkDownloadCompleted {
-            job_id: 1,
-            link_index: 0,
-            path: PathBuf::from("linked/example.md"),
-        },
-    );
-    let (state, _) = submit_urls(state, "https://pending.example/article\n");
-    let (state, _) = update(state, Msg::StopFinishClicked);
-    let (_, effects) = update(
-        state,
-        Msg::LinkToggleRequested {
-            job_id: 1,
-            link_index: 0,
-            checked: false,
-        },
-    );
-    assert_eq!(
-        effects,
-        vec![Effect::DeleteLinkedPage {
-            job_id: 1,
-            link_index: 0,
-            path: PathBuf::from("linked/example.md"),
-        }]
-    );
-}
-
-#[test]
-fn link_toggle_unchecked_without_download_generates_no_effect() {
-    init_logging();
-    let (state, effects) = update(
-        state_with_single_link(),
-        Msg::LinkToggleRequested {
-            job_id: 1,
-            link_index: 0,
-            checked: false,
-        },
-    );
-    assert!(effects.is_empty());
-    let link = state.job_links(1).unwrap().first().unwrap();
-    assert!(matches!(
-        link.download_state,
-        LinkDownloadState::NotDownloaded
-    ));
-}
-
-#[test]
 fn link_download_failed_sets_failed_state() {
     init_logging();
     let (state, _) = update(
         state_with_single_link(),
-        Msg::LinkToggleRequested {
-            job_id: 1,
-            link_index: 0,
-            checked: true,
-        },
-    );
-    let (state, _) = update(
-        state,
         Msg::LinkDownloadFailed {
             job_id: 1,
             link_index: 0,
-            error: "boom".to_string(),
+            error: "boom".into(),
         },
     );
     let link = state.job_links(1).unwrap().first().unwrap();
-    assert!(matches!(
-        link.download_state,
-        LinkDownloadState::Failed { ref error } if error == "boom"
-    ));
+    assert!(
+        matches!(link.download_state, LinkDownloadState::Failed { ref error } if error == "boom")
+    );
 }

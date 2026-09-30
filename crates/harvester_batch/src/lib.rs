@@ -5,7 +5,6 @@ mod import_mode;
 mod no_progress;
 mod progress;
 pub mod runner;
-mod summary_refresh;
 
 pub use cli::Args;
 

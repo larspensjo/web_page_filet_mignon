@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use engine_logging::engine_warn;
-use serde_json::json;
 
 use crate::archive_url_key;
 use crate::corpus_manifest::write_corpus_manifest;
@@ -38,31 +37,11 @@ pub struct ArchiveDocAnnotations {
     pub themes: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone)]
-pub struct ExportOptions {
-    pub output_filename: String,
-    pub manifest_filename: Option<String>,
-    pub delimiter_start: String,
-    pub delimiter_end: String,
-}
-
-impl Default for ExportOptions {
-    fn default() -> Self {
-        Self {
-            output_filename: "export.txt".to_string(),
-            manifest_filename: Some("manifest.json".to_string()),
-            delimiter_start: "===== DOC START =====".to_string(),
-            delimiter_end: "===== DOC END =====".to_string(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportSummary {
     pub doc_count: usize,
     pub total_tokens: u64,
     pub output_path: PathBuf,
-    pub manifest_path: Option<PathBuf>,
     pub window_count: Option<usize>,
     pub unexported_by_priority: Option<[usize; 6]>,
 }
@@ -87,80 +66,12 @@ struct DocMeta {
     filename: String,
 }
 
-pub fn build_concatenated_export(
-    output_dir: &Path,
-    options: ExportOptions,
-) -> Result<ExportSummary, ExportError> {
-    ensure_output_dir(output_dir)?;
-    write_corpus_manifest(output_dir)?;
-    let mut entries = collect_archive_md_files(output_dir)?;
-    exclude_export_artifacts(
-        &mut entries,
-        output_dir,
-        &options.output_filename,
-        &options.manifest_filename,
-    );
-    entries.sort_by_key(|path| path.file_name().map(|name| name.to_os_string()));
-
-    let mut docs = Vec::new();
-    let mut seen = HashSet::new();
-    for path in entries {
-        let relative = path
-            .strip_prefix(output_dir)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .to_string();
-        let content = fs::read_to_string(&path)?;
-        let meta = parse_doc(&content, &relative)?;
-        let normalized = archive_url_key(&meta.url);
-        if seen.insert(normalized) {
-            docs.push(meta);
-        }
-    }
-
-    let mut buffer = String::new();
-    let mut total_tokens: u64 = 0;
-    for doc in &docs {
-        if let Some(t) = doc.token_count {
-            total_tokens += t as u64;
-        }
-        buffer.push_str(&options.delimiter_start);
-        buffer.push('\n');
-        buffer.push_str(&format!(
-            "url: {}\ntitle: {}\ntokens: {}\nfetched_utc: {}\nfilename: {}\n\n",
-            doc.url,
-            doc.title,
-            doc.token_count.unwrap_or(0),
-            doc.fetched_utc,
-            doc.filename
-        ));
-        buffer.push_str(doc.body.trim_end());
-        buffer.push('\n');
-        buffer.push_str(&options.delimiter_end);
-        buffer.push_str("\n\n");
-    }
-
-    let output_path = write_export_file(output_dir, &options.output_filename, &buffer)?;
-    let manifest_path =
-        write_manifest(output_dir, &options.manifest_filename, &docs, total_tokens)?;
-
-    Ok(ExportSummary {
-        doc_count: docs.len(),
-        total_tokens,
-        output_path,
-        manifest_path,
-        window_count: None,
-        unexported_by_priority: None,
-    })
-}
-
 #[allow(clippy::too_many_arguments)]
 pub fn build_triage_archive(
     output_dir: &Path,
     basename: &str,
     ordered_urls: &[String],
     since_utc: Option<DateTime<Utc>>,
-    options: ExportOptions,
     use_summaries: bool,
     summaries: &HashMap<String, String>,
     annotations: &HashMap<String, ArchiveDocAnnotations>,
@@ -169,12 +80,7 @@ pub fn build_triage_archive(
     ensure_output_dir(output_dir)?;
     write_corpus_manifest(output_dir)?;
     let mut entries = collect_archive_md_files(output_dir)?;
-    exclude_export_artifacts(
-        &mut entries,
-        output_dir,
-        basename,
-        &options.manifest_filename,
-    );
+    exclude_export_artifacts(&mut entries, output_dir, basename);
     entries.sort_by_key(|path| path.file_name().map(|name| name.to_os_string()));
 
     let mut docs_by_url: HashMap<String, DocMeta> = HashMap::new();
@@ -264,14 +170,11 @@ pub fn build_triage_archive(
     );
 
     let output_path = write_export_file(output_dir, basename, &buffer)?;
-    let manifest_path =
-        write_manifest(output_dir, &options.manifest_filename, &docs, total_tokens)?;
 
     Ok(ExportSummary {
         doc_count: docs.len(),
         total_tokens,
         output_path,
-        manifest_path,
         window_count: since_utc.is_some().then_some(window_count),
         unexported_by_priority: since_utc.is_some().then_some(unexported_by_priority),
     })
@@ -286,14 +189,8 @@ fn collect_archive_md_files(output_dir: &Path) -> Result<Vec<PathBuf>, ExportErr
     Ok(entries)
 }
 
-fn exclude_export_artifacts(
-    entries: &mut Vec<PathBuf>,
-    output_dir: &Path,
-    output_filename: &str,
-    manifest_filename: &Option<String>,
-) {
+fn exclude_export_artifacts(entries: &mut Vec<PathBuf>, output_dir: &Path, output_filename: &str) {
     let output_artifact = output_dir.join(output_filename);
-    let manifest_artifact = manifest_filename.as_ref().map(|name| output_dir.join(name));
 
     entries.retain(|path| {
         if is_archive_artifact(path, output_dir, output_filename) {
@@ -301,11 +198,6 @@ fn exclude_export_artifacts(
         }
         if *path == output_artifact {
             return false;
-        }
-        if let Some(manifest) = manifest_artifact.as_ref() {
-            if path == manifest {
-                return false;
-            }
         }
         true
     });
@@ -354,34 +246,6 @@ fn write_export_file(
 ) -> Result<PathBuf, ExportError> {
     let writer = AtomicFileWriter::new(output_dir.to_path_buf());
     Ok(writer.write(output_filename, content)?)
-}
-
-fn write_manifest(
-    output_dir: &Path,
-    manifest_filename: &Option<String>,
-    docs: &[DocMeta],
-    total_tokens: u64,
-) -> Result<Option<PathBuf>, ExportError> {
-    if let Some(name) = manifest_filename {
-        let manifest = json!({
-            "doc_count": docs.len(),
-            "total_tokens": total_tokens,
-            "files": docs.iter().map(|d| {
-                json!({
-                    "filename": d.filename,
-                    "title": d.title,
-                    "url": d.url,
-                    "tokens": d.token_count.unwrap_or(0),
-                    "fetched_utc": d.fetched_utc
-                })
-            }).collect::<Vec<_>>()
-        });
-        let writer = AtomicFileWriter::new(output_dir.to_path_buf());
-        let path = writer.write(name, &manifest.to_string())?;
-        Ok(Some(path))
-    } else {
-        Ok(None)
-    }
 }
 
 fn passes_since_filter(meta: &DocMeta, since_utc: Option<DateTime<Utc>>) -> bool {

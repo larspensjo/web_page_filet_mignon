@@ -44,11 +44,11 @@ pub(crate) use dispatch_loop::{
 };
 
 use live_progress::LiveBatchProgress;
+pub(crate) use reporting::CycleStartWorkReporter;
 use reporting::{
     format_optional_cycle_diagnostics, format_startup_notice, print_final_summary,
     print_poll_stats, CycleCounts,
 };
-pub(crate) use reporting::{microdollars_to_display, CycleStartWorkReporter};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct CycleCounterBaseline {
@@ -117,10 +117,6 @@ pub fn run(args: Args) -> Result<i32, String> {
     engine_info!("[batch] output_dir: {:?}", args.output_dir);
     engine_info!("[batch] sources: {:?}", args.sources_path());
     engine_info!(
-        "[batch] refresh_stale_summaries_limit: {:?}",
-        args.refresh_stale_summaries_limit
-    );
-    engine_info!(
         "[batch] signal_candidate_threshold: {:?}",
         args.signal_candidate_threshold
     );
@@ -174,15 +170,6 @@ pub fn run(args: Args) -> Result<i32, String> {
             &args,
             import_dir.clone(),
             Arc::clone(&shutdown_flag),
-        );
-    }
-
-    if args.refresh_stale_summaries_limit.is_some() {
-        engine_info!("[batch] Summary refresh mode enabled");
-        return crate::summary_refresh::run_refresh_stale_summaries_mode(
-            &paths,
-            &args,
-            &shutdown_flag,
         );
     }
 

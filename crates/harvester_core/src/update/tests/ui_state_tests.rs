@@ -268,31 +268,15 @@ fn briefing_generate_enabled_false_when_signal_scoring_in_progress() {
 }
 
 #[test]
-fn briefing_generate_enabled_true_when_summaries_settled_and_signal_idle() {
+fn retired_briefing_controls_are_empty_when_summaries_settled() {
     init_logging();
     let state = complete_triage_with_settled_summaries(2);
 
     let view = state.view();
-    assert!(view.briefing_generate_enabled);
-    assert_eq!(state.triage().completed_count(), 2);
-}
-
-#[test]
-fn briefing_generate_enabled_false_while_briefing_is_running() {
-    init_logging();
-    let state = complete_triage_with_settled_summaries(1);
-    let (state, effects) = update(state, Msg::GenerateBriefingClicked);
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        Effect::RequestLlmCompletion {
-            prompt_id: PromptId::BriefingExecutiveSummary,
-            ..
-        }
-    )));
-
-    let view = state.view();
     assert!(!view.briefing_generate_enabled);
-    assert!(!state.briefing().can_start());
+    assert!(!view.next_item_enabled);
+    assert!(view.briefing_blocked_reason.is_none());
+    assert_eq!(state.triage().completed_count(), 2);
 }
 
 #[test]
@@ -383,12 +367,6 @@ fn missing_api_key_blocks_triage_and_briefing_actions() {
     assert_eq!(
         state.pre_triage().resolved_included_urls(),
         pre_triage_before
-    );
-
-    let (state, briefing_effects) = update(state, Msg::GenerateBriefingClicked);
-    assert!(
-        briefing_effects.is_empty(),
-        "blocked briefing must dispatch nothing"
     );
 
     let (_state, summary_effects) = update(

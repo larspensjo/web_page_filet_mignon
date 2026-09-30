@@ -19,9 +19,6 @@ pub fn complete_processing_configuration(
         PromptId::ArticleTriage,
         PromptId::ArticleSummary,
         PromptId::ArticleSignalCandidate,
-        PromptId::AggregateBriefing,
-        PromptId::BriefingExecutiveSummary,
-        PromptId::BriefingNextItem,
     ];
     let contexts = ids
         .iter()
@@ -78,3 +75,6 @@ pub fn complete_processing_start(
     }
     (state, effects)
 }
+
+#[doc(hidden)]
+pub use crate::pre_triage_filter::test_support::ManualPreTriageDecisions;

@@ -2,19 +2,14 @@ use crate::summary_cache::SummaryCacheKey;
 use crate::triage::{ArticleTriageState, TriageSession};
 use harvester_engine::llm::SummaryEntities;
 use serde::{Deserialize, Serialize};
-use std::fmt::Write;
 
 pub type BriefingArticleId = usize;
-const MAX_BRIEFING_PREVIEW_CHARS: usize = 32_768;
-const PREVIEW_TRUNCATE_MARKER: &str = "[...truncated]";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BriefingPhase {
     Idle,
     LoadingArticles,
     Summarizing,
-    GeneratingBriefing,
-    Streaming,
     Complete,
     Failed { reason: String },
 }
@@ -49,153 +44,11 @@ pub struct BriefingArticle {
     pub cache_key_snapshot: Option<SummaryCacheKey>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BriefingStoryResult {
-    pub headline: String,
-    pub body: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BriefingItem {
-    pub headline: String,
-    pub body: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BriefingResult {
-    pub executive_summary: String,
-    pub top_stories: Vec<BriefingStoryResult>,
-    pub article_count: u32,
-    pub input_tokens: u32,
-    pub output_tokens: u32,
-}
-
-impl BriefingResult {
-    pub fn story_summary(&self) -> String {
-        let mut buffer = String::new();
-        for (idx, story) in self.top_stories.iter().enumerate() {
-            let _ = writeln!(buffer, "{}. {}: {}", idx + 1, story.headline, story.body);
-        }
-        buffer
-    }
-}
-
-/// A single entry in the persisted briefing history.
-/// Distinct from `BriefingResult` — this is the persisted/history version.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BriefingHistoryEntry {
-    pub generated_at_utc: String, // RFC3339, UTC
-    pub executive_summary: String,
-    pub top_stories: Vec<BriefingHistoryStory>,
-    pub article_count: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BriefingHistoryStory {
-    pub headline: String,
-    pub body: String,
-}
-
-impl BriefingHistoryEntry {
-    /// Creates a history entry from a completed briefing result.
-    /// Returns `None` if the summary is blank (not worth storing).
-    pub fn from_result(result: &BriefingResult, generated_at_utc: &str) -> Option<Self> {
-        let summary = result.executive_summary.trim().to_string();
-        if summary.is_empty() {
-            return None;
-        }
-        Some(BriefingHistoryEntry {
-            generated_at_utc: generated_at_utc.to_string(),
-            executive_summary: summary,
-            top_stories: result
-                .top_stories
-                .iter()
-                .map(|story| BriefingHistoryStory {
-                    headline: story.headline.clone(),
-                    body: story.body.clone(),
-                })
-                .collect(),
-            article_count: result.article_count,
-        })
-    }
-}
-
-/// Maximum number of Unicode scalar values for a single executive_summary in the history block.
-const HISTORY_SUMMARY_MAX_CHARS: usize = 500;
-
-/// Truncates `s` to at most `max_chars` Unicode scalar values, appending `…` if truncated.
-/// Safe on all UTF-8 input — never panics on multibyte boundaries.
-fn truncate_history_summary(s: &str, max_chars: usize) -> String {
-    let mut char_indices = s.char_indices();
-    match char_indices.nth(max_chars) {
-        Some((byte_pos, _)) => format!("{}…", &s[..byte_pos]),
-        None => s.to_string(),
-    }
-}
-
-/// Formats the briefing history into the `{{previous_briefings}}` template variable value.
-/// Returns `"(none)"` when history is empty.
-/// Entries are rendered newest-first (index 0 = most recent).
-pub fn format_previous_briefings_block(history: &[BriefingHistoryEntry]) -> String {
-    if history.is_empty() {
-        return "(none)".to_string();
-    }
-    let mut parts = Vec::new();
-    for entry in history {
-        let summary = if entry.executive_summary.chars().count() > HISTORY_SUMMARY_MAX_CHARS {
-            truncate_history_summary(&entry.executive_summary, HISTORY_SUMMARY_MAX_CHARS)
-        } else {
-            entry.executive_summary.clone()
-        };
-        let top_stories_line = entry
-            .top_stories
-            .iter()
-            .map(|story| format!("{}: {}", story.headline, story.body))
-            .collect::<Vec<_>>()
-            .join("; ");
-        parts.push(format!(
-            "[{}]\nSummary: {}\nTop Stories: {}",
-            entry.generated_at_utc, summary, top_stories_line
-        ));
-    }
-    parts.join("\n\n")
-}
-
-/// Formats a human-readable coverage window label for aggregate briefings.
-/// This string is used both in prompt template variables and in briefing preview metadata.
-pub fn format_briefing_time_window_label(
-    since_utc: Option<chrono::DateTime<chrono::Utc>>,
-) -> String {
-    match since_utc {
-        Some(dt) => format!(
-            "Articles fetched on or after {} (briefing checkpoint filter).",
-            dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
-        ),
-        None => "All available articles (no briefing checkpoint filter).".to_string(),
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct BriefingSession {
     phase: BriefingPhase,
     articles: Vec<BriefingArticle>,
     article_indices: std::collections::HashMap<(String, String), usize>,
-    collection_text: Option<String>,
-    briefing_request_id: Option<u64>,
-    briefing_result: Option<BriefingResult>,
-    started_at: Option<String>,
-    coverage_window_label: Option<String>,
-    summaries_snapshot: Option<String>,
-    executive_summary: Option<String>,
-    stream_items: Vec<BriefingItem>,
-    next_item_request_id: Option<u64>,
-    exhausted: bool,
-    stream_epoch: u64,
-    snapshot_included_count: usize,
-    snapshot_skipped_count: usize,
-    snapshot_dropped_count: usize,
-    snapshot_truncated: bool,
-    exec_dispatch_deferred: bool,
 }
 
 pub use harvester_engine::LoadedArticle;
@@ -244,48 +97,16 @@ impl Default for BriefingSession {
             phase: BriefingPhase::Idle,
             articles: Vec::new(),
             article_indices: Default::default(),
-            collection_text: None,
-            briefing_request_id: None,
-            briefing_result: None,
-            started_at: None,
-            coverage_window_label: None,
-            summaries_snapshot: None,
-            executive_summary: None,
-            stream_items: Vec::new(),
-            next_item_request_id: None,
-            exhausted: false,
-            stream_epoch: 0,
-            snapshot_included_count: 0,
-            snapshot_skipped_count: 0,
-            snapshot_dropped_count: 0,
-            snapshot_truncated: false,
-            exec_dispatch_deferred: false,
         }
     }
 }
 
 impl BriefingSession {
-    pub fn new_loading(started_at: Option<String>) -> Self {
+    pub fn new_loading() -> Self {
         Self {
             phase: BriefingPhase::LoadingArticles,
             article_indices: Default::default(),
             articles: Vec::new(),
-            collection_text: None,
-            briefing_request_id: None,
-            briefing_result: None,
-            started_at,
-            coverage_window_label: None,
-            summaries_snapshot: None,
-            executive_summary: None,
-            stream_items: Vec::new(),
-            next_item_request_id: None,
-            exhausted: false,
-            stream_epoch: 0,
-            snapshot_included_count: 0,
-            snapshot_skipped_count: 0,
-            snapshot_dropped_count: 0,
-            snapshot_truncated: false,
-            exec_dispatch_deferred: false,
         }
     }
 
@@ -300,159 +121,18 @@ impl BriefingSession {
         )
     }
 
-    pub fn can_generate(&self) -> bool {
-        matches!(
-            self.phase,
-            BriefingPhase::Idle
-                | BriefingPhase::Complete
-                | BriefingPhase::Failed { .. }
-                | BriefingPhase::Streaming
-        )
-    }
-
     pub fn is_active(&self) -> bool {
         matches!(
             self.phase,
-            BriefingPhase::LoadingArticles
-                | BriefingPhase::Summarizing
-                | BriefingPhase::GeneratingBriefing
-        ) || self.next_item_in_flight()
-    }
-
-    pub(crate) fn set_phase(&mut self, phase: BriefingPhase) {
-        self.phase = phase;
-    }
-
-    pub fn start_stream(
-        &mut self,
-        snapshot: String,
-        coverage_window_label: String,
-        included_count: usize,
-        skipped_count: usize,
-        dropped_count: usize,
-        truncated: bool,
-    ) {
-        self.summaries_snapshot = Some(snapshot);
-        self.coverage_window_label = Some(coverage_window_label);
-        self.snapshot_included_count = included_count;
-        self.snapshot_skipped_count = skipped_count;
-        self.snapshot_dropped_count = dropped_count;
-        self.snapshot_truncated = truncated;
-        self.executive_summary = None;
-        self.stream_items.clear();
-        self.next_item_request_id = None;
-        self.exhausted = false;
-        self.briefing_request_id = None;
-        self.exec_dispatch_deferred = false;
-        self.stream_epoch = self.stream_epoch.wrapping_add(1);
-    }
-
-    pub fn enter_streaming(&mut self, executive_summary: String) {
-        self.executive_summary = Some(executive_summary);
-        self.phase = BriefingPhase::Streaming;
-        self.briefing_request_id = None;
-    }
-
-    pub fn summaries_snapshot(&self) -> Option<&str> {
-        self.summaries_snapshot.as_deref()
-    }
-
-    pub fn executive_summary(&self) -> Option<&str> {
-        self.executive_summary.as_deref()
-    }
-
-    pub fn stream_items(&self) -> &[BriefingItem] {
-        &self.stream_items
-    }
-
-    pub fn append_stream_item(&mut self, item: BriefingItem) {
-        self.stream_items.push(item);
-    }
-
-    pub fn exhausted(&self) -> bool {
-        self.exhausted
-    }
-
-    pub fn set_exhausted(&mut self) {
-        self.exhausted = true;
-    }
-
-    pub fn stream_epoch(&self) -> u64 {
-        self.stream_epoch
-    }
-
-    pub fn set_next_item_request_id(&mut self, request_id: u64) {
-        self.next_item_request_id = Some(request_id);
-    }
-
-    pub fn next_item_request_id(&self) -> Option<u64> {
-        self.next_item_request_id
-    }
-
-    pub fn clear_next_item_request_id(&mut self) {
-        self.next_item_request_id = None;
-    }
-
-    pub fn snapshot_counts(&self) -> (usize, usize) {
-        (self.snapshot_included_count, self.snapshot_skipped_count)
-    }
-
-    pub fn snapshot_dropped_count(&self) -> usize {
-        self.snapshot_dropped_count
-    }
-
-    pub fn snapshot_truncated(&self) -> bool {
-        self.snapshot_truncated
-    }
-
-    pub fn next_item_in_flight(&self) -> bool {
-        matches!(self.phase, BriefingPhase::Streaming) && self.next_item_request_id.is_some()
-    }
-
-    pub fn has_active_llm_request(&self) -> bool {
-        self.briefing_request_id.is_some() || self.next_item_request_id.is_some()
-    }
-
-    pub fn defer_exec_dispatch(&mut self) {
-        self.exec_dispatch_deferred = true;
-    }
-
-    pub fn exec_dispatch_deferred(&self) -> bool {
-        self.exec_dispatch_deferred
-    }
-
-    pub fn take_exec_dispatch_deferred(&mut self) -> bool {
-        std::mem::take(&mut self.exec_dispatch_deferred)
-    }
-
-    pub fn next_item_enabled(&self) -> bool {
-        matches!(self.phase, BriefingPhase::Streaming)
-            && self.executive_summary.is_some()
-            && self.next_item_request_id.is_none()
-            && !self.exhausted
-    }
-
-    pub fn already_shown_headlines(&self) -> String {
-        if self.stream_items.is_empty() {
-            return "(none)".to_string();
-        }
-        self.stream_items
-            .iter()
-            .enumerate()
-            .map(|(idx, item)| format!("{}. {}", idx + 1, item.headline))
-            .collect::<Vec<_>>()
-            .join("\n")
+            BriefingPhase::LoadingArticles | BriefingPhase::Summarizing
+        )
     }
 
     pub fn articles(&self) -> &[BriefingArticle] {
         &self.articles
     }
 
-    pub fn collection_text(&self) -> Option<&str> {
-        self.collection_text.as_deref()
-    }
-
-    pub fn set_articles(&mut self, loaded: Vec<LoadedArticle>, collection_text: String) {
+    pub fn set_articles(&mut self, loaded: Vec<LoadedArticle>) {
         self.articles = loaded
             .into_iter()
             .map(|article| BriefingArticle {
@@ -471,7 +151,6 @@ impl BriefingSession {
             .enumerate()
             .map(|(i, a)| ((a.url.clone(), a.content_hash.clone()), i))
             .collect();
-        self.collection_text = Some(collection_text);
     }
 
     pub fn transition_to_summarizing(&mut self) {
@@ -658,39 +337,12 @@ impl BriefingSession {
             })
     }
 
-    pub fn is_briefing_request(&self, request_id: u64) -> bool {
-        self.briefing_request_id == Some(request_id)
-    }
-
-    pub fn set_briefing_request_id(&mut self, request_id: u64) {
-        self.briefing_request_id = Some(request_id);
-        self.phase = BriefingPhase::GeneratingBriefing;
-    }
-
-    pub fn set_coverage_window_label(&mut self, label: String) {
-        self.coverage_window_label = Some(label);
-    }
-
-    pub fn coverage_window_label(&self) -> Option<&str> {
-        self.coverage_window_label.as_deref()
-    }
-
-    pub fn complete_briefing(&mut self, result: BriefingResult) {
-        self.briefing_result = Some(result);
-        self.phase = BriefingPhase::Complete;
-        self.briefing_request_id = None;
-    }
-
     pub fn complete_without_briefing(&mut self) {
         self.phase = BriefingPhase::Complete;
-        self.briefing_request_id = None;
     }
 
     pub fn fail(&mut self, reason: String) {
         self.phase = BriefingPhase::Failed { reason };
-        self.briefing_request_id = None;
-        self.next_item_request_id = None;
-        self.exec_dispatch_deferred = false;
     }
 
     pub fn fail_all_pending(&mut self, reason: &str) {
@@ -734,10 +386,6 @@ impl BriefingSession {
         })
     }
 
-    pub fn briefing_result(&self) -> Option<&BriefingResult> {
-        self.briefing_result.as_ref()
-    }
-
     pub fn progress_text(&self) -> Option<String> {
         let text = match self.phase {
             BriefingPhase::LoadingArticles => "Loading articles...".to_string(),
@@ -746,105 +394,11 @@ impl BriefingSession {
                 let total = self.total();
                 format!("Summarizing {completed}/{total} articles...")
             }
-            BriefingPhase::GeneratingBriefing => "Generating executive summary...".to_string(),
-            BriefingPhase::Streaming if self.next_item_request_id.is_some() => {
-                "Fetching next item...".to_string()
-            }
             BriefingPhase::Failed { ref reason } => format!("Briefing failed: {reason}"),
             _ => return None,
         };
         Some(text)
     }
-
-    pub fn format_preview(&self) -> Option<String> {
-        if let BriefingPhase::Failed { reason } = &self.phase {
-            let mut sections = Vec::new();
-            sections.push("# Executive Briefing".to_string());
-            sections.push(format!("## Failed\n\n{reason}"));
-            if let Some(label) = self.coverage_window_label.as_deref() {
-                sections.push(format!("## Session Info\n\nCoverage Window: {label}"));
-            }
-            return Some(truncate_preview(&sections.join("\n\n")));
-        }
-
-        let exec = self.executive_summary.as_deref()?;
-        let mut sections = Vec::new();
-        sections.push("# Executive Briefing".to_string());
-        sections.push(format!("## Executive Summary\n\n{}", exec.trim()));
-
-        if !self.stream_items.is_empty() {
-            let mut items = String::from("## News Items");
-            for (idx, story) in self.stream_items.iter().enumerate() {
-                let indented_body = indent_markdown_list_item_body(&story.body);
-                let _ = writeln!(
-                    items,
-                    "\n{}. **{}**\n\n{}",
-                    idx + 1,
-                    story.headline,
-                    indented_body
-                );
-            }
-            items.pop();
-            sections.push(items);
-        }
-
-        let coverage = self
-            .coverage_window_label
-            .as_deref()
-            .map(|label| format!("Coverage Window: {label}\n"))
-            .unwrap_or_default();
-        let mut session_info = format!(
-            "## Session Info\n\n{coverage}Sources: {} article summaries ({} skipped: no summary)",
-            self.snapshot_included_count, self.snapshot_skipped_count
-        );
-        if self.snapshot_truncated || self.snapshot_dropped_count > 0 {
-            let _ = write!(
-                session_info,
-                " - {} dropped (snapshot truncated to fit the byte budget)",
-                self.snapshot_dropped_count
-            );
-        }
-        if self.exhausted {
-            session_info.push_str("\n\nNo further notable items.");
-        }
-        sections.push(session_info);
-
-        let preview = sections.join("\n\n");
-        Some(truncate_preview(&preview))
-    }
-}
-
-fn indent_markdown_list_item_body(body: &str) -> String {
-    body.lines()
-        .map(|line| {
-            if line.is_empty() {
-                "   ".to_string()
-            } else {
-                format!("   {line}")
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn truncate_preview(text: &str) -> String {
-    let total_chars = text.chars().count();
-    if total_chars <= MAX_BRIEFING_PREVIEW_CHARS {
-        return text.to_string();
-    }
-    let marker_chars = PREVIEW_TRUNCATE_MARKER.chars().count();
-    if marker_chars >= MAX_BRIEFING_PREVIEW_CHARS {
-        return PREVIEW_TRUNCATE_MARKER.to_string();
-    }
-    let keep_chars = MAX_BRIEFING_PREVIEW_CHARS - marker_chars;
-    let cutoff = text
-        .char_indices()
-        .nth(keep_chars)
-        .map(|(idx, _)| idx)
-        .unwrap_or(text.len());
-    let mut truncated = text[..cutoff].to_string();
-    truncated.push_str(PREVIEW_TRUNCATE_MARKER);
-    truncated
 }
 
 #[cfg(test)]
@@ -925,182 +479,15 @@ mod tests {
         assert!(session.summary_for_url("https://other.com").is_none());
     }
 
-    fn streaming_session() -> BriefingSession {
-        let mut session = BriefingSession::default();
-        session.start_stream(
-            "[A1] T\nbody".to_string(),
-            "All available articles (no briefing checkpoint filter).".to_string(),
-            3,
-            1,
-            0,
-            false,
-        );
-        session.enter_streaming("Concise executive synthesis.".to_string());
-        session
-    }
-
-    #[test]
-    fn can_generate_allows_streaming_but_can_start_does_not() {
-        let session = streaming_session();
-        assert!(matches!(session.phase(), BriefingPhase::Streaming));
-        assert!(session.can_generate());
-        assert!(!session.can_start());
-    }
-
-    #[test]
-    fn restart_bumps_epoch_and_clears_stream() {
-        let mut session = streaming_session();
-        session.append_stream_item(BriefingItem {
-            headline: "H".to_string(),
-            body: "B".to_string(),
-        });
-        let epoch = session.stream_epoch();
-
-        session.start_stream("snap2".to_string(), "win2".to_string(), 1, 0, 0, false);
-
-        assert!(session.stream_epoch() > epoch);
-        assert!(session.executive_summary().is_none());
-        assert!(session.stream_items().is_empty());
-        assert!(!session.exhausted());
-        assert_eq!(session.summaries_snapshot(), Some("snap2"));
-    }
-
-    #[test]
-    fn append_and_exhaust_stream_items() {
-        let mut session = streaming_session();
-        session.append_stream_item(BriefingItem {
-            headline: "H1".to_string(),
-            body: "B1".to_string(),
-        });
-        assert_eq!(session.stream_items().len(), 1);
-        session.set_exhausted();
-        assert!(session.exhausted());
-    }
-
-    #[test]
-    fn stream_preview_has_exec_summary_numbered_items_and_session_info() {
-        let mut session = streaming_session();
-        session.append_stream_item(BriefingItem {
-            headline: "First".to_string(),
-            body: "Body one".to_string(),
-        });
-        session.append_stream_item(BriefingItem {
-            headline: "Second".to_string(),
-            body: "Body two".to_string(),
-        });
-        let preview = session.format_preview().expect("preview");
-        assert!(preview.contains("# Executive Briefing"));
-        assert!(preview.contains("## Executive Summary"));
-        assert!(preview.contains("Concise executive synthesis."));
-        assert!(preview.contains("## News Items"));
-        let first_pos = preview.find("1. **First**").expect("first item");
-        let second_pos = preview.find("2. **Second**").expect("second item");
-        assert!(first_pos < second_pos);
-        assert!(preview.contains("1. **First**\n\n   Body one"));
-        assert!(preview.contains("2. **Second**\n\n   Body two"));
-        assert!(preview.contains("## Session Info"));
-        assert!(preview.contains("Coverage Window:"));
-        assert!(preview.contains("3 article summaries"));
-        assert!(preview.contains("1 skipped"));
-    }
-
-    #[test]
-    fn stream_preview_indents_multiline_item_body_under_list_item() {
-        let mut session = streaming_session();
-        session.append_stream_item(BriefingItem {
-            headline: "First".to_string(),
-            body: "Line one\n\nLine two".to_string(),
-        });
-        let preview = session.format_preview().expect("preview");
-        assert!(preview.contains("1. **First**\n\n   Line one\n   \n   Line two"));
-    }
-
-    #[test]
-    fn stream_preview_session_info_reports_truncation_and_dropped() {
-        let mut session = BriefingSession::default();
-        session.start_stream("[A1] T\nbody".to_string(), "win".to_string(), 2, 0, 5, true);
-        session.enter_streaming("Synthesis.".to_string());
-        let preview = session.format_preview().expect("preview");
-        assert!(preview.contains("5 dropped"));
-        assert!(preview.contains("truncated"));
-    }
-
-    #[test]
-    fn stream_preview_shows_exhausted_note() {
-        let mut session = streaming_session();
-        session.set_exhausted();
-        let preview = session.format_preview().expect("preview");
-        assert!(preview.contains("No further notable items."));
-    }
-
-    #[test]
-    fn stream_preview_none_before_exec_summary() {
-        let mut session = BriefingSession::default();
-        session.start_stream("snap".to_string(), "win".to_string(), 1, 0, 0, false);
-        assert!(session.format_preview().is_none());
-    }
-
-    #[test]
-    fn briefing_format_preview_none_when_not_complete() {
-        let mut session = BriefingSession::new_loading(None);
-        session.set_articles(
-            vec![LoadedArticle {
-                url: "https://example.com".to_string(),
-                source_title: None,
-                prepared_text: "text".to_string(),
-                content_hash: "hash".to_string(),
-                fetched_utc: None,
-            }],
-            "collection".to_string(),
-        );
-        assert!(session.format_preview().is_none());
-    }
-
-    #[test]
-    fn briefing_format_preview_shows_failure_reason() {
-        let mut session = BriefingSession::new_loading(None);
-        session.fail("request timed out".to_string());
-
-        let preview = session.format_preview().expect("preview");
-        assert!(preview.contains("# Executive Briefing"));
-        assert!(preview.contains("## Failed"));
-        assert!(preview.contains("request timed out"));
-    }
-
     #[test]
     fn briefing_progress_text_shows_failure_reason() {
-        let mut session = BriefingSession::new_loading(None);
+        let mut session = BriefingSession::new_loading();
         session.fail("request timed out".to_string());
 
         assert_eq!(
             session.progress_text().as_deref(),
             Some("Briefing failed: request timed out")
         );
-    }
-
-    #[test]
-    fn briefing_format_preview_truncates_at_limit() {
-        let long_summary = "a".repeat(MAX_BRIEFING_PREVIEW_CHARS + 500);
-        let mut session = BriefingSession::default();
-        session.start_stream("snap".to_string(), "win".to_string(), 1, 0, 0, false);
-        session.enter_streaming(long_summary);
-
-        let preview = session.format_preview().expect("preview");
-        assert!(preview.ends_with(PREVIEW_TRUNCATE_MARKER));
-        assert_eq!(preview.chars().count(), MAX_BRIEFING_PREVIEW_CHARS);
-    }
-
-    #[test]
-    fn format_briefing_time_window_label_formats_checkpoint_and_all_time() {
-        let all_time = format_briefing_time_window_label(None);
-        assert!(all_time.contains("All available articles"));
-
-        let since = chrono::DateTime::parse_from_rfc3339("2026-02-24T12:34:56Z")
-            .unwrap()
-            .with_timezone(&chrono::Utc);
-        let filtered = format_briefing_time_window_label(Some(since));
-        assert!(filtered.contains("2026-02-24T12:34:56Z"));
-        assert!(filtered.contains("checkpoint"));
     }
 
     fn make_loaded(url: &str, hash: &str) -> LoadedArticle {
@@ -1163,91 +550,5 @@ mod tests {
             policy.eligible_urls(&triage),
             vec!["https://a".to_string(), "https://b".to_string()]
         );
-    }
-}
-
-#[cfg(test)]
-mod history_tests {
-    use super::*;
-
-    fn make_entry(ts: &str, summary: &str, top_stories: &[(&str, &str)]) -> BriefingHistoryEntry {
-        BriefingHistoryEntry {
-            generated_at_utc: ts.to_string(),
-            executive_summary: summary.to_string(),
-            top_stories: top_stories
-                .iter()
-                .map(|(headline, body)| BriefingHistoryStory {
-                    headline: headline.to_string(),
-                    body: body.to_string(),
-                })
-                .collect(),
-            article_count: 5,
-        }
-    }
-
-    #[test]
-    fn format_empty_history_returns_sentinel() {
-        let block = format_previous_briefings_block(&[]);
-        assert_eq!(block, "(none)");
-    }
-
-    #[test]
-    fn format_single_entry_contains_timestamp_summary_and_top_stories() {
-        let entry = make_entry(
-            "2026-02-21T08:00:00Z",
-            "Markets rose sharply.",
-            &[
-                ("Economy", "Growth driven by tech."),
-                ("Policy", "Rate cuts expected."),
-            ],
-        );
-        let block = format_previous_briefings_block(&[entry]);
-        assert!(block.contains("2026-02-21T08:00:00Z"), "missing timestamp");
-        assert!(block.contains("Markets rose sharply."), "missing summary");
-        assert!(block.contains("Economy"), "missing story headline");
-        assert!(
-            block.contains("Growth driven by tech."),
-            "missing story body"
-        );
-        assert!(block.contains("Policy"), "missing second story");
-    }
-
-    #[test]
-    fn format_three_entries_all_present() {
-        let entries: Vec<BriefingHistoryEntry> = (1..=3)
-            .map(|i| {
-                make_entry(
-                    &format!("2026-02-2{}T00:00:00Z", i),
-                    &format!("Summary {i}"),
-                    &[("Theme", &format!("Desc {i}"))],
-                )
-            })
-            .collect();
-        let block = format_previous_briefings_block(&entries);
-        for i in 1..=3 {
-            assert!(block.contains(&format!("Summary {i}")), "missing entry {i}");
-        }
-    }
-
-    #[test]
-    fn from_result_rejects_empty_summary() {
-        let result = BriefingResult {
-            executive_summary: "   ".to_string(),
-            top_stories: vec![],
-            article_count: 0,
-            input_tokens: 0,
-            output_tokens: 0,
-        };
-        assert!(BriefingHistoryEntry::from_result(&result, "2026-02-21T00:00:00Z").is_none());
-    }
-
-    #[test]
-    fn truncation_is_safe_on_multibyte_characters() {
-        // "é" is 2 bytes but 1 char — byte-slicing at byte boundary would panic.
-        let multibyte: String = "é".repeat(600);
-        let entry = make_entry("2026-02-21T00:00:00Z", &multibyte, &[]);
-        let block = format_previous_briefings_block(&[entry]);
-        // Must not panic and must contain the truncation marker
-        assert!(block.contains('…'), "expected truncation marker");
     }
 }

@@ -4,8 +4,7 @@ use serde_json::{Map, Value};
 use thiserror::Error;
 
 use crate::llm::dto::{
-    AggregateBriefing, ArticleSummary, BriefingExecutiveSummaryResult, BriefingNextItem,
-    BriefingStory, Confidence, SignalCandidateResult, SourceTier, SummaryEntities, TriagePriority,
+    ArticleSummary, Confidence, SignalCandidateResult, SourceTier, SummaryEntities, TriagePriority,
     TriageResult,
 };
 use crate::text_safety::truncate_to_char_boundary;
@@ -18,10 +17,6 @@ const MAX_TITLE_LEN: usize = 200;
 const MAX_RESPONSE_SUMMARY_CHARS: usize = 1200;
 const MAX_KEY_POINTS: usize = 8;
 const MAX_KEY_POINT_LEN: usize = 256;
-const MAX_RESPONSE_EXEC_SUMMARY_CHARS: usize = 3000;
-const MAX_TOP_STORIES: usize = 5;
-const MAX_STORY_HEADLINE_LEN: usize = 160;
-const MAX_STORY_BODY_WORDS: usize = 150;
 const MIN_SIGNAL_KEY_LEN: usize = 8;
 const MAX_SIGNAL_KEY_LEN: usize = 80;
 const MIN_SIGNAL_THEMES: usize = 1;
@@ -38,12 +33,6 @@ const FIELD_RATIONALE: &str = "rationale";
 const FIELD_TITLE: &str = "title";
 const FIELD_SUMMARY: &str = "summary";
 const FIELD_KEY_POINTS: &str = "key_points";
-const FIELD_EXEC_SUMMARY: &str = "executive_summary";
-const FIELD_TOP_STORIES: &str = "top_stories";
-const FIELD_STORY_HEADLINE: &str = "headline";
-const FIELD_STORY_BODY: &str = "body";
-const FIELD_STATUS: &str = "status";
-const FIELD_ARTICLE_COUNT: &str = "article_count";
 const FIELD_ENTITIES: &str = "entities";
 const FIELD_ENTITIES_COMPANIES: &str = "companies";
 const FIELD_ENTITIES_TECHNOLOGIES: &str = "technologies";
@@ -58,8 +47,6 @@ const FIELD_SIGNAL_REASONING: &str = "reasoning";
 const MAX_ENTITY_ITEMS: usize = 15;
 const MAX_ENTITY_INPUT_ITEMS: usize = 100;
 const MAX_ENTITY_ITEM_LEN: usize = 100;
-const EXEC_SUMMARY_TRUNCATION_SUFFIX: &str =
-    "\n\n[Truncated response: removed {removed} characters to fit the 3000-character limit.]";
 
 /// Errors produced while validating parsed LLM output.
 #[derive(Debug, PartialEq, Eq, Error)]
@@ -208,70 +195,6 @@ fn parse_entity_list(
     Ok(result)
 }
 
-pub fn validate_briefing(content: &str) -> Result<AggregateBriefing, ValidationError> {
-    let document = parse_document(content)?;
-    let executive_summary = require_string(&document, FIELD_EXEC_SUMMARY)?;
-    let executive_summary = truncate_executive_summary(executive_summary);
-
-    let top_stories = parse_briefing_stories(&document)?;
-
-    let article_count_value = require_u64(&document, FIELD_ARTICLE_COUNT)?;
-    let article_count = u32::try_from(article_count_value)
-        .map_err(|_| ValidationError::ValueOutOfRange(FIELD_ARTICLE_COUNT))?;
-
-    Ok(AggregateBriefing {
-        executive_summary,
-        top_stories,
-        article_count,
-    })
-}
-
-/// Validate the executive-summary-only response for the briefing stream.
-pub fn validate_briefing_executive_summary(
-    content: &str,
-) -> Result<BriefingExecutiveSummaryResult, ValidationError> {
-    let document = parse_document(content)?;
-    let executive_summary = require_string(&document, FIELD_EXEC_SUMMARY)?;
-    if executive_summary.trim().is_empty() {
-        return Err(ValidationError::SchemaViolation(
-            "executive_summary must not be blank".into(),
-        ));
-    }
-    let executive_summary = truncate_executive_summary(executive_summary);
-    Ok(BriefingExecutiveSummaryResult { executive_summary })
-}
-
-/// Validate one briefing-stream item. Unknown or missing status fails closed.
-pub fn validate_briefing_next_item(content: &str) -> Result<BriefingNextItem, ValidationError> {
-    let document = parse_document(content)?;
-    let status = require_string(&document, FIELD_STATUS)?;
-    match status {
-        "exhausted" => Ok(BriefingNextItem::Exhausted),
-        "item" => {
-            let headline = require_string(&document, FIELD_STORY_HEADLINE)?;
-            if headline.trim().is_empty() {
-                return Err(ValidationError::SchemaViolation(
-                    "headline must not be blank".into(),
-                ));
-            }
-            ensure_max_length(headline, MAX_STORY_HEADLINE_LEN, FIELD_STORY_HEADLINE)?;
-            let body = require_string(&document, FIELD_STORY_BODY)?;
-            if body.trim().is_empty() {
-                return Err(ValidationError::SchemaViolation(
-                    "body must not be blank".into(),
-                ));
-            }
-            Ok(BriefingNextItem::Item {
-                headline: headline.to_string(),
-                body: truncate_to_word_limit(body, MAX_STORY_BODY_WORDS),
-            })
-        }
-        _ => Err(ValidationError::SchemaViolation(
-            "status must be \"item\" or \"exhausted\"".into(),
-        )),
-    }
-}
-
 pub fn validate_signal_candidate(content: &str) -> Result<SignalCandidateResult, ValidationError> {
     let document = parse_document(content)?;
 
@@ -369,50 +292,6 @@ pub fn validate_signal_candidate(content: &str) -> Result<SignalCandidateResult,
     })
 }
 
-fn parse_briefing_stories(
-    document: &Map<String, Value>,
-) -> Result<Vec<BriefingStory>, ValidationError> {
-    if let Some(stories_value) = document.get(FIELD_TOP_STORIES) {
-        let stories_array = stories_value.as_array().ok_or_else(|| {
-            ValidationError::SchemaViolation(format!("{FIELD_TOP_STORIES} must be an array"))
-        })?;
-        ensure_max_items(stories_array.len(), MAX_TOP_STORIES, FIELD_TOP_STORIES)?;
-        return stories_array
-            .iter()
-            .map(|value| {
-                let obj = value.as_object().ok_or_else(|| {
-                    ValidationError::SchemaViolation("each top story must be an object".into())
-                })?;
-                let headline = require_string(obj, FIELD_STORY_HEADLINE)?;
-                ensure_max_length(headline, MAX_STORY_HEADLINE_LEN, FIELD_STORY_HEADLINE)?;
-                let body = require_string(obj, FIELD_STORY_BODY)?;
-                Ok(BriefingStory {
-                    headline: headline.to_string(),
-                    body: truncate_to_word_limit(body, MAX_STORY_BODY_WORDS),
-                })
-            })
-            .collect::<Result<Vec<_>, ValidationError>>();
-    }
-
-    let themes_array = require_array(document, "themes")?;
-    ensure_max_items(themes_array.len(), MAX_TOP_STORIES, "themes")?;
-    themes_array
-        .iter()
-        .map(|value| {
-            let obj = value.as_object().ok_or_else(|| {
-                ValidationError::SchemaViolation("each theme must be an object".into())
-            })?;
-            let headline = require_string(obj, "name")?;
-            ensure_max_length(headline, MAX_STORY_HEADLINE_LEN, "name")?;
-            let body = require_string(obj, "description")?;
-            Ok(BriefingStory {
-                headline: headline.to_string(),
-                body: truncate_to_word_limit(body, MAX_STORY_BODY_WORDS),
-            })
-        })
-        .collect::<Result<Vec<_>, ValidationError>>()
-}
-
 fn parse_document(content: &str) -> Result<Map<String, Value>, ValidationError> {
     let value = serde_json::from_str::<Value>(content)
         .map_err(|err| ValidationError::InvalidJson(err.to_string()))?;
@@ -501,31 +380,6 @@ fn ensure_kebab_lower(value: &str, field: &'static str) -> Result<(), Validation
     }
 }
 
-fn truncate_executive_summary(value: &str) -> String {
-    let actual_chars = value.chars().count();
-    if actual_chars <= MAX_RESPONSE_EXEC_SUMMARY_CHARS {
-        return value.to_string();
-    }
-
-    let mut removed_chars = actual_chars - MAX_RESPONSE_EXEC_SUMMARY_CHARS;
-    loop {
-        let suffix =
-            EXEC_SUMMARY_TRUNCATION_SUFFIX.replace("{removed}", &removed_chars.to_string());
-        let suffix_chars = suffix.chars().count();
-        if suffix_chars >= MAX_RESPONSE_EXEC_SUMMARY_CHARS {
-            return truncate_to_char_boundary(&suffix, MAX_RESPONSE_EXEC_SUMMARY_CHARS).to_string();
-        }
-
-        let preserved_chars = MAX_RESPONSE_EXEC_SUMMARY_CHARS - suffix_chars;
-        let recalculated_removed = actual_chars - preserved_chars;
-        if recalculated_removed == removed_chars {
-            let prefix = truncate_to_char_boundary(value, preserved_chars);
-            return format!("{prefix}{suffix}");
-        }
-        removed_chars = recalculated_removed;
-    }
-}
-
 fn truncate_prose_field(value: &str, max_chars: usize) -> String {
     const SUFFIX: &str = "...";
 
@@ -541,14 +395,6 @@ fn truncate_prose_field(value: &str, max_chars: usize) -> String {
     let preserved_chars = max_chars - suffix_chars;
     let prefix = truncate_to_char_boundary(value, preserved_chars).trim_end();
     format!("{prefix}{SUFFIX}")
-}
-
-fn truncate_to_word_limit(value: &str, max_words: usize) -> String {
-    let words: Vec<&str> = value.split_whitespace().collect();
-    if words.len() <= max_words {
-        return value.trim().to_string();
-    }
-    format!("{}...", words[..max_words].join(" "))
 }
 
 fn ensure_max_items(count: usize, max: usize, field: &'static str) -> Result<(), ValidationError> {
@@ -570,90 +416,6 @@ fn ensure_in_range(value: u64, field: &'static str) -> Result<(), ValidationErro
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn validate_executive_summary_accepts_valid() {
-        let json = r#"{"executive_summary":"Markets shifted on new capex guidance."}"#;
-        let result = validate_briefing_executive_summary(json).expect("valid");
-        assert_eq!(
-            result.executive_summary,
-            "Markets shifted on new capex guidance."
-        );
-    }
-
-    #[test]
-    fn validate_executive_summary_rejects_blank() {
-        let json = r#"{"executive_summary":"   "}"#;
-        assert!(matches!(
-            validate_briefing_executive_summary(json).unwrap_err(),
-            ValidationError::SchemaViolation(_)
-        ));
-    }
-
-    #[test]
-    fn validate_next_item_accepts_item() {
-        let json = r#"{"status":"item","headline":"Nvidia ships Blackwell","body":"Volume shipments began this week."}"#;
-        let parsed = validate_briefing_next_item(json).expect("valid item");
-        assert_eq!(
-            parsed,
-            BriefingNextItem::Item {
-                headline: "Nvidia ships Blackwell".to_string(),
-                body: "Volume shipments began this week.".to_string(),
-            }
-        );
-    }
-
-    #[test]
-    fn validate_next_item_accepts_exhausted_and_ignores_extra_fields() {
-        let json = r#"{"status":"exhausted","headline":"ignored","body":"ignored"}"#;
-        assert_eq!(
-            validate_briefing_next_item(json).expect("valid exhausted"),
-            BriefingNextItem::Exhausted
-        );
-    }
-
-    #[test]
-    fn validate_next_item_rejects_blank_headline_or_body() {
-        let blank_headline = r#"{"status":"item","headline":"  ","body":"text"}"#;
-        let blank_body = r#"{"status":"item","headline":"text","body":""}"#;
-        assert!(matches!(
-            validate_briefing_next_item(blank_headline).unwrap_err(),
-            ValidationError::SchemaViolation(_)
-        ));
-        assert!(matches!(
-            validate_briefing_next_item(blank_body).unwrap_err(),
-            ValidationError::SchemaViolation(_) | ValidationError::MissingField(_)
-        ));
-    }
-
-    #[test]
-    fn validate_next_item_fails_closed_on_unknown_status() {
-        let unknown = r#"{"status":"maybe","headline":"h","body":"b"}"#;
-        let missing = r#"{"headline":"h","body":"b"}"#;
-        assert!(matches!(
-            validate_briefing_next_item(unknown).unwrap_err(),
-            ValidationError::SchemaViolation(_)
-        ));
-        assert!(matches!(
-            validate_briefing_next_item(missing).unwrap_err(),
-            ValidationError::MissingField(_)
-        ));
-    }
-
-    #[test]
-    fn validate_next_item_truncates_long_body_to_word_limit() {
-        let body = (0..200)
-            .map(|i| format!("w{i}"))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let json = format!(r#"{{"status":"item","headline":"h","body":"{body}"}}"#);
-        if let BriefingNextItem::Item { body, .. } = validate_briefing_next_item(&json).unwrap() {
-            assert!(body.ends_with("..."));
-            assert!(body.split_whitespace().count() <= MAX_STORY_BODY_WORDS + 1);
-        } else {
-            panic!("expected item");
-        }
-    }
 
     // ── validate_summary entity tests ────────────────────────────────────────
 

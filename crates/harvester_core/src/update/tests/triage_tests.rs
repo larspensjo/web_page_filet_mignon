@@ -29,34 +29,6 @@ fn summary_cache_model_id_compatibility_accepts_resolved_suffix() {
 }
 
 #[test]
-fn briefing_blocked_when_triage_in_progress() {
-    init_logging();
-    let mut state = AppState::new();
-    state.set_triage(crate::triage::TriageSession::new_loading(None));
-    let (next_state, effects) = update(state.clone(), Msg::GenerateBriefingClicked);
-    assert!(effects.is_empty());
-    assert!(matches!(
-        next_state.briefing().phase(),
-        crate::briefing::BriefingPhase::Failed { reason }
-            if reason == "No completed triage. Run triage before generating a briefing."
-    ));
-}
-
-#[test]
-fn triage_click_blocked_when_briefing_owns_triage() {
-    init_logging();
-    let state = AppState::new();
-    let (state, _) = update(state, Msg::GenerateBriefingClicked);
-    let (_state, effects) = update(
-        state,
-        Msg::PipelineRunRequested {
-            scope: crate::PipelineRunScope::Resume,
-        },
-    );
-    assert_eq!(effects, vec![Effect::FlushResults]);
-}
-
-#[test]
 fn triage_articles_loaded_dispatches_up_to_limit_requests() {
     init_logging();
     let mut state = AppState::new();

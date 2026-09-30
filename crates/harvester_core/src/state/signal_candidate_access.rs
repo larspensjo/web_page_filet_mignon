@@ -10,18 +10,6 @@ use crate::signal_candidate_cache::{
 use crate::update::signal_candidate::SignalCandidateInputSnapshot;
 use harvester_engine::llm::dto::SignalCandidateResult;
 
-/// Whether the briefing may generate now, and on what list.
-///
-/// The `Ready` variant carries the resolved selection so the entry point does
-/// not recompute it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BriefingGenerateReadiness {
-    Ready { selection: ArchiveFinalSelection },
-    TriageOrCorpusNotReady,
-    SummariesNotSettled,
-    SignalScoringInProgress,
-}
-
 impl AppState {
     /// Pin the signal-candidate archive selection snapshot for the current dialog session.
     pub fn pin_signal_candidate_selection(&mut self, selection: SignalCandidateArchiveSelection) {
@@ -129,7 +117,7 @@ impl AppState {
 
     /// The live signal-candidate selection computed from the current session:
     /// the same threshold + exclusion logic the Archive dialog uses. Single
-    /// source of truth shared by the dialog snapshot and the briefing selector.
+    /// source of truth shared by the dialog snapshot and archive selection.
     pub(crate) fn signal_candidate_selection(&self) -> SignalCandidateSelection {
         let scored: Vec<ScoredCandidate> = self
             .signal_candidate()
@@ -191,45 +179,5 @@ impl AppState {
         matches!(self.triage().phase(), crate::triage::TriagePhase::Complete)
             && !self.archive_corpus().is_empty()
             && self.briefing.can_start()
-    }
-
-    /// The corpus-relative readiness verdict for Generate Briefing.
-    ///
-    /// This deliberately does not include session/AI gates. The view and
-    /// entry-point guards compose those with this verdict when they need the
-    /// full "can generate now" answer.
-    pub fn briefing_generate_readiness(&self) -> BriefingGenerateReadiness {
-        let corpus = self.archive_corpus();
-        self.briefing_generate_readiness_for_corpus(&corpus, |url| {
-            self.summary_result_for_url(url).is_some()
-        })
-    }
-
-    pub(in crate::state) fn briefing_generate_readiness_for_corpus(
-        &self,
-        corpus: &crate::working_corpus::CurrentWorkingCorpus,
-        has_summary: impl Fn(&str) -> bool,
-    ) -> BriefingGenerateReadiness {
-        if corpus.is_empty()
-            || !matches!(self.triage().phase(), crate::triage::TriagePhase::Complete)
-        {
-            return BriefingGenerateReadiness::TriageOrCorpusNotReady;
-        }
-
-        let all_settled = corpus
-            .ordered_urls()
-            .iter()
-            .all(|url| has_summary(url) || self.briefing.summary_failed_for_url(url));
-        if !all_settled {
-            return BriefingGenerateReadiness::SummariesNotSettled;
-        }
-
-        if self.signal_candidate().in_flight_count() > 0 {
-            return BriefingGenerateReadiness::SignalScoringInProgress;
-        }
-
-        BriefingGenerateReadiness::Ready {
-            selection: self.archive_final_selection(),
-        }
     }
 }

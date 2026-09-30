@@ -286,7 +286,6 @@ impl RunProgress {
 pub enum PipelineRunPhase {
     Idle,
     Requested,
-    AwaitingSettle,
     Stopping,
 }
 

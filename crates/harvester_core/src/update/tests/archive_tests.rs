@@ -273,11 +273,6 @@ fn archive_clicked_with_triage_complete_and_pre_triage_ready_sets_pending_count(
             ),
         },
     );
-    assert_eq!(
-        state.current_working_corpus().source(),
-        crate::working_corpus::CurrentWorkingCorpusSource::PreTriageReady,
-        "working corpus should be PreTriageReady — archive corpus is different"
-    );
 
     let (_, effects) = update(state, Msg::ArchiveClicked);
     let (article_count, pending_count) = effects
@@ -753,17 +748,11 @@ fn resume_run_consumes_ready_pre_triage_into_triage_session() {
 }
 
 #[test]
-fn resume_run_sets_current_working_corpus_to_unavailable_until_triage_completes() {
+fn resume_run_makes_archive_corpus_available_when_triage_completes() {
     init_logging();
     let urls = &["https://corpus-src.com/1"];
     let state = ready_pre_triage_state(urls);
     let state = prime_llm_metadata(state);
-
-    assert_eq!(
-        state.current_working_corpus().source(),
-        crate::working_corpus::CurrentWorkingCorpusSource::PreTriageReady,
-        "source must be PreTriageReady before a Resume run"
-    );
 
     let (state, effects) = update(
         state,
@@ -771,19 +760,10 @@ fn resume_run_sets_current_working_corpus_to_unavailable_until_triage_completes(
             scope: crate::PipelineRunScope::Resume,
         },
     );
-    assert_eq!(
-        state.current_working_corpus().source(),
-        crate::working_corpus::CurrentWorkingCorpusSource::Unavailable,
-        "source must be Unavailable while triage is in-flight"
-    );
 
     let state = complete_all_triage_llm_requests(state, effects);
-
-    assert_eq!(
-        state.current_working_corpus().source(),
-        crate::working_corpus::CurrentWorkingCorpusSource::TriageComplete,
-        "source must be TriageComplete after triage finishes"
-    );
+    assert_eq!(state.triage().phase(), &crate::TriagePhase::Complete);
+    assert_eq!(state.archive_corpus().count(), 1);
 }
 
 #[test]
@@ -1907,13 +1887,6 @@ fn parity_a_pre_triage_ready_archive_count_is_zero_pending_count_is_nonzero() {
         .unwrap()
         .with_timezone(&chrono::Utc);
 
-    let corpus = state.current_working_corpus();
-    assert_eq!(
-        corpus.source(),
-        crate::working_corpus::CurrentWorkingCorpusSource::PreTriageReady,
-        "source must be PreTriageReady"
-    );
-
     let (state, open_effects) = update(state, Msg::ArchiveClicked);
     let request_id = state.archive_request_id();
     let (archive_count, pending_count) = open_effects
@@ -1970,14 +1943,8 @@ fn parity_b_triage_complete_corpus_count_dialog_count_urls_match() {
         .unwrap()
         .with_timezone(&chrono::Utc);
 
-    let corpus = state.current_working_corpus();
-    assert_eq!(
-        corpus.source(),
-        crate::working_corpus::CurrentWorkingCorpusSource::TriageComplete,
-        "source must be TriageComplete when pre-triage is idle"
-    );
-    let expected_count = corpus.count();
-    let expected_urls: Vec<String> = corpus.ordered_urls().to_vec();
+    let expected_count = state.archive_corpus().count();
+    let expected_urls: Vec<String> = state.archive_corpus().ordered_urls().to_vec();
     assert!(
         expected_count > 0,
         "corpus must be non-empty for a meaningful parity test"
@@ -2041,18 +2008,12 @@ fn checkpoint_set_does_not_reduce_corpus_count_to_zero() {
         "checkpoint must be set before the test"
     );
 
-    let corpus = state.current_working_corpus();
-    assert_eq!(
-        corpus.source(),
-        crate::working_corpus::CurrentWorkingCorpusSource::TriageComplete,
-        "corpus source must be TriageComplete"
-    );
     assert!(
-        corpus.count() > 0,
+        state.archive_corpus().count() > 0,
         "corpus count must be non-zero even when briefing checkpoint is set"
     );
-    let expected_count = corpus.count();
-    let expected_urls: Vec<String> = corpus.ordered_urls().to_vec();
+    let expected_count = state.archive_corpus().count();
+    let expected_urls: Vec<String> = state.archive_corpus().ordered_urls().to_vec();
 
     let (state, open_effects) = update(state, Msg::ArchiveClicked);
     let dialog_since_utc = open_effects
@@ -2516,17 +2477,14 @@ fn summary_failed_for_url_returns_true_for_failed_summary() {
 
     init_logging();
     let url = "https://triage-complete.com/0";
-    let mut briefing = BriefingSession::new_loading(None);
-    briefing.set_articles(
-        vec![LoadedArticle {
-            url: url.to_string(),
-            source_title: None,
-            prepared_text: "text".to_string(),
-            content_hash: "hash-tc-0".to_string(),
-            fetched_utc: None,
-        }],
-        "collection".to_string(),
-    );
+    let mut briefing = BriefingSession::new_loading();
+    briefing.set_articles(vec![LoadedArticle {
+        url: url.to_string(),
+        source_title: None,
+        prepared_text: "text".to_string(),
+        content_hash: "hash-tc-0".to_string(),
+        fetched_utc: None,
+    }]);
     briefing.transition_to_summarizing();
     briefing.start_article(0, 1);
     briefing.fail_article(0, "network".to_string());
@@ -2555,130 +2513,9 @@ fn summaries_can_start_false_when_briefing_active() {
 
     init_logging();
     let mut state = complete_triage_state_for_test(2);
-    state.set_briefing(BriefingSession::new_loading(None));
+    state.set_briefing(BriefingSession::new_loading());
     assert!(!state.briefing().can_start());
     assert!(!state.summaries_can_start());
-}
-
-#[test]
-fn briefing_generate_readiness_triage_or_corpus_not_ready_when_empty() {
-    use crate::state::BriefingGenerateReadiness;
-
-    init_logging();
-    let state = AppState::new();
-    assert!(matches!(
-        state.briefing_generate_readiness(),
-        BriefingGenerateReadiness::TriageOrCorpusNotReady
-    ));
-}
-
-#[test]
-fn briefing_generate_readiness_summaries_not_settled() {
-    use crate::state::BriefingGenerateReadiness;
-
-    init_logging();
-    let state = complete_triage_state_for_test(2);
-    assert!(matches!(
-        state.briefing_generate_readiness(),
-        BriefingGenerateReadiness::SummariesNotSettled
-    ));
-}
-
-#[test]
-fn briefing_generate_readiness_ready_when_failed_summary_does_not_block() {
-    use crate::briefing::{ArticleSummaryResult, BriefingSession, LoadedArticle};
-    use crate::state::BriefingGenerateReadiness;
-    use crate::summary_cache::SummaryCacheKey;
-    use harvester_engine::llm::dto::SummaryEntities;
-    use harvester_engine::llm::prompt::PromptId;
-
-    init_logging();
-    let mut state = complete_triage_state_for_test(2);
-
-    state.store_summary_result(
-        SummaryCacheKey {
-            content_hash: "hash-tc-0".to_string(),
-            prompt_id: PromptId::ArticleSummary,
-            prompt_version: 1,
-            model_id: "test-summary-model".to_string(),
-            context_hash: "ctx".to_string(),
-        },
-        ArticleSummaryResult {
-            title: "A".to_string(),
-            summary: "s".to_string(),
-            key_points: vec![],
-            input_tokens: 1,
-            output_tokens: 1,
-            entities: SummaryEntities::default(),
-        },
-        "2026-05-01T00:00:00Z".to_string(),
-    );
-
-    let mut briefing = BriefingSession::new_loading(None);
-    briefing.set_articles(
-        vec![LoadedArticle {
-            url: "https://triage-complete.com/1".to_string(),
-            source_title: None,
-            prepared_text: "t".to_string(),
-            content_hash: "hash-tc-1".to_string(),
-            fetched_utc: None,
-        }],
-        "c".to_string(),
-    );
-    briefing.transition_to_summarizing();
-    briefing.start_article(0, 1);
-    briefing.fail_article(0, "network".to_string());
-    briefing.complete_without_briefing();
-    state.set_briefing(briefing);
-
-    assert!(matches!(
-        state.briefing_generate_readiness(),
-        BriefingGenerateReadiness::Ready { .. }
-    ));
-}
-
-#[test]
-fn briefing_generate_readiness_signal_scoring_in_progress() {
-    use crate::briefing::ArticleSummaryResult;
-    use crate::state::BriefingGenerateReadiness;
-    use crate::summary_cache::SummaryCacheKey;
-    use harvester_engine::llm::dto::SummaryEntities;
-    use harvester_engine::llm::prompt::PromptId;
-
-    init_logging();
-    let mut state = complete_triage_state_for_test(2);
-
-    for i in 0..2usize {
-        state.store_summary_result(
-            SummaryCacheKey {
-                content_hash: format!("hash-tc-{i}"),
-                prompt_id: PromptId::ArticleSummary,
-                prompt_version: 1,
-                model_id: "test-summary-model".to_string(),
-                context_hash: "ctx".to_string(),
-            },
-            ArticleSummaryResult {
-                title: "A".to_string(),
-                summary: "s".to_string(),
-                key_points: vec![],
-                input_tokens: 1,
-                output_tokens: 1,
-                entities: SummaryEntities::default(),
-            },
-            "2026-05-01T00:00:00Z".to_string(),
-        );
-    }
-
-    let url = "https://triage-complete.com/0".to_string();
-    state
-        .signal_candidate_mut()
-        .enqueue(url, "fixture-input".to_string());
-    assert!(state.signal_candidate().in_flight_count() > 0);
-
-    assert!(matches!(
-        state.briefing_generate_readiness(),
-        BriefingGenerateReadiness::SignalScoringInProgress
-    ));
 }
 
 #[test]
@@ -2966,11 +2803,6 @@ fn archive_counts_derive_from_triage_cache_at_startup_without_running_triage() {
     assert_eq!(
         view.raw_unprocessed_count, 2,
         "both cached-triaged articles lack a summary → both are raw backlog"
-    );
-    assert_eq!(
-        state.current_working_corpus().source(),
-        crate::working_corpus::CurrentWorkingCorpusSource::PreTriageReady,
-        "working corpus stays PreTriageReady — only the archive corpus is cache-derived"
     );
 }
 

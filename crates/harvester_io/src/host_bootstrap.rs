@@ -8,7 +8,7 @@ use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::prompts::register_defaults;
 use harvester_engine::llm::{
     LlmConfig, LlmHandle, LlmQuotas, ModelId, OpenAiProvider, PricingRegistry, PromptRegistry,
-    ProviderKind, DEFAULT_BRIEFING_MODEL, DEFAULT_SUMMARY_MODEL, DEFAULT_TRIAGE_MODEL,
+    ProviderKind, DEFAULT_SUMMARY_MODEL, DEFAULT_TRIAGE_MODEL,
 };
 
 use crate::{
@@ -151,16 +151,6 @@ pub fn effective_model_map(config: &LlmConfig) -> HashMap<PromptId, String> {
         .to_string();
     map.insert(PromptId::ArticleSignalCandidate, signal_candidate_model);
 
-    let briefing_model = config
-        .briefing_model
-        .as_ref()
-        .unwrap_or(&config.default_model)
-        .model_name()
-        .to_string();
-    map.insert(PromptId::AggregateBriefing, briefing_model.clone());
-    map.insert(PromptId::BriefingExecutiveSummary, briefing_model.clone());
-    map.insert(PromptId::BriefingNextItem, briefing_model);
-
     map
 }
 
@@ -272,21 +262,17 @@ pub fn llm_config_with_provider(
         triage_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_TRIAGE_MODEL)),
         summary_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_SUMMARY_MODEL)),
         signal_candidate_model: None,
-        briefing_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_BRIEFING_MODEL)),
         registry: Arc::clone(&registry),
         quotas: LlmQuotas::default(),
         output_dir: paths.output_dir.clone(),
         pricing: PricingRegistry::with_defaults(),
         max_input_bytes: 100_000,
-        #[allow(deprecated)]
-        max_input_chars: 0,
         timestamp_utc: Arc::new(|| Utc::now().to_rfc3339()),
         session_id: format!(
             "{}{}",
             defaults.session_id_prefix,
             Utc::now().format("%Y%m%d-%H%M%S")
         ),
-        replay_cache: None,
         replay_write_observer: None,
         max_concurrent_requests: llm_concurrency,
     };

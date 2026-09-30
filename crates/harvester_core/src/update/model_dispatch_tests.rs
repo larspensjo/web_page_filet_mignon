@@ -29,7 +29,6 @@ fn state_with_work(triage: &[&str], summaries: &[&str], scores: &[&str]) -> AppS
     state.mark_triage_metadata_ready();
     state.start_summary_cache_run();
     state.mark_briefing_metadata_ready();
-    state.request_summary_preparation();
     if !triage.is_empty() {
         let mut session = TriageSession::new_loading(None);
         session.set_articles(triage.iter().map(|name| article(name)).collect());
@@ -37,11 +36,8 @@ fn state_with_work(triage: &[&str], summaries: &[&str], scores: &[&str]) -> AppS
         state.set_triage(session);
     }
     if !summaries.is_empty() {
-        let mut session = BriefingSession::new_loading(None);
-        session.set_articles(
-            summaries.iter().map(|name| article(name)).collect(),
-            "collection".into(),
-        );
+        let mut session = BriefingSession::new_loading();
+        session.set_articles(summaries.iter().map(|name| article(name)).collect());
         session.transition_to_summarizing();
         state.set_briefing(session);
     }
@@ -157,7 +153,7 @@ fn synchronous_budget_is_clamped_and_zero_dispatches_one_triage_request() {
     );
     state.set_llm_max_in_flight(0);
     assert_eq!(state.llm_max_in_flight(), 1);
-    let (state, effects) = crate::update(state, Msg::NoOp);
+    let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
     let emitted = requests(&effects);
     assert_eq!(emitted.len(), 1);
     assert_eq!(emitted[0].1, PromptId::ArticleTriage);
@@ -169,7 +165,7 @@ fn synchronous_budget_is_clamped_and_zero_dispatches_one_triage_request() {
 fn shared_budget_dispatches_scoring_summary_triage_and_never_exceeds_three() {
     let mut state = state_with_work(&["triage-z", "triage-a"], &["summary"], &["score"]);
     state.set_llm_max_in_flight(3);
-    let (state, effects) = crate::update(state, Msg::NoOp);
+    let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
     let emitted = requests(&effects);
     assert_eq!(
         emitted.iter().map(|r| r.1).collect::<Vec<_>>(),
@@ -177,7 +173,7 @@ fn shared_budget_dispatches_scoring_summary_triage_and_never_exceeds_three() {
     );
     assert_eq!(state.article_model_requests_in_flight(), 3);
     assert_eq!(state.triage().pending_count(), 1);
-    let (state, effects) = crate::update(state, Msg::NoOp);
+    let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
     assert!(requests(&effects).is_empty());
     assert_eq!(state.article_model_requests_in_flight(), 3);
 }
@@ -185,7 +181,7 @@ fn shared_budget_dispatches_scoring_summary_triage_and_never_exceeds_three() {
 #[test]
 fn completion_gives_slot_to_new_highest_priority_work() {
     let state = state_with_work(&["triage-z", "triage-a"], &[], &[]);
-    let (mut state, effects) = crate::update(state, Msg::NoOp);
+    let (mut state, effects) = crate::update(state, Msg::PipelineRunAdvance);
     let id = requests(&effects)[0].0;
     admit_score(&mut state, "score");
     let (state, effects) = completion(
@@ -209,7 +205,7 @@ fn summary_cache_completion_yields_to_scoring_before_next_summary() {
         summary_result("cached"),
         "now".into(),
     );
-    let (state, effects) = crate::update(state, Msg::NoOp);
+    let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
     assert_eq!(requests(&effects).len(), 1);
     assert_eq!(requests(&effects)[0].1, PromptId::ArticleSignalCandidate);
     assert_eq!(state.briefing().pending_count(), 1);
@@ -249,7 +245,7 @@ fn changed_in_flight_score_settles_and_caches_old_request_before_readmission() {
         summary_result("first"),
         "now".into(),
     );
-    let (mut state, effects) = crate::update(state, Msg::NoOp);
+    let (mut state, effects) = crate::update(state, Msg::PipelineRunAdvance);
     let first_id = requests(&effects)[0].0;
     let first_key = input_key(&url, state.signal_candidate_input_snapshot(&url).unwrap()).unwrap();
     state.store_summary_result(
@@ -258,7 +254,7 @@ fn changed_in_flight_score_settles_and_caches_old_request_before_readmission() {
         "later".into(),
     );
     assert!(!try_enqueue(&mut state, &url));
-    let (state, effects) = crate::update(state, Msg::NoOp);
+    let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
     assert!(requests(&effects).is_empty());
     assert_eq!(state.article_model_requests_in_flight(), 1);
     let (mut state, effects) = completion(
@@ -282,7 +278,7 @@ fn changed_in_flight_score_settles_and_caches_old_request_before_readmission() {
     crate::update::test_support::arm_admitted(&mut state);
     assert!(try_enqueue(&mut state, &url));
     assert_eq!(state.signal_candidate().enqueued_count(), 2);
-    let (state, effects) = crate::update(state, Msg::NoOp);
+    let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
     assert_eq!(requests(&effects)[0].1, PromptId::ArticleSignalCandidate);
     assert_eq!(
         state.signal_candidate_input_snapshot(&url).unwrap().summary,
@@ -300,7 +296,7 @@ fn every_stage_preserves_admission_order() {
             _ => state_with_work(&[], &[], &names),
         };
         state.set_llm_max_in_flight(3);
-        let (_, effects) = crate::update(state, Msg::NoOp);
+        let (_, effects) = crate::update(state, Msg::PipelineRunAdvance);
         let emitted = requests(&effects);
         assert_eq!(emitted.len(), 3);
         for (request, name) in emitted.iter().zip(names) {
@@ -330,7 +326,7 @@ fn cache_hits_in_all_stages_take_no_slot() {
     let url = article("score-hit").url;
     let key = input_key(&url, state.signal_candidate_input_snapshot(&url).unwrap()).unwrap();
     state.store_signal_candidate_result(key, score_result(), "now".into());
-    let (state, effects) = crate::update(state, Msg::NoOp);
+    let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
     assert_eq!(requests(&effects).len(), 1);
     assert_eq!(requests(&effects)[0].2, "triage-miss");
     assert_eq!(state.article_model_requests_in_flight(), 1);
@@ -348,16 +344,16 @@ fn triage_cache_hit_rejects_old_summary_then_current_completion_admits_scoring()
         summary_result("old"),
         "now".into(),
     );
-    let (mut state, effects) = crate::update(state, Msg::NoOp);
+    let (mut state, effects) = crate::update(state, Msg::PipelineRunAdvance);
     let url = article("article").url;
     assert!(requests(&effects).is_empty());
     assert!(state.signal_candidate().state_for(&url).is_none());
-    let mut summaries = BriefingSession::new_loading(None);
-    summaries.set_articles(vec![article("article")], "collection".into());
+    let mut summaries = BriefingSession::new_loading();
+    summaries.set_articles(vec![article("article")]);
     summaries.transition_to_summarizing();
     state.set_briefing(summaries);
     crate::update::test_support::arm_admitted(&mut state);
-    let (state, effects) = crate::update(state, Msg::NoOp);
+    let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
     let id = requests(&effects)[0].0;
     let (state, effects) = completion(
         state,
@@ -433,7 +429,7 @@ fn changed_summary_replaces_completed_and_failed_scores_but_same_digest_is_refus
 fn quota_halts_all_stages_and_future_admissions_with_provider_reason() {
     for origin in [QuotaOrigin::Provider, QuotaOrigin::SessionBudget] {
         let state = state_with_work(&["triage"], &["summary"], &["score", "pending-score"]);
-        let (state, effects) = crate::update(state, Msg::NoOp);
+        let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
         let id = requests(&effects)[0].0;
         let (mut state, effects) = completion(
             state,
@@ -457,7 +453,7 @@ fn quota_halts_all_stages_and_future_admissions_with_provider_reason() {
         );
         state.clear_provider_alert();
         admit_score(&mut state, "later");
-        let (state, effects) = crate::update(state, Msg::NoOp);
+        let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
         assert!(requests(&effects).is_empty());
         assert!(
             matches!(state.signal_candidate().state_for(&article("later").url), Some(SignalCandidateState::Failed { reason }) if reason == "quota reason")
@@ -472,7 +468,7 @@ fn existing_three_rate_limit_threshold_halts_all_stages() {
         &["summary"],
         &["score-1", "score-2", "score-3", "score-4"],
     );
-    let (mut state, mut effects) = crate::update(state, Msg::NoOp);
+    let (mut state, mut effects) = crate::update(state, Msg::PipelineRunAdvance);
     for count in 1..=3 {
         let id = requests(&effects)[0].0;
         (state, effects) = completion(

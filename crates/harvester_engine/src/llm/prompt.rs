@@ -9,9 +9,6 @@ pub enum PromptId {
     ArticleTriage,
     ArticleSummary,
     ArticleSignalCandidate,
-    AggregateBriefing,
-    BriefingExecutiveSummary,
-    BriefingNextItem,
 }
 
 impl FromStr for PromptId {
@@ -22,9 +19,6 @@ impl FromStr for PromptId {
             "ArticleTriage" => Ok(PromptId::ArticleTriage),
             "ArticleSummary" => Ok(PromptId::ArticleSummary),
             "ArticleSignalCandidate" => Ok(PromptId::ArticleSignalCandidate),
-            "AggregateBriefing" => Ok(PromptId::AggregateBriefing),
-            "BriefingExecutiveSummary" => Ok(PromptId::BriefingExecutiveSummary),
-            "BriefingNextItem" => Ok(PromptId::BriefingNextItem),
             _ => Err(ParsePromptIdError::Unknown(s.to_string())),
         }
     }
@@ -36,9 +30,6 @@ impl std::fmt::Display for PromptId {
             PromptId::ArticleTriage => write!(f, "ArticleTriage"),
             PromptId::ArticleSummary => write!(f, "ArticleSummary"),
             PromptId::ArticleSignalCandidate => write!(f, "ArticleSignalCandidate"),
-            PromptId::AggregateBriefing => write!(f, "AggregateBriefing"),
-            PromptId::BriefingExecutiveSummary => write!(f, "BriefingExecutiveSummary"),
-            PromptId::BriefingNextItem => write!(f, "BriefingNextItem"),
         }
     }
 }
@@ -412,20 +403,6 @@ pub fn render_template(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn briefing_stream_prompt_ids_round_trip() {
-        for (id, name) in [
-            (
-                PromptId::BriefingExecutiveSummary,
-                "BriefingExecutiveSummary",
-            ),
-            (PromptId::BriefingNextItem, "BriefingNextItem"),
-        ] {
-            assert_eq!(id.to_string(), name);
-            assert_eq!(PromptId::from_str(name).unwrap(), id);
-        }
-    }
 
     fn make_static_template(version: PromptVersion) -> PromptTemplate {
         PromptTemplate {

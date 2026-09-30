@@ -263,7 +263,12 @@ fn drain_cost_state() -> (AppState, usize) {
     let state = seed_populated_run_progress();
     let (state, _) = update(state, Msg::RestoreCompletedJobs(snapshots));
     // Restoration resets source state; keep a real source poll open for the active-run fixture.
-    let (state, _) = update(state, Msg::PollSourcesClicked);
+    let (state, _) = harvester_core::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Full,
+        },
+    );
     let (state, _) = update(state, Msg::PollStarted { total: 1 });
     let (state, _) = update(
         state,
@@ -274,7 +279,25 @@ fn drain_cost_state() -> (AppState, usize) {
 
 fn seed_populated_run_progress() -> AppState {
     const ACTIVITY_JOBS: usize = ACTIVITY_FEED_CAPACITY / 2;
-    let (state, _) = update(AppState::new(), Msg::PollSourcesClicked);
+    let (active_versions, effective_models) = production_metadata();
+    let (state, _) = update(
+        AppState::new(),
+        Msg::LlmMetadataLoaded {
+            active_versions,
+            effective_models,
+        },
+    );
+    let (state, configuration_effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Full,
+        },
+    );
+    let (state, _) = harvester_core::fixture_support::complete_processing_configuration(
+        state,
+        configuration_effects,
+        100_000,
+    );
     let (state, _) = update(state, Msg::PollStarted { total: 2 });
     let urls = (0..ACTIVITY_JOBS).map(job_url).collect::<Vec<_>>();
     let (mut state, effects) = update(
@@ -711,8 +734,6 @@ fn production_metadata() -> (HashMap<PromptId, u32>, HashMap<PromptId, String>) 
         PromptId::ArticleTriage,
         PromptId::ArticleSummary,
         PromptId::ArticleSignalCandidate,
-        PromptId::BriefingExecutiveSummary,
-        PromptId::BriefingNextItem,
     ] {
         active_versions.insert(prompt_id, 1);
     }
@@ -721,14 +742,6 @@ fn production_metadata() -> (HashMap<PromptId, u32>, HashMap<PromptId, String>) 
     effective_models.insert(
         PromptId::ArticleSignalCandidate,
         "drain-cost-scoring-model".into(),
-    );
-    effective_models.insert(
-        PromptId::BriefingExecutiveSummary,
-        "drain-cost-briefing-model".into(),
-    );
-    effective_models.insert(
-        PromptId::BriefingNextItem,
-        "drain-cost-briefing-model".into(),
     );
     (active_versions, effective_models)
 }

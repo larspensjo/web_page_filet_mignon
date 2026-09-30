@@ -1,7 +1,5 @@
 use harvester_engine::llm::PromptRegistry;
-use harvester_engine::{
-    load_and_prepare_articles_filtered, CorpusScanIndex, HeldArticle, TriageArticleDelta,
-};
+use harvester_engine::{CorpusScanIndex, HeldArticle, TriageArticleDelta};
 use std::{fs, path::Path};
 
 fn write(dir: &Path, name: &str, url: &str, date: &str, text: &str) {
@@ -232,7 +230,7 @@ fn since_filter_uses_cached_timestamp_and_includes_missing_or_invalid_dates() {
 }
 
 #[test]
-fn triage_delta_and_summary_collection_use_identical_preparation() {
+fn triage_delta_preserves_summary_hash_and_preparation_budget() {
     let dir = tempfile::tempdir().unwrap();
     let urls: Vec<String> = vec!["https://example.com/a".into()];
     write(
@@ -246,8 +244,15 @@ fn triage_delta_and_summary_collection_use_identical_preparation() {
     let (delta, _) = CorpusScanIndex::default()
         .load_delta(dir.path(), 4_000, &registry, &urls, None, &[], |_| {})
         .unwrap();
-    let (summary, _) =
-        load_and_prepare_articles_filtered(dir.path(), 4_000, &registry, &urls, None).unwrap();
-    assert_eq!(delta.articles, summary);
+    let metadata = harvester_engine::scan_archive_article_metadata(dir.path()).unwrap();
+    assert_eq!(
+        delta.articles[0].content_hash,
+        metadata[0].content_hash.clone().unwrap()
+    );
+    assert_eq!(
+        delta.preparation_budget,
+        harvester_engine::summary_preparation_budget(4_000, &registry).unwrap()
+    );
+    assert_eq!(delta.articles[0].url, urls[0]);
     assert!(delta.articles[0].prepared_text.len() <= delta.preparation_budget);
 }

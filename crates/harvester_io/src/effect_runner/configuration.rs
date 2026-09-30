@@ -31,9 +31,6 @@ pub(super) fn load_contexts(
         PromptId::ArticleTriage,
         PromptId::ArticleSummary,
         PromptId::ArticleSignalCandidate,
-        PromptId::AggregateBriefing,
-        PromptId::BriefingExecutiveSummary,
-        PromptId::BriefingNextItem,
     ] {
         let path = contexts_dir.join(crate::effect_helpers::prompt_context_filename(id));
         if !path.exists() {

@@ -1,6 +1,5 @@
-use super::stale_reporter::format_elapsed;
 use std::io::Write;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Live progress reporter for `--import-saved-web-dir` mode.
 ///
@@ -109,6 +108,11 @@ fn phase_label(obs: &harvester_core::BatchObservation) -> &'static str {
     "SETTLING "
 }
 
+pub(super) fn format_elapsed(d: Duration) -> String {
+    let secs = d.as_secs();
+    format!("{}:{:02}", secs / 60, secs % 60)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,6 +159,23 @@ mod tests {
             imports_failed: 0,
             import_in_flight: false,
             source_poll_stats: vec![],
+        }
+    }
+
+    #[test]
+    fn format_elapsed_formats_minutes_and_padded_seconds() {
+        for (seconds, expected) in [
+            (0, "0:00"),
+            (9, "0:09"),
+            (59, "0:59"),
+            (60, "1:00"),
+            (61, "1:01"),
+            (3601, "60:01"),
+        ] {
+            assert_eq!(
+                format_elapsed(Duration::from_millis(seconds * 1000 + 999)),
+                expected
+            );
         }
     }
 

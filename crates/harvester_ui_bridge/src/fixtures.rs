@@ -441,7 +441,7 @@ fn completed_run_state() -> AppState {
     state = next;
     assert!(summary_effects
         .iter()
-        .all(|effect| !matches!(effect, Effect::LoadArticlesForBriefing { .. })));
+        .all(|effect| !matches!(effect, Effect::LoadArticlesForTriage { .. })));
     let summary_request_id = request_id(&summary_effects, PromptId::ArticleSummary, "summary");
     let (next, signal_effects) = update(state, summary_success(summary_request_id));
     state = next;
@@ -474,7 +474,17 @@ fn prepared_article_state_with_source_failure(
         fetched_utc: Some("2023-11-14T22:13:20Z".into()),
     };
     let state = reduce(add_llm_metadata(AppState::new()), Msg::tick_at(time(0)));
-    let state = reduce(state, Msg::PollSourcesClicked);
+    let (state, configuration_effects) = harvester_core::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Full,
+        },
+    );
+    let (state, _) = harvester_core::fixture_support::complete_processing_configuration(
+        state,
+        configuration_effects,
+        100_000,
+    );
     let state = reduce(
         state,
         Msg::PollStarted {
@@ -738,8 +748,29 @@ mod tests {
                 std::fs::create_dir_all(&root).unwrap();
                 std::fs::write(&path, actual).unwrap();
             } else {
+                // Keep the schema-12 fixtures as decoder inputs. Only the retired
+                // control values change; all other fields still compare byte for byte.
+                let mut expected: SnapshotEnvelope = serde_json::from_str(
+                    &std::fs::read_to_string(&path).expect("checked-in UI fixture"),
+                )
+                .unwrap();
+                for field in ["briefing_generate_enabled", "next_item_enabled"] {
+                    assert!(expected.view[field].is_boolean(), "{name}: {field}");
+                    assert_eq!(
+                        envelope.view[field],
+                        serde_json::json!(false),
+                        "{name}: {field}"
+                    );
+                    expected.view[field] = serde_json::json!(false);
+                }
+                assert!(
+                    expected.view["briefing_blocked_reason"].is_null()
+                        || expected.view["briefing_blocked_reason"].is_string()
+                );
+                assert!(envelope.view["briefing_blocked_reason"].is_null());
+                expected.view["briefing_blocked_reason"] = serde_json::Value::Null;
                 assert_eq!(
-                    std::fs::read_to_string(&path).expect("checked-in UI fixture"),
+                    serde_json::to_string_pretty(&expected).unwrap() + "\n",
                     actual,
                     "regenerate with UPDATE_UI_FIXTURES=1 cargo test -p harvester_ui_bridge"
                 );

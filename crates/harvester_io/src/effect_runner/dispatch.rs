@@ -7,7 +7,7 @@ use std::thread;
 use std::time::Instant;
 
 use engine_logging::{engine_error, engine_info, engine_warn};
-use harvester_core::{Effect, LlmResultKind, LoadedArticle, Msg, StopPolicy};
+use harvester_core::{Effect, LlmResultKind, Msg, StopPolicy};
 #[cfg(test)]
 use harvester_engine::llm::prompt::PromptId;
 #[cfg(test)]
@@ -15,8 +15,7 @@ use harvester_engine::llm::prompt_context::ContextMeta;
 use harvester_engine::llm::prompt_context::PromptContextFile;
 use harvester_engine::llm::LlmCommand;
 use harvester_engine::{
-    build_triage_archive, import_saved_webpages, is_confined_to,
-    load_and_prepare_articles_filtered, scan_archive_article_metadata, ExportOptions,
+    build_triage_archive, import_saved_webpages, is_confined_to, scan_archive_article_metadata,
     ImportOptions,
 };
 
@@ -114,17 +113,11 @@ impl EffectRunner {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.paths.output_dir.clone();
                 thread::spawn(move || {
-                    let options = ExportOptions {
-                        output_filename: basename.clone(),
-                        manifest_filename: None,
-                        ..ExportOptions::default()
-                    };
                     match build_triage_archive(
                         &output_dir,
                         &basename,
                         &ordered_urls,
                         since_utc,
-                        options,
                         use_summaries,
                         &summaries,
                         &annotations,
@@ -256,10 +249,8 @@ impl EffectRunner {
                 request_id,
                 prompt_id,
                 prompt_version,
-                model_override,
                 input_content,
                 context,
-                template_override,
                 extra_template_vars,
             } => {
                 if let Some(handle) = &self.llm_handle {
@@ -268,10 +259,8 @@ impl EffectRunner {
                             request_id,
                             prompt_id,
                             prompt_version,
-                            model_override,
                             input_content,
                             context,
-                            template_override,
                             extra_template_vars,
                         },
                     ));
@@ -309,68 +298,7 @@ impl EffectRunner {
                     });
                 }
             }
-            Effect::LoadArticlesForBriefing {
-                ordered_urls,
-                since_utc,
-            } => {
-                let msg_tx = self.msg_tx.clone();
-                let output_dir = self.paths.output_dir.clone();
-                let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
-                let registry = self.prompt_registry.clone();
-                thread::spawn(move || {
-                    let load_started = Instant::now();
-                    engine_info!(
-                        "[articles-load] briefing start urls={} since_filter={}",
-                        ordered_urls.len(),
-                        since_utc.is_some()
-                    );
-                    let guard = registry.read().unwrap();
-                    match load_and_prepare_articles_filtered(
-                        &output_dir,
-                        max_input_bytes,
-                        &guard,
-                        &ordered_urls,
-                        since_utc,
-                    ) {
-                        Ok((articles, collection_text)) => {
-                            let loaded_articles: Vec<LoadedArticle> = articles
-                                .into_iter()
-                                .map(|article| LoadedArticle {
-                                    url: article.url,
-                                    source_title: article.source_title,
-                                    prepared_text: article.prepared_text,
-                                    content_hash: article.content_hash,
-                                    fetched_utc: article.fetched_utc,
-                                })
-                                .collect();
-                            engine_info!(
-                                "[briefing-loader] prepared {} article(s)",
-                                loaded_articles.len()
-                            );
-                            engine_info!(
-                                "[articles-load] briefing done urls={} prepared={} elapsed_ms={}",
-                                ordered_urls.len(),
-                                loaded_articles.len(),
-                                load_started.elapsed().as_millis()
-                            );
-                            let _ = msg_tx.send(Msg::ArticlesLoaded {
-                                articles: loaded_articles,
-                                collection_text,
-                            });
-                        }
-                        Err(reason) => {
-                            engine_warn!(
-                                "[articles-load] briefing failed urls={} elapsed_ms={} reason={}",
-                                ordered_urls.len(),
-                                load_started.elapsed().as_millis(),
-                                reason
-                            );
-                            engine_warn!("[briefing-loader] load failed: {}", reason);
-                            let _ = msg_tx.send(Msg::ArticlesLoadFailed { reason });
-                        }
-                    }
-                });
-            }
+
             Effect::LoadProcessingConfiguration {
                 request_id,
                 require_triage_context,
@@ -525,25 +453,7 @@ impl EffectRunner {
             Effect::PollAllSources => {
                 self.execute_poll_all_sources();
             }
-            Effect::LoadBriefingHistory => {
-                let msg_tx = self.msg_tx.clone();
-                let path = self.paths.briefing_history_path.clone();
-                thread::spawn(move || {
-                    // load_briefing_history already returns [] and logs on failure —
-                    // always send BriefingHistoryLoaded (no separate failure Msg).
-                    let entries = crate::load_briefing_history(&path);
-                    let _ = msg_tx.send(Msg::BriefingHistoryLoaded { entries });
-                });
-            }
-            Effect::SaveBriefingHistory { entries } => {
-                let path = self.paths.briefing_history_path.clone();
-                thread::spawn(move || {
-                    if let Err(e) = crate::save_briefing_history(&path, &entries) {
-                        engine_error!("[briefing-history] Save failed: {}", e);
-                        // Non-fatal: no Msg sent on failure
-                    }
-                });
-            }
+
             Effect::LoadBriefingCheckpoint => {
                 let msg_tx = self.msg_tx.clone();
                 let path = self.paths.briefing_checkpoint_path.clone();
@@ -777,7 +687,7 @@ mod context_order_tests {
         variables.insert("mid".to_string(), "m".to_string());
         let pairs = ordered_context_pairs(&PromptContextFile {
             meta: ContextMeta {
-                prompt_id: PromptId::AggregateBriefing.to_string(),
+                prompt_id: PromptId::ArticleSummary.to_string(),
                 schema_version: 1,
                 version: 1,
                 updated: "2026-06-15".to_string(),

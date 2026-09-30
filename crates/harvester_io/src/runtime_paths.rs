@@ -21,7 +21,6 @@ pub struct RuntimePaths {
     pub signal_candidate_overrides_path: PathBuf,
     pub seen_set_path: PathBuf,
     pub state_path: PathBuf,
-    pub briefing_history_path: PathBuf,
     pub briefing_checkpoint_path: PathBuf,
     pub entity_index_path: PathBuf,
     pub brave_seen_set_path: PathBuf,
@@ -43,7 +42,6 @@ impl RuntimePaths {
         let signal_candidate_overrides_path = output_dir.join(".signal_candidate_overrides.ron");
         let seen_set_path = output_dir.join(".seen_set.ron");
         let state_path = output_dir.join(".harvester_state.ron");
-        let briefing_history_path = output_dir.join(".briefing_history.ron");
         let briefing_checkpoint_path = output_dir.join(".briefing_checkpoint.ron");
         let entity_index_path = output_dir.join(".entity_index.ron");
         let brave_seen_set_path = output_dir.join(".brave_seen_set.ron");
@@ -61,7 +59,6 @@ impl RuntimePaths {
             signal_candidate_overrides_path,
             seen_set_path,
             state_path,
-            briefing_history_path,
             briefing_checkpoint_path,
             entity_index_path,
             brave_seen_set_path,
@@ -90,7 +87,6 @@ mod tests {
     use harvester_core::{ArticleSummaryResult, SummaryCache, SummaryCacheEntry, SummaryCacheKey};
     use harvester_engine::llm::prompt::PromptId;
     use harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI;
-    use std::path::PathBuf;
     use tempfile::tempdir;
 
     #[test]
@@ -109,20 +105,6 @@ mod tests {
         assert!(paths.seen_set_path.ends_with(".seen_set.ron"));
         assert!(paths.state_path.ends_with(".harvester_state.ron"));
         assert_eq!(paths.sources_path, dir.path().join(".sources.ron"));
-    }
-
-    #[test]
-    fn briefing_history_path_is_in_output_dir() {
-        let paths = RuntimePaths::new(
-            PathBuf::from("/tmp/out"),
-            PathBuf::from("/tmp/sources.ron"),
-            PathBuf::from("/tmp/contexts"),
-            PathBuf::from("/tmp/prompts"),
-        );
-        assert_eq!(
-            paths.briefing_history_path,
-            PathBuf::from("/tmp/out/.briefing_history.ron")
-        );
     }
 
     #[test]

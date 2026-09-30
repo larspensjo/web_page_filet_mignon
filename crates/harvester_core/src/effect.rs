@@ -2,8 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use harvester_engine::llm::dto::SummaryEntities;
-use harvester_engine::llm::prompt::{PromptId, PromptTemplateOwned, PromptVersion};
-use harvester_engine::llm::types::ModelId;
+use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::ArchiveDocAnnotations;
 use serde::{Deserialize, Serialize};
 
@@ -32,11 +31,6 @@ pub enum Effect {
         job_id: crate::JobId,
         url: String,
     },
-    /// Loads aggregate-briefing articles for the aggregate-briefing domain path.
-    LoadArticlesForBriefing {
-        ordered_urls: Vec<String>,
-        since_utc: Option<chrono::DateTime<chrono::Utc>>,
-    },
     LoadProcessingConfiguration {
         request_id: u64,
         require_triage_context: bool,
@@ -56,11 +50,8 @@ pub enum Effect {
         request_id: u64,
         prompt_id: PromptId,
         prompt_version: Option<PromptVersion>,
-        /// Per-run model override; `None` means use the stage/default model.
-        model_override: Option<ModelId>,
         input_content: String,
         context: Vec<(String, String)>,
-        template_override: Option<PromptTemplateOwned>,
         /// Extra key-value pairs inserted as individual template variables ({{key}}).
         /// NOT concatenated into the {{context}} block.
         extra_template_vars: Vec<(String, String)>,
@@ -124,12 +115,6 @@ pub enum Effect {
     },
     PersistSignalCandidateOverrides {
         overrides: std::collections::HashSet<crate::signal_candidate::OverrideKey>,
-    },
-    /// Load briefing history from disk at startup.
-    LoadBriefingHistory,
-    /// Save briefing history to disk after a successful briefing.
-    SaveBriefingHistory {
-        entries: Vec<crate::briefing::BriefingHistoryEntry>,
     },
     /// Load the briefing time checkpoint from disk at startup.
     LoadBriefingCheckpoint,

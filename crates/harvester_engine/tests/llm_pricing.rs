@@ -1,6 +1,5 @@
 use harvester_engine::llm::{
-    ModelPricing, PricingRegistry, TokenUsage, DEFAULT_BRIEFING_MODEL, DEFAULT_SUMMARY_MODEL,
-    DEFAULT_TRIAGE_MODEL,
+    ModelPricing, PricingRegistry, TokenUsage, DEFAULT_SUMMARY_MODEL, DEFAULT_TRIAGE_MODEL,
 };
 
 #[test]
@@ -8,11 +7,7 @@ fn default_pricing_covers_configured_default_models() {
     let registry = PricingRegistry::with_defaults();
     let usage = TokenUsage::new(10_000, 5_000);
 
-    for model in [
-        DEFAULT_TRIAGE_MODEL,
-        DEFAULT_SUMMARY_MODEL,
-        DEFAULT_BRIEFING_MODEL,
-    ] {
+    for model in [DEFAULT_TRIAGE_MODEL, DEFAULT_SUMMARY_MODEL] {
         assert!(
             registry.get(model).is_some(),
             "default model {model} must have pricing"

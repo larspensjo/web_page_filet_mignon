@@ -217,17 +217,14 @@ pub(super) fn format_startup_notice(mode_label: &str) -> String {
     format!("Harvester batch · starting ({mode_label}) · loading state and caches")
 }
 
-/// Converts microdollars to a human-readable dollar string with exact rounding.
-/// Examples: 0 -> "$0.00", 1234567 -> "$1.23", 50 -> "$0.00", 5000 -> "$0.01"
-pub(crate) fn microdollars_to_display(microdollars: u64) -> String {
-    let cents = (microdollars + 5000) / 10000; // Round to nearest cent
-    let dollars = cents / 100;
-    let remaining_cents = cents % 100;
-    format!("${}.{:02}", dollars, remaining_cents)
-}
-
 #[cfg(test)]
 mod tests {
+    fn microdollars_to_display(microdollars: u64) -> String {
+        let cents = (microdollars + 5000) / 10000; // Round to nearest cent
+        let dollars = cents / 100;
+        let remaining_cents = cents % 100;
+        format!("${}.{:02}", dollars, remaining_cents)
+    }
     use super::*;
     use harvester_core::{CompletedJobSnapshot, SessionState, SourcePollStat};
     use harvester_engine::{llm::PromptId, SourceId, SourceKind};

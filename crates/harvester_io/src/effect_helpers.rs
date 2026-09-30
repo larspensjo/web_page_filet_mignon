@@ -31,9 +31,6 @@ pub fn prompt_context_filename(prompt_id: PromptId) -> &'static str {
         PromptId::ArticleTriage => "article_triage.toml",
         PromptId::ArticleSummary => "article_summary.toml",
         PromptId::ArticleSignalCandidate => "article_signal_candidate.toml",
-        PromptId::AggregateBriefing => "aggregate_briefing.toml",
-        PromptId::BriefingExecutiveSummary => "aggregate_briefing.toml",
-        PromptId::BriefingNextItem => "aggregate_briefing.toml",
     }
 }
 
@@ -47,25 +44,10 @@ mod prompt_context_filename_tests {
             PromptId::ArticleTriage,
             PromptId::ArticleSummary,
             PromptId::ArticleSignalCandidate,
-            PromptId::AggregateBriefing,
-            PromptId::BriefingExecutiveSummary,
-            PromptId::BriefingNextItem,
         ] {
             let fname = prompt_context_filename(id);
             assert!(!fname.is_empty(), "missing filename for {id:?}");
         }
-    }
-
-    #[test]
-    fn briefing_stream_ids_reuse_aggregate_context_file() {
-        assert_eq!(
-            prompt_context_filename(PromptId::BriefingExecutiveSummary),
-            "aggregate_briefing.toml"
-        );
-        assert_eq!(
-            prompt_context_filename(PromptId::BriefingNextItem),
-            "aggregate_briefing.toml"
-        );
     }
 }
 
@@ -523,14 +505,7 @@ fn llm_error_reason(error: LlmCompletionError) -> String {
         LlmCompletionError::TemplateRenderFailed { detail } => {
             format!("template rendering failed: {}", detail)
         }
-        LlmCompletionError::UnsupportedModel { model, reason } => {
-            format!(
-                "unsupported model {:?}/{}: {}",
-                model.provider(),
-                model.model_name(),
-                reason
-            )
-        }
+
         LlmCompletionError::ValidationFailed { .. } => unreachable!(),
     }
 }
