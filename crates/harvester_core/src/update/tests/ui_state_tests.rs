@@ -1,5 +1,4 @@
 use super::*;
-use crate::WorkspaceView;
 use harvester_engine::llm::prompt::PromptId;
 
 #[test]
@@ -28,43 +27,21 @@ fn job_list_mode_set_same_value_is_noop() {
             mode: crate::JobListMode::SinceCheckpoint,
         },
     );
-    assert!(!state.view().dirty, "setting same mode must not mark dirty");
+    assert!(
+        !{
+            let mut snapshot = state.clone();
+            snapshot.consume_dirty()
+        },
+        "setting same mode must not mark dirty"
+    );
     let _ = view_before;
-}
-
-#[test]
-fn job_list_mode_persists_across_workspace_switches() {
-    init_logging();
-    let state = AppState::new();
-    let (state, _) = update(
-        state,
-        Msg::JobListModeSet {
-            mode: crate::JobListMode::Last24Hours,
-        },
-    );
-    let (state, _) = update(
-        state,
-        Msg::WorkspaceViewSet {
-            view: WorkspaceView::Trends,
-        },
-    );
-    assert_eq!(state.job_list_mode(), crate::JobListMode::Last24Hours);
-    let (state, _) = update(
-        state,
-        Msg::WorkspaceViewSet {
-            view: WorkspaceView::Blacklist,
-        },
-    );
-    assert_eq!(state.job_list_mode(), crate::JobListMode::Last24Hours);
-    let (state, _) = update(state, Msg::JobsSearchRevealRequested);
-    assert_eq!(state.job_list_mode(), crate::JobListMode::Last24Hours);
 }
 
 #[test]
 fn jobs_search_query_changed_updates_state() {
     init_logging();
     assert!(
-        !AppState::new().view().dirty,
+        !AppState::new().consume_dirty(),
         "new state should start clean so this dirty assertion is load-bearing"
     );
     let (state, effects) = update(
@@ -74,7 +51,10 @@ fn jobs_search_query_changed_updates_state() {
 
     assert!(effects.is_empty());
     assert_eq!(state.jobs_search_query(), "kube");
-    assert!(state.view().dirty);
+    assert!({
+        let mut snapshot = state.clone();
+        snapshot.consume_dirty()
+    });
 }
 
 #[test]
@@ -90,25 +70,10 @@ fn jobs_search_cleared_resets_query() {
 
     assert!(effects.is_empty());
     assert_eq!(state.jobs_search_query(), "");
-    assert!(state.view().dirty);
-}
-
-#[test]
-fn jobs_search_query_persists_across_workspace_switch() {
-    init_logging();
-    let (state, _) = update(
-        AppState::new(),
-        Msg::JobsSearchQueryChanged("rust".to_string()),
-    );
-    let (state, _) = update(
-        state,
-        Msg::WorkspaceViewSet {
-            view: WorkspaceView::Trends,
-        },
-    );
-    let (state, _) = update(state, Msg::JobsSearchRevealRequested);
-
-    assert_eq!(state.jobs_search_query(), "rust");
+    assert!({
+        let mut snapshot = state.clone();
+        snapshot.consume_dirty()
+    });
 }
 
 #[test]
@@ -134,7 +99,7 @@ fn jobs_search_query_persists_when_jobs_mutate() {
 }
 
 #[test]
-fn duplicate_resume_request_keeps_desktop_workspace_stable_during_run() {
+fn duplicate_resume_request_keeps_list_mode_stable_during_run() {
     init_logging();
     let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
     let (state, request_id) = tick_until_dispatch(state);
@@ -152,8 +117,8 @@ fn duplicate_resume_request_keeps_desktop_workspace_stable_during_run() {
     let state = prime_llm_metadata(state);
     let state = update(
         state,
-        Msg::WorkspaceViewSet {
-            view: WorkspaceView::Trends,
+        Msg::JobListModeSet {
+            mode: crate::JobListMode::Last24Hours,
         },
     )
     .0;
@@ -179,11 +144,11 @@ fn duplicate_resume_request_keeps_desktop_workspace_stable_during_run() {
             ..
         }
     )));
-    assert_eq!(state.workspace_view(), WorkspaceView::Trends);
+    assert_eq!(state.job_list_mode(), crate::JobListMode::Last24Hours);
 }
 
 #[test]
-fn job_selection_during_run_preserves_the_current_workspace() {
+fn job_selection_during_run_preserves_list_mode() {
     init_logging();
     let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
     let job_id = state
@@ -195,8 +160,8 @@ fn job_selection_during_run_preserves_the_current_workspace() {
         .job_id;
     let state = update(
         state,
-        Msg::WorkspaceViewSet {
-            view: WorkspaceView::Trends,
+        Msg::JobListModeSet {
+            mode: crate::JobListMode::Last24Hours,
         },
     )
     .0;
@@ -210,7 +175,8 @@ fn job_selection_during_run_preserves_the_current_workspace() {
 
     let (state, _) = update(state, Msg::JobSelected { job_id });
 
-    assert_eq!(state.workspace_view(), WorkspaceView::Trends);
+    assert_eq!(state.job_list_mode(), crate::JobListMode::Last24Hours);
+    assert_eq!(state.selected_job_id(), Some(job_id));
 }
 
 #[test]
@@ -219,64 +185,6 @@ fn ai_availability_defaults_to_available_before_startup_evidence_arrives() {
     let state = AppState::new();
     assert_eq!(state.ai_availability(), &crate::AiAvailability::Available);
     assert!(state.view().ai_unavailable_message.is_none());
-    assert!(state.view().ai_warning_banner.is_none());
-}
-
-fn complete_triage_with_settled_summaries(count: usize) -> AppState {
-    let mut state = complete_triage_state_for_test(count);
-    state = with_summary_metadata(state);
-    seed_summaries_for_triage_hashes(&mut state, count);
-    state
-}
-
-#[test]
-fn briefing_generate_enabled_false_when_triage_incomplete_or_corpus_empty() {
-    init_logging();
-    let view = AppState::new().view();
-
-    assert!(!view.briefing_generate_enabled);
-    assert_eq!(view.unfinished_work, crate::UnfinishedWork::Unknown);
-}
-
-#[test]
-fn briefing_generate_enabled_false_when_summaries_not_settled() {
-    init_logging();
-    let state = with_summary_metadata(complete_triage_state_for_test(2));
-
-    let view = state.view();
-    assert!(!view.briefing_generate_enabled);
-    assert_eq!(state.triage().completed_count(), 2);
-}
-
-#[test]
-fn briefing_generate_enabled_false_when_signal_scoring_in_progress() {
-    init_logging();
-    let mut state = complete_triage_with_settled_summaries(2);
-    state = with_signal_candidate_metadata(state);
-    let url = "https://triage-complete.com/0".to_string();
-    state
-        .signal_candidate_mut()
-        .enqueue(url.clone(), "fixture-input".to_string());
-    state.signal_candidate_mut().mark_scoring(&url, 99);
-
-    let view = state.view();
-    assert!(!view.briefing_generate_enabled);
-    assert!(matches!(
-        state.signal_candidate().state_for(&url),
-        Some(crate::signal_candidate::SignalCandidateState::Scoring { .. })
-    ));
-}
-
-#[test]
-fn retired_briefing_controls_are_empty_when_summaries_settled() {
-    init_logging();
-    let state = complete_triage_with_settled_summaries(2);
-
-    let view = state.view();
-    assert!(!view.briefing_generate_enabled);
-    assert!(!view.next_item_enabled);
-    assert!(view.briefing_blocked_reason.is_none());
-    assert_eq!(state.triage().completed_count(), 2);
 }
 
 #[test]
@@ -309,7 +217,6 @@ fn run_stays_enabled_but_resume_is_disabled_when_ai_is_unavailable() {
     );
 
     let view = state.view();
-    assert!(!view.briefing_generate_enabled);
     assert!(view.run_enabled);
     assert!(!view.resume_enabled);
     assert_eq!(
@@ -334,23 +241,9 @@ fn missing_api_key_blocks_triage_and_briefing_actions() {
     let view = state.view();
     assert!(view.run_enabled);
     assert!(!view.resume_enabled);
-    assert!(!view.briefing_generate_enabled);
     assert_eq!(
         view.ai_unavailable_message.as_deref(),
         Some("AI features unavailable: OPENAI_API_KEY is not set")
-    );
-    assert_eq!(
-        view.ai_warning_banner,
-        Some(crate::InlineWarningView {
-            title: "AI features are disabled".to_string(),
-            body: "Set OPENAI_API_KEY in the launch environment and restart to enable triage and briefing.".to_string(),
-        })
-    );
-    assert_eq!(
-        view.right_pane.triage_markdown.as_deref(),
-        Some(
-            "AI setup required\n\nTriage is disabled because `OPENAI_API_KEY` is not set.\n\nSet `OPENAI_API_KEY` in the launch environment and restart the app to enable article triage."
-        )
     );
 
     let pre_triage_before = state.pre_triage().resolved_included_urls().to_vec();
@@ -403,7 +296,12 @@ fn llm_metadata_without_triage_model_sets_ai_unavailable_reason() {
             reason: crate::AiUnavailableReason::NoTriageModel,
         }
     );
-    assert!(state.view().ai_warning_banner.is_none());
+    assert!(state
+        .view()
+        .ai_unavailable_message
+        .as_deref()
+        .unwrap()
+        .contains("no triage model"));
 }
 
 #[test]

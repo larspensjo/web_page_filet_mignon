@@ -448,7 +448,7 @@ fn url_lookup_aliases(url: &str) -> Vec<String> {
 }
 
 /// Scan `output_dir` for markdown articles and return lightweight metadata for each.
-/// Used by the entity index rebuild procedure to join against the triage/summary caches.
+/// Used by the batch replay benchmark to assemble its corpus metadata.
 /// Articles with missing or malformed frontmatter are skipped (logged as warnings by the inner scanner).
 pub fn scan_archive_article_metadata(output_dir: &Path) -> Result<Vec<ArchiveArticleMeta>, String> {
     let packages = scan_and_prepare_articles(output_dir, None)?;

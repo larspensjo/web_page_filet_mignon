@@ -1,59 +1,9 @@
 use super::{AppState, JobId, SessionState};
-use crate::entity_index::EntityIndex;
-use crate::preview::PreviewContentKind;
-use crate::tabs::TrendCategory;
-use crate::trends::EntityTrendData;
 use crate::view_model::LastPasteStats;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(super) struct MetricsState {
     pub(super) total_urls: usize,
-    pub(super) total_tokens: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(super) enum PreviewState {
-    #[default]
-    Empty,
-    Available {
-        job_id: JobId,
-        content: String,
-        kind: PreviewContentKind,
-    },
-    InProgress {
-        job_id: JobId,
-        content: String,
-    },
-    Unavailable {
-        job_id: JobId,
-    },
-}
-
-impl PreviewState {
-    pub(super) fn job_id(&self) -> Option<JobId> {
-        match self {
-            PreviewState::Empty => None,
-            PreviewState::Available { job_id, .. }
-            | PreviewState::InProgress { job_id, .. }
-            | PreviewState::Unavailable { job_id } => Some(*job_id),
-        }
-    }
-
-    pub(super) fn content(&self) -> Option<&str> {
-        match self {
-            PreviewState::Available { content, .. } | PreviewState::InProgress { content, .. } => {
-                Some(content.as_str())
-            }
-            PreviewState::Empty | PreviewState::Unavailable { .. } => None,
-        }
-    }
-
-    pub(super) fn content_kind(&self) -> Option<PreviewContentKind> {
-        match self {
-            PreviewState::Available { kind, .. } => Some(*kind),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -61,45 +11,20 @@ pub(super) struct UiState {
     pub(super) urls: Vec<String>,
     input_buffer: String,
     jobs_search_query: String,
-    pub(super) preview: PreviewState,
+    selected_job_id: Option<JobId>,
 }
 
 impl UiState {
-    pub(super) fn preview_content(&self) -> Option<&str> {
-        self.preview.content()
-    }
-
     pub(super) fn selected_job_id(&self) -> Option<JobId> {
-        self.preview.job_id()
+        self.selected_job_id
     }
-
-    pub(super) fn select_job(
-        &mut self,
-        job_id: JobId,
-        content: Option<(&str, PreviewContentKind)>,
-    ) -> bool {
-        let next_state = match content {
-            Some((text, kind)) => PreviewState::Available {
-                job_id,
-                content: text.to_owned(),
-                kind,
-            },
-            None => PreviewState::Unavailable { job_id },
-        };
-        self.set_preview_state(next_state)
+    pub(super) fn select_job(&mut self, job_id: JobId) -> bool {
+        let changed = self.selected_job_id != Some(job_id);
+        self.selected_job_id = Some(job_id);
+        changed
     }
-
-    pub(super) fn clear_preview(&mut self) -> bool {
-        self.set_preview_state(PreviewState::Empty)
-    }
-
-    pub(super) fn set_preview_state(&mut self, next: PreviewState) -> bool {
-        if self.preview == next {
-            false
-        } else {
-            self.preview = next;
-            true
-        }
+    pub(super) fn clear_selection(&mut self) {
+        self.selected_job_id = None;
     }
 
     pub(super) fn set_input_buffer(&mut self, text: String) {
@@ -136,14 +61,8 @@ impl AppState {
         self.last_observed_utc = Some(now);
     }
 
-    pub fn workspace_view(&self) -> crate::WorkspaceView {
-        self.workspace_view
-    }
     pub fn job_list_mode(&self) -> crate::JobListMode {
         self.job_list_mode
-    }
-    pub(crate) fn set_workspace_view(&mut self, view: crate::WorkspaceView) {
-        self.workspace_view = view;
     }
     pub(crate) fn set_job_list_mode(&mut self, mode: crate::JobListMode) {
         self.job_list_mode = mode;
@@ -260,24 +179,5 @@ impl AppState {
     pub(crate) fn set_last_paste_stats(&mut self, enqueued: usize, skipped: usize) {
         self.last_paste_stats = Some(LastPasteStats { enqueued, skipped });
         self.dirty = true;
-    }
-
-    pub(crate) fn set_active_trend_category(&mut self, category: TrendCategory) {
-        self.active_trend_category = category;
-        self.dirty = true;
-    }
-
-    pub fn active_trend_category(&self) -> TrendCategory {
-        self.active_trend_category
-    }
-
-    pub(crate) fn set_entity_index(&mut self, index: EntityIndex, window_weeks: u32, top_n: usize) {
-        self.entity_trend_data = Some(crate::trends::compute_trends(&index, window_weeks, top_n));
-        self.entity_index = Some(index);
-        self.dirty = true;
-    }
-
-    pub fn entity_trend_data(&self) -> Option<&EntityTrendData> {
-        self.entity_trend_data.as_ref()
     }
 }

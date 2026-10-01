@@ -1,34 +1,9 @@
-use std::path::PathBuf;
-
-use harvester_core::{update, AppState, Effect, JobResultKind, LinkDownloadState, Msg, Stage};
+use harvester_core::{update, AppState, Effect, JobResultKind, Msg, Stage};
 use harvester_engine::{ExtractedLink, LinkKind};
 
 fn submit_urls(state: AppState, input: &str) -> (AppState, Vec<Effect>) {
     let (state, _) = update(state, Msg::InputChanged(input.to_string()));
     update(state, Msg::UrlsSubmitted)
-}
-
-fn state_with_single_link() -> AppState {
-    let (state, _) = submit_urls(AppState::new(), "https://links.example\n");
-    let (state, _) = update(
-        state,
-        Msg::JobDone {
-            job_id: 1,
-            result: JobResultKind::Success,
-            content_preview: None,
-            extracted_links: vec![ExtractedLink {
-                url: "http://example.com/".to_string(),
-                text: Some("Example".to_string()),
-                kind: LinkKind::Hyperlink,
-            }],
-            fetched_utc: None,
-        },
-    );
-    state
-}
-
-fn init_logging() {
-    engine_logging::initialize_for_tests();
 }
 
 #[test]
@@ -39,7 +14,6 @@ fn urls_pasted_trims_and_ignores_empty() {
     let (mut next, _effects) = submit_urls(state, input);
     let view = next.view();
 
-    assert!(view.queued_urls.is_empty());
     assert_eq!(view.job_count, 2);
     assert!(next.consume_dirty());
 }
@@ -56,7 +30,6 @@ fn job_progress_updates_stage_tokens_and_bytes() {
             stage: Stage::Downloading,
             tokens: Some(10),
             bytes: Some(1024),
-            content_preview: None,
         },
     );
     let job1 = next
@@ -83,7 +56,6 @@ fn job_done_transitions_to_done() {
         Msg::JobDone {
             job_id: 1,
             result: JobResultKind::Success,
-            content_preview: None,
             extracted_links: Vec::new(),
             fetched_utc: None,
         },
@@ -119,52 +91,6 @@ fn jobs_are_ordered_by_btree_key() {
 }
 
 #[test]
-fn token_totals_accumulate_and_replace_previous_values() {
-    let state = AppState::new();
-    let (state, _effects) = submit_urls(state, "a.com\nb.com\n");
-
-    let (mut state, _effects) = update(
-        state,
-        Msg::JobProgress {
-            job_id: 1,
-            stage: Stage::Tokenizing,
-            tokens: Some(120),
-            bytes: None,
-            content_preview: None,
-        },
-    );
-    let view_after_first = state.view();
-    assert_eq!(view_after_first.total_tokens, 120);
-    assert!(state.consume_dirty());
-
-    let (mut state, _effects) = update(
-        state,
-        Msg::JobProgress {
-            job_id: 1,
-            stage: Stage::Tokenizing,
-            tokens: Some(150),
-            bytes: None,
-            content_preview: None,
-        },
-    );
-    assert_eq!(state.view().total_tokens, 150);
-    assert!(state.consume_dirty());
-
-    let (mut state, _effects) = update(
-        state,
-        Msg::JobProgress {
-            job_id: 2,
-            stage: Stage::Tokenizing,
-            tokens: Some(50),
-            bytes: None,
-            content_preview: None,
-        },
-    );
-    assert_eq!(state.view().total_tokens, 200);
-    assert!(state.consume_dirty());
-}
-
-#[test]
 fn job_done_attaches_link_records_and_dedupes() {
     let state = AppState::new();
     let (state, _effects) = submit_urls(state, "https://links.example\n");
@@ -173,7 +99,6 @@ fn job_done_attaches_link_records_and_dedupes() {
         Msg::JobDone {
             job_id: 1,
             result: JobResultKind::Success,
-            content_preview: None,
             extracted_links: vec![
                 ExtractedLink {
                     url: "HTTP://EXAMPLE.com".to_string(),
@@ -213,40 +138,4 @@ fn job_done_attaches_link_records_and_dedupes() {
     assert_eq!(links[2].index, 3);
     assert_eq!(links[2].url, "https://example.com/guide".to_string());
     assert!(links[2].anchor_text.is_none());
-}
-
-#[test]
-fn link_download_completed_updates_state() {
-    init_logging();
-    let path = PathBuf::from("linked/example.md");
-    let (state, _) = update(
-        state_with_single_link(),
-        Msg::LinkDownloadCompleted {
-            job_id: 1,
-            link_index: 0,
-            path: path.clone(),
-        },
-    );
-    let link = state.job_links(1).unwrap().first().unwrap();
-    match &link.download_state {
-        LinkDownloadState::Downloaded { path: stored } => assert_eq!(stored, &path),
-        other => panic!("expected downloaded state, got {:?}", other),
-    }
-}
-
-#[test]
-fn link_download_failed_sets_failed_state() {
-    init_logging();
-    let (state, _) = update(
-        state_with_single_link(),
-        Msg::LinkDownloadFailed {
-            job_id: 1,
-            link_index: 0,
-            error: "boom".into(),
-        },
-    );
-    let link = state.job_links(1).unwrap().first().unwrap();
-    assert!(
-        matches!(link.download_state, LinkDownloadState::Failed { ref error } if error == "boom")
-    );
 }

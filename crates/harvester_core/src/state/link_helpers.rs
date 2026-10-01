@@ -28,24 +28,6 @@ pub(super) fn normalize_extracted_link(link: &str) -> String {
     }
 }
 
-pub(super) fn domain_from_url(url: &str) -> String {
-    let trimmed = url.trim();
-    let without_scheme = trimmed
-        .find("://")
-        .map(|pos| &trimmed[pos + 3..])
-        .unwrap_or(trimmed);
-    let host = without_scheme
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or(without_scheme)
-        .trim_end_matches('/');
-    if host.is_empty() {
-        trimmed.to_string()
-    } else {
-        host.to_string()
-    }
-}
-
 pub(super) fn map_job_filter_status(entry: &crate::ArticleFilterEntry) -> JobFilterStatus {
     match entry.auto_verdict {
         crate::AutoVerdict::HardExclude => JobFilterStatus::HardExcluded {
@@ -67,8 +49,6 @@ pub(super) fn build_link_rows(records: &[LinkRecord]) -> Vec<LinkRowView> {
             url: record.url.clone(),
             label: link_label_for_record(record),
             kind: record.kind.clone(),
-            download_state: record.download_state.clone(),
-            age_suspect: record.age_estimate.is_some(),
         })
         .collect()
 }

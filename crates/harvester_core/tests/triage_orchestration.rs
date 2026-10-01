@@ -28,7 +28,6 @@ fn add_completed_job(state: AppState, url: &str) -> (AppState, u64) {
         Msg::JobDone {
             job_id,
             result: JobResultKind::Success,
-            content_preview: None,
             extracted_links: Vec::new(),
             fetched_utc: None,
         },
@@ -240,7 +239,7 @@ fn triage_articles_loaded_empty_fails() {
         state.batch_observation().pre_triage_phase,
         harvester_core::PreTriagePhase::Failed { .. }
     ));
-    assert!(!state.view().triage_results_reorder_suppressed);
+    assert!(!state.triage_reorder_suppressed());
 }
 
 #[test]
@@ -249,7 +248,7 @@ fn triage_load_failed_transitions_to_failed() {
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let state = simulate_triage_load_failed(state, "boom");
     assert!(!state.can_start_triage_from_pre_triage());
-    assert!(!state.view().triage_results_reorder_suppressed);
+    assert!(!state.triage_reorder_suppressed());
 }
 
 fn triage_flow_with_two_articles() -> (AppState, Vec<LoadedArticle>) {
@@ -553,7 +552,7 @@ fn restore_completed_jobs_resets_triage() {
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let snapshot = state.completed_jobs_snapshot();
     let (state, _) = update(state, Msg::RestoreCompletedJobs(snapshot));
-    assert!(!state.view().triage_results_reorder_suppressed);
+    assert!(!state.triage_reorder_suppressed());
 }
 
 #[test]
@@ -772,7 +771,6 @@ fn resume_run_enters_the_pipeline_with_retired_briefing_controls_disabled() {
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let state = with_triage_metadata_ready(state);
     let state = simulate_triage_loaded(state, sample_articles(&["https://one.example"]));
-    assert!(!state.view().briefing_generate_enabled);
     let (state, effects) = request_resume(state, sample_articles(&["https://one.example"]));
     assert!(effects.iter().any(|e| matches!(
         e,

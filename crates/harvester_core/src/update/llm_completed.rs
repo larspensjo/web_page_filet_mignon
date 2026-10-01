@@ -22,7 +22,6 @@ pub(super) fn handle(
         state.record_llm_usage_from_metadata(run_metadata);
     }
 
-    let mut effects = Vec::new();
     if state
         .signal_candidate()
         .url_for_request(request_id)
@@ -32,16 +31,16 @@ pub(super) fn handle(
         handle_signal_candidate_completion(state, request_id, &result);
     } else if let Some(article_idx) = state.briefing().find_article_by_request_id(request_id) {
         note_article_model_result(state, &result);
-        handle_summary_completion(state, article_idx, &result, &mut effects);
+        handle_summary_completion(state, article_idx, &result);
     } else if let Some(article_idx) = state.triage().find_article_by_request_id(request_id) {
         note_article_model_result(state, &result);
-        handle_triage_completion(state, article_idx, &result, &mut effects);
+        handle_triage_completion(state, article_idx, &result);
         let article = &state.triage().articles()[article_idx];
         let identity = (article.url.clone(), article.content_hash.clone());
         super::waves::triage_changed(state, &identity.0, &identity.1);
     }
 
-    effects
+    Vec::new()
 }
 
 fn note_article_model_result(state: &mut AppState, result: &LlmResultKind) {
@@ -64,7 +63,6 @@ fn note_owned_quota(state: &mut AppState, result: &LlmResultKind) {
                 state.halt_model_dispatch(ModelDispatchHalt::SessionQuota(reason.clone()));
             }
             QuotaOrigin::Provider => {
-                state.note_provider_out_of_credits(reason.clone());
                 state.halt_model_dispatch(ModelDispatchHalt::ProviderCredits(reason.clone()));
             }
         }
@@ -106,12 +104,7 @@ fn record_llm_result(state: &mut AppState, request_id: u64, result: &LlmResultKi
     }
 }
 
-fn handle_summary_completion(
-    state: &mut AppState,
-    article_idx: usize,
-    result: &LlmResultKind,
-    effects: &mut Vec<Effect>,
-) {
+fn handle_summary_completion(state: &mut AppState, article_idx: usize, result: &LlmResultKind) {
     match result {
         LlmResultKind::Success {
             output_json,
@@ -142,7 +135,6 @@ fn handle_summary_completion(
                 state
                     .briefing_mut()
                     .complete_article(article_idx, summary_result.clone());
-                state.refresh_selected_preview();
 
                 let cache_key_result = match lookup_key.clone() {
                     Some(key) => Ok(key),
@@ -176,10 +168,8 @@ fn handle_summary_completion(
                             );
                         }
 
-                        let article_entities = summary_result.entities.clone();
                         let article_url = state.briefing().articles()[article_idx].url.clone();
-                        let article_fetched_utc =
-                            state.briefing().articles()[article_idx].fetched_utc.clone();
+
                         state.store_summary_result(
                             store_key.clone(),
                             summary_result,
@@ -199,13 +189,6 @@ fn handle_summary_completion(
                             store_key.context_hash,
                             short_hash(&content_hash),
                         );
-                        effects.push(Effect::UpsertEntityIndexEntry {
-                            url: article_url.clone(),
-                            fetched_utc: article_fetched_utc,
-                            content_hash: Some(content_hash.clone()),
-                            summary_entities: Some(article_entities),
-                            themes: None,
-                        });
                         let _ = try_enqueue(state, &article_url);
                     }
                     Err(err) => {
@@ -239,12 +222,7 @@ fn handle_summary_completion(
     }
 }
 
-fn handle_triage_completion(
-    state: &mut AppState,
-    article_idx: usize,
-    result: &LlmResultKind,
-    effects: &mut Vec<Effect>,
-) {
+fn handle_triage_completion(state: &mut AppState, article_idx: usize, result: &LlmResultKind) {
     match result {
         LlmResultKind::Success {
             output_json,
@@ -254,8 +232,7 @@ fn handle_triage_completion(
         } => match validate_triage(output_json) {
             Ok(triage) => {
                 let content_hash = state.triage().articles()[article_idx].content_hash.clone();
-                let url = state.triage().articles()[article_idx].url.clone();
-                let fetched_utc = state.triage().articles()[article_idx].fetched_utc.clone();
+
                 let result = ArticleTriageResult {
                     category: triage.category,
                     priority: triage.priority.value(),
@@ -265,7 +242,7 @@ fn handle_triage_completion(
                     output_tokens: *output_tokens,
                 };
                 let triage_priority = result.priority;
-                let themes = result.tags.clone();
+
                 let triage_model =
                     state.store_triage_result_with_model(&content_hash, result.clone());
                 state.triage_mut().complete_article_with_model(
@@ -273,13 +250,6 @@ fn handle_triage_completion(
                     result.clone(),
                     triage_model,
                 );
-                effects.push(Effect::UpsertEntityIndexEntry {
-                    url,
-                    fetched_utc,
-                    content_hash: Some(content_hash),
-                    summary_entities: None,
-                    themes: Some(themes),
-                });
                 let article_url = state.triage().articles()[article_idx].url.clone();
                 engine_info!(
                     "[signal-dispatch] triage completed url={} triage_priority={} signal_state_present_before_enqueue={}",
@@ -291,7 +261,6 @@ fn handle_triage_completion(
                         .is_some(),
                 );
                 let _ = try_enqueue(state, &article_url);
-                state.refresh_selected_preview();
             }
             Err(err) => {
                 state

@@ -479,7 +479,6 @@ fn synchronous_staggered_downloads_dispatch_triage_and_settle_once() {
                 stage: harvester_core::Stage::Downloading,
                 tokens: None,
                 bytes: Some(1_024),
-                content_preview: None,
             },
         )
         .0;
@@ -496,7 +495,6 @@ fn synchronous_staggered_downloads_dispatch_triage_and_settle_once() {
         Msg::JobDone {
             job_id: jobs[0],
             result: JobResultKind::Success,
-            content_preview: None,
             extracted_links: Vec::new(),
             fetched_utc: articles[0].fetched_utc.clone(),
         },
@@ -560,7 +558,6 @@ fn synchronous_staggered_downloads_dispatch_triage_and_settle_once() {
         Msg::JobDone {
             job_id: jobs[1],
             result: JobResultKind::Success,
-            content_preview: None,
             extracted_links: Vec::new(),
             fetched_utc: articles[1].fetched_utc.clone(),
         },
@@ -699,7 +696,6 @@ fn test_should_log_batch_msg_filters_downloading_progress() {
         stage: harvester_core::Stage::Downloading,
         tokens: None,
         bytes: Some(4096),
-        content_preview: None,
     };
     assert!(!should_log_batch_msg(&downloading));
 
@@ -708,7 +704,6 @@ fn test_should_log_batch_msg_filters_downloading_progress() {
         stage: harvester_core::Stage::Tokenizing,
         tokens: Some(10),
         bytes: None,
-        content_preview: None,
     };
     assert!(should_log_batch_msg(&tokenizing));
 }

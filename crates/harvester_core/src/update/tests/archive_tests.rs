@@ -2581,7 +2581,6 @@ fn view_exposes_archive_token_estimate_and_article_counts() {
             stage: Stage::Tokenizing,
             tokens: Some(700),
             bytes: None,
-            content_preview: None,
         },
     );
     let (state, _) = update(
@@ -2591,7 +2590,7 @@ fn view_exposes_archive_token_estimate_and_article_counts() {
             result: JobResultKind::Failed {
                 reason: "boom".to_string(),
             },
-            content_preview: None,
+
             extracted_links: Vec::new(),
             fetched_utc: None,
         },
@@ -2606,7 +2605,6 @@ fn view_exposes_archive_token_estimate_and_article_counts() {
             stage: Stage::Tokenizing,
             tokens: Some(800),
             bytes: None,
-            content_preview: None,
         },
     );
 

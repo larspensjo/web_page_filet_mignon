@@ -14,7 +14,6 @@ use crate::decode::decode_html;
 use crate::fetch::{ChannelProgressSink, FetchSettings, Fetcher, ReqwestFetcher};
 use crate::frontmatter::build_markdown_document;
 use crate::persist::{AtomicFileWriter, PersistError};
-use crate::preview::prepare_preview_content;
 use crate::quota::{QuotaTracker, SessionQuotas};
 use crate::token::TokenCounter;
 use crate::url_policy::UrlPolicy;
@@ -354,14 +353,11 @@ async fn run_job(
         return Err(failure);
     }
 
-    let preview_content = prepare_preview_content(&markdown);
-
     let _ = event_tx.send(EngineEvent::Progress(JobProgress {
         job_id,
         stage: Stage::Converting,
         bytes: None,
         tokens: None,
-        content_preview: Some(preview_content.clone()),
     }));
 
     if cancel_token.is_cancelled() {
@@ -396,7 +392,6 @@ async fn run_job(
         stage: Stage::Tokenizing,
         bytes: None,
         tokens: Some(tokens),
-        content_preview: None,
     }));
 
     if cancel_token.is_cancelled() {
@@ -447,7 +442,6 @@ async fn run_job(
                     final_url: fetch_output.metadata.final_url,
                     tokens: Some(token_count),
                     bytes_written: Some(doc_for_write.len() as u64),
-                    content_preview: Some(preview_content),
                     extracted_links: extracted_article.links,
                     fetched_utc: Some(fetched_utc_str),
                 }),

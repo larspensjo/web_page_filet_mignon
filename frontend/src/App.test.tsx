@@ -123,6 +123,41 @@ describe("job list", () => {
 		}
 	});
 
+	it("pins the reduced IPC 13 snapshot in every bridge fixture", () => {
+		const fields = [
+			"job_count",
+			"desktop_job_list",
+			"last_paste_stats",
+			"token_limit",
+			"archive_token_estimate",
+			"archive_filtered_count",
+			"archive_partial_coverage",
+			"raw_unprocessed_count",
+			"stop_finish_button",
+			"signal_candidate_rows",
+			"ai_unavailable_message",
+			"run_progress",
+			"archive_enabled",
+			"run_state",
+			"run_completion_notice",
+			"run_enabled",
+			"resume_enabled",
+			"resume_disabled_reason",
+			"unfinished_work",
+			"reprocess_notice",
+			"checkpoint_status_message",
+			"llm_quota",
+			"right_pane",
+		].sort();
+		for (const [, fixture] of reviewFixtures) {
+			expect(fixture.schema_version).toBe(13);
+			expect(Object.keys(fixture.view).sort()).toEqual(fields);
+			expect(Object.keys(fixture.view.right_pane)).toEqual([
+				"summary_markdown",
+			]);
+		}
+	});
+
 	it("renders exactly the rows core sent", async () => {
 		snapshot = {
 			...corpus,
@@ -1143,14 +1178,12 @@ describe("modals and chrome", () => {
 		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 	});
 
-	it("Ctrl+F dispatches RevealJobsSearch and focuses the search box locally", async () => {
+	it("Ctrl+F focuses the search box locally without dispatching an intent", async () => {
 		await renderWithCommands();
 		const input = screen.getByRole("textbox", { name: "Search jobs" });
 		expect(document.activeElement).not.toBe(input);
 		fireEvent.keyDown(window, { key: "f", ctrlKey: true });
-		expect(intents()).toEqual([
-			["dispatch_intent", { payload: { type: "RevealJobsSearch" } }],
-		]);
+		expect(intents()).toEqual([]);
 		expect(document.activeElement).toBe(input);
 	});
 

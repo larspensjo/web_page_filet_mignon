@@ -1,19 +1,12 @@
 {
   "generation": 1,
-  "schema_version": 12,
+  "schema_version": 13,
   "view": {
     "ai_unavailable_message": null,
-    "ai_warning_banner": null,
     "archive_enabled": false,
     "archive_filtered_count": 0,
     "archive_partial_coverage": null,
     "archive_token_estimate": 0,
-    "blacklist": {
-      "blacklisted_count": 0,
-      "rows": []
-    },
-    "briefing_blocked_reason": null,
-    "briefing_generate_enabled": false,
     "checkpoint_status_message": null,
     "desktop_job_list": {
       "hidden_without_fetch_time": 0,
@@ -25,15 +18,8 @@
       "truncated": false,
       "visible_count": 0
     },
-    "dirty": true,
-    "indirect_link_summary": null,
-    "is_pre_triage_reviewing": false,
     "job_count": 0,
-    "job_list_mode": "SinceCheckpoint",
     "last_paste_stats": null,
-    "left_pane": {
-      "jobs_search_query": ""
-    },
     "llm_quota": {
       "label": "LLM calls 0 / unlimited",
       "limit": null,
@@ -41,14 +27,6 @@
       "severity": "Normal",
       "used": 0
     },
-    "llm_usage_by_model": [],
-    "next_item_enabled": false,
-    "poll_indirect_links_enabled": false,
-    "preview_context": null,
-    "preview_header": null,
-    "preview_source": null,
-    "preview_text": null,
-    "queued_urls": [],
     "raw_unprocessed_count": 0,
     "reprocess_notice": {
       "articles": 151,
@@ -57,14 +35,7 @@
     "resume_disabled_reason": "A run is already in progress.",
     "resume_enabled": false,
     "right_pane": {
-      "poll_stats_markdown": null,
-      "summary_markdown": null,
-      "trends": {
-        "active_category": "Companies",
-        "category_data": null,
-        "is_loading": true
-      },
-      "triage_markdown": null
+      "summary_markdown": null
     },
     "run_completion_notice": null,
     "run_enabled": false,
@@ -135,10 +106,6 @@
       ]
     },
     "run_state": "Active",
-    "selected_job_id": null,
-    "selected_url": null,
-    "session": "Idle",
-    "signal_candidate_preview": null,
     "signal_candidate_rows": [],
     "stop_finish_button": {
       "Enabled": {
@@ -146,9 +113,6 @@
       }
     },
     "token_limit": 100000,
-    "total_tokens": 0,
-    "triage_blocked_reason": null,
-    "triage_results_reorder_suppressed": true,
     "unfinished_work": {
       "Known": {
         "articles_with_work": 0,
@@ -160,8 +124,7 @@
         "needs_triage": 0,
         "not_eligible": 0
       }
-    },
-    "workspace_view": "Review"
+    }
   },
   "fatal_message": null
 }

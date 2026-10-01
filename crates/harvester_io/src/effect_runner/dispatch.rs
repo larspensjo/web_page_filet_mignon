@@ -1,6 +1,5 @@
 #[cfg(test)]
 use std::collections::HashMap;
-use std::fs;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
@@ -14,14 +13,10 @@ use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::prompt_context::ContextMeta;
 use harvester_engine::llm::prompt_context::PromptContextFile;
 use harvester_engine::llm::LlmCommand;
-use harvester_engine::{
-    build_triage_archive, import_saved_webpages, is_confined_to, scan_archive_article_metadata,
-    ImportOptions,
-};
+use harvester_engine::{build_triage_archive, import_saved_webpages, ImportOptions};
 
-use super::worker::{run_triage_refresh_load, EntityIndexWorkerMsg};
+use super::worker::run_triage_refresh_load;
 use super::{truncate_url_for_log, EffectRunner};
-use crate::effect_helpers::download_link_page;
 
 pub(crate) fn ordered_context_pairs(ctx_file: &PromptContextFile) -> Vec<(String, String)> {
     let mut pairs: Vec<(String, String)> = ctx_file
@@ -180,70 +175,6 @@ impl EffectRunner {
             }
             Effect::OpenUrlInBrowser { url } => {
                 self.platform_handler.open_url(&url);
-            }
-            Effect::DownloadLinkedPage {
-                job_id,
-                link_index,
-                url,
-            } => {
-                engine_info!(
-                    "DownloadLinkedPage job_id={} link_index={} url={}",
-                    job_id,
-                    link_index,
-                    url
-                );
-                let msg_tx = self.msg_tx.clone();
-                let output_dir = self.paths.output_dir.clone();
-                let url_policy = self.url_policy.clone();
-                let fetch_settings = self.fetch_settings.clone();
-                thread::spawn(move || {
-                    match download_link_page(&url, &output_dir, &url_policy, &fetch_settings) {
-                        Ok(path) => {
-                            engine_info!("Linked page saved: {}", path.display());
-                            let _ = msg_tx.send(Msg::LinkDownloadCompleted {
-                                job_id,
-                                link_index,
-                                path,
-                            });
-                        }
-                        Err(error) => {
-                            engine_warn!("Linked page download failed: {}", error);
-                            let _ = msg_tx.send(Msg::LinkDownloadFailed {
-                                job_id,
-                                link_index,
-                                error,
-                            });
-                        }
-                    }
-                });
-            }
-            Effect::DeleteLinkedPage {
-                job_id,
-                link_index,
-                path,
-            } => {
-                engine_info!(
-                    "Delete linked page job_id={} link_index={} path={}",
-                    job_id,
-                    link_index,
-                    path.display()
-                );
-                let msg_tx = self.msg_tx.clone();
-                let output_dir = self.paths.output_dir.clone();
-                thread::spawn(move || {
-                    if is_confined_to(&path, &output_dir) {
-                        let absolute_path = output_dir.join(&path);
-                        let _ = fs::remove_file(&absolute_path);
-                    } else {
-                        engine_warn!(
-                            "DeleteLinkedPage rejected unsafe path job_id={} link_index={} path={}",
-                            job_id,
-                            link_index,
-                            path.display()
-                        );
-                    }
-                    let _ = msg_tx.send(Msg::LinkDeleted { job_id, link_index });
-                });
             }
             Effect::RequestLlmCompletion {
                 request_id,
@@ -481,156 +412,6 @@ impl EffectRunner {
                                 .send(Msg::BriefingCheckpointSaveFailed { save_id, reason: e });
                         }
                     }
-                });
-            }
-            Effect::LoadEntityIndex => {
-                let path = self.paths.entity_index_path.clone();
-                let msg_tx = self.msg_tx.clone();
-                thread::spawn(move || {
-                    let index = crate::entity_index_store::load_entity_index(&path);
-                    // `load_entity_index` already logs and returns default on parse/IO errors.
-                    // Distinguish parse failures from successful-but-empty by checking if the
-                    // file exists. If it does not exist, treat as a fresh (empty) index — loaded,
-                    // not failed.
-                    engine_info!(
-                        "[entity-index] LoadEntityIndex: {} entries",
-                        index.entries.len()
-                    );
-                    let _ = msg_tx.send(Msg::EntityIndexLoaded { index });
-                });
-            }
-            Effect::RebuildEntityIndex => {
-                let msg_tx = self.msg_tx.clone();
-                let output_dir = self.paths.output_dir.clone();
-                let triage_cache_path = self.paths.triage_cache_path.clone();
-                let summary_cache_path = self.paths.summary_cache_path.clone();
-                let entity_index_path = self.paths.entity_index_path.clone();
-                thread::spawn(move || {
-                    engine_info!("[entity-index] starting rebuild");
-
-                    // Step 1: scan archive for article metadata (url, fetched_utc, content_hash)
-                    let article_metas = match scan_archive_article_metadata(&output_dir) {
-                        Ok(metas) => metas,
-                        Err(e) => {
-                            engine_error!("[entity-index] rebuild: scan failed: {}", e);
-                            let _ = msg_tx.send(Msg::EntityIndexRebuildFailed {
-                                reason: format!("scan failed: {e}"),
-                            });
-                            return;
-                        }
-                    };
-
-                    // Step 2: load triage cache and build content_hash → tags map.
-                    // Use the first entry per content_hash (any version is fine for rebuild).
-                    let triage_cache =
-                        match crate::triage_cache_store::load_triage_cache(&triage_cache_path) {
-                            Ok(cache) => cache,
-                            Err(error) => {
-                                let reason = error.to_string();
-                                let _ = msg_tx.send(Msg::ResultStoreUnavailable {
-                                    reason: reason.clone(),
-                                });
-                                let _ = msg_tx.send(Msg::EntityIndexRebuildFailed { reason });
-                                return;
-                            }
-                        };
-                    let mut themes_map: std::collections::HashMap<String, Vec<String>> =
-                        std::collections::HashMap::new();
-                    for (key, entry) in triage_cache.iter() {
-                        themes_map
-                            .entry(key.content_hash.clone())
-                            .or_insert_with(|| entry.result.tags.clone());
-                    }
-
-                    // Step 3: load summary cache and build content_hash → entities map.
-                    // Only V4+ entries will have non-empty entities; older entries → empty.
-                    let summary_cache =
-                        match crate::summary_cache_store::load_summary_cache(&summary_cache_path) {
-                            Ok(cache) => cache,
-                            Err(error) => {
-                                let reason = error.to_string();
-                                let _ = msg_tx.send(Msg::ResultStoreUnavailable {
-                                    reason: reason.clone(),
-                                });
-                                let _ = msg_tx.send(Msg::EntityIndexRebuildFailed { reason });
-                                return;
-                            }
-                        };
-                    let mut entities_map: std::collections::HashMap<
-                        String,
-                        harvester_engine::llm::SummaryEntities,
-                    > = std::collections::HashMap::new();
-                    for (key, entry) in summary_cache.iter() {
-                        entities_map
-                            .entry(key.content_hash.clone())
-                            .or_insert_with(|| entry.result.entities.clone());
-                    }
-
-                    // Step 4: build EntityIndex by joining on content_hash.
-                    let mut index =
-                        crate::entity_index_store::load_entity_index(&entity_index_path);
-                    for meta in &article_metas {
-                        let content_hash = meta.content_hash.as_deref().unwrap_or("");
-                        let entities = entities_map.get(content_hash);
-                        let themes = themes_map.get(content_hash);
-                        let entry = harvester_core::entity_index::EntityIndexEntry {
-                            fetched_utc: meta.fetched_utc.clone(),
-                            content_hash: meta.content_hash.clone(),
-                            companies: entities.map(|e| e.companies.clone()).unwrap_or_default(),
-                            technologies: entities
-                                .map(|e| e.technologies.clone())
-                                .unwrap_or_default(),
-                            products: entities.map(|e| e.products.clone()).unwrap_or_default(),
-                            themes: themes.cloned().unwrap_or_default(),
-                        };
-                        index.entries.insert(meta.url.clone(), entry);
-                    }
-
-                    // Step 5: atomically write the rebuilt index.
-                    if let Err(e) =
-                        crate::entity_index_store::save_entity_index(&entity_index_path, &index)
-                    {
-                        engine_error!("[entity-index] rebuild: save failed: {}", e);
-                        let _ = msg_tx.send(Msg::EntityIndexRebuildFailed {
-                            reason: format!("save failed: {e}"),
-                        });
-                        return;
-                    }
-
-                    engine_info!(
-                        "[entity-index] rebuild complete: {} entries",
-                        index.entries.len()
-                    );
-                    let _ = msg_tx.send(Msg::EntityIndexRebuilt { index });
-                });
-            }
-            Effect::UpsertEntityIndexEntry {
-                url,
-                fetched_utc,
-                content_hash,
-                summary_entities,
-                themes,
-            } => {
-                let patch = crate::entity_index_store::EntityIndexPatch {
-                    fetched_utc,
-                    content_hash,
-                    summary_entities,
-                    themes,
-                };
-                if let Err(e) = self
-                    .entity_index_worker_tx
-                    .send(EntityIndexWorkerMsg::Upsert { url, patch })
-                {
-                    engine_error!("[entity-index] worker channel closed, upsert dropped: {e}");
-                }
-            }
-
-            // --- Window size persistence ---
-            Effect::PersistWindowSize { width, height } => {
-                let path = self.paths.state_path.clone();
-                thread::spawn(move || {
-                    crate::persist_window_size(&path, width, height);
-                    engine_info!("[window-size] Persisted {}x{} to {:?}", width, height, path);
                 });
             }
             Effect::PersistDesktopWindowSize { width, height } => {

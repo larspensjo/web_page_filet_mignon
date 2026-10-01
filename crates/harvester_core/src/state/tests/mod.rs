@@ -1,6 +1,7 @@
 use super::*;
 #[cfg(test)]
 use crate::fixture_support::ManualPreTriageDecisions;
+use crate::preview;
 
 #[cfg(test)]
 mod app_state_tests {
@@ -11,28 +12,6 @@ mod app_state_tests {
         SignalCandidateRow, DESKTOP_JOB_LIST_MAX_ROWS,
     };
     use harvester_engine::{ExtractedLink, LinkKind};
-
-    #[test]
-    fn job_done_success_stores_preview() {
-        let mut state = AppState::new();
-        state.jobs.insert(
-            1,
-            JobState {
-                url: "https://example.com".to_string(),
-                stage: Stage::Queued,
-                ..Default::default()
-            },
-        );
-        state.apply_done(
-            1,
-            JobResultKind::Success,
-            Some("preview content".to_string()),
-            Vec::new(),
-            None,
-        );
-        let job = state.jobs.get(&1).expect("job exists");
-        assert_eq!(job.content_preview(), Some("preview content"));
-    }
 
     #[test]
     fn batch_observation_poll_in_progress_tracks_source_poll_state() {
@@ -105,10 +84,10 @@ mod app_state_tests {
         state.end_poll();
         assert_eq!(state.poll_pipeline_job_total(), Some(2));
 
-        state.apply_done(1, JobResultKind::Success, None, Vec::new(), None);
+        state.apply_done(1, JobResultKind::Success, Vec::new(), None);
         assert_eq!(state.poll_pipeline_job_total(), Some(2));
 
-        state.apply_done(2, JobResultKind::Success, None, Vec::new(), None);
+        state.apply_done(2, JobResultKind::Success, Vec::new(), None);
         assert_eq!(state.poll_pipeline_job_total(), None);
     }
 
@@ -207,54 +186,25 @@ mod app_state_tests {
     }
 
     #[test]
-    fn job_done_failure_clears_preview() {
-        let mut state = AppState::new();
-        state.jobs.insert(
-            2,
-            JobState {
-                url: "https://example.com".to_string(),
-                stage: Stage::Queued,
-                content_preview: Some("old preview".to_string()),
-                ..Default::default()
-            },
-        );
-        state.apply_done(
-            2,
-            JobResultKind::Failed {
-                reason: "ignored".to_string(),
-            },
-            Some("ignored".to_string()),
-            Vec::new(),
-            None,
-        );
-        let job = state.jobs.get(&2).expect("job exists");
-        assert_eq!(job.content_preview(), None);
-    }
-
-    #[test]
-    fn selecting_job_with_preview_updates_view_model() {
+    fn selecting_completed_job_updates_selected_record() {
         let mut state = AppState::new();
         state.jobs.insert(
             3,
             JobState {
                 url: "https://example.com/path".to_string(),
                 stage: Stage::Done,
-                content_preview: Some("preview content".to_string()),
                 ..Default::default()
             },
         );
         let (state, _) = update(state, Msg::JobSelected { job_id: 3 });
         let view = state.view();
-        assert!(view
-            .preview_text
-            .as_deref()
-            .unwrap_or("")
-            .contains("No Analysis Available Yet"));
-        assert_eq!(view.preview_header.as_ref().unwrap().domain, "example.com");
+        let selected = view.desktop_job_list.selected_job.unwrap();
+        assert_eq!(selected.job_id, 3);
+        assert_eq!(selected.url, "https://example.com/path");
     }
 
     #[test]
-    fn selecting_job_without_preview_only_sets_header() {
+    fn selecting_in_progress_job_exposes_its_stage() {
         let mut state = AppState::new();
         state.jobs.insert(
             4,
@@ -266,14 +216,10 @@ mod app_state_tests {
         );
         let (state, _) = update(state, Msg::JobSelected { job_id: 4 });
         let view = state.view();
-        assert!(view
-            .preview_text
-            .as_deref()
-            .unwrap_or("")
-            .contains("No Analysis Available Yet"));
-        let header = view.preview_header.expect("header should exist");
-        assert_eq!(header.domain, "sub.example.net");
-        assert_eq!(header.stage, Stage::Downloading);
+        let selected = view.desktop_job_list.selected_job.unwrap();
+        assert_eq!(selected.job_id, 4);
+        assert_eq!(selected.url, "http://sub.example.net/a");
+        assert_eq!(selected.stage, Stage::Downloading);
     }
 
     #[test]
@@ -284,7 +230,6 @@ mod app_state_tests {
             JobState {
                 url: "https://repeat.example".to_string(),
                 stage: Stage::Done,
-                content_preview: Some("d".to_string()),
                 ..Default::default()
             },
         );
@@ -294,132 +239,6 @@ mod app_state_tests {
         let (state, _) = update(state, Msg::JobSelected { job_id: 5 });
         let mut state = state;
         assert!(!state.consume_dirty());
-    }
-
-    #[test]
-    fn domain_from_url_handles_various_inputs() {
-        assert_eq!(domain_from_url("https://example.com/"), "example.com");
-        assert_eq!(domain_from_url("http://foo.bar/baz?qux"), "foo.bar");
-        assert_eq!(domain_from_url("example.org/path"), "example.org");
-        assert_eq!(domain_from_url(""), "");
-    }
-
-    #[test]
-    fn job_progress_with_preview_updates_selected_preview() {
-        let mut state = AppState::new();
-        state.jobs.insert(
-            6,
-            JobState {
-                url: "https://partial.example".to_string(),
-                stage: Stage::Downloading,
-                ..Default::default()
-            },
-        );
-
-        let (state, _) = update(state, Msg::JobSelected { job_id: 6 });
-        let (state, _) = update(
-            state,
-            Msg::JobProgress {
-                job_id: 6,
-                stage: Stage::Converting,
-                tokens: None,
-                bytes: None,
-                content_preview: Some("live content".to_string()),
-            },
-        );
-
-        let view = state.view();
-        assert_eq!(view.preview_text, Some("live content".to_string()));
-        let job = state.jobs.get(&6).expect("job exists");
-        assert_eq!(job.content_preview(), Some("live content"));
-    }
-
-    #[test]
-    fn job_progress_with_preview_stores_content_when_not_selected() {
-        let mut state = AppState::new();
-        state.jobs.insert(
-            7,
-            JobState {
-                url: "https://unselected.example".to_string(),
-                stage: Stage::Downloading,
-                ..Default::default()
-            },
-        );
-
-        let (state, _) = update(
-            state,
-            Msg::JobProgress {
-                job_id: 7,
-                stage: Stage::Converting,
-                tokens: None,
-                bytes: None,
-                content_preview: Some("background content".to_string()),
-            },
-        );
-
-        let view = state.view();
-        assert_eq!(view.preview_text, None);
-        let job = state.jobs.get(&7).expect("job exists");
-        assert_eq!(job.content_preview(), Some("background content"));
-    }
-
-    #[test]
-    fn job_done_after_inprogress_promotes_preview_to_available() {
-        let mut state = AppState::new();
-        state.jobs.insert(
-            8,
-            JobState {
-                url: "https://final.example".to_string(),
-                stage: Stage::Downloading,
-                ..Default::default()
-            },
-        );
-
-        let (state, _) = update(state, Msg::JobSelected { job_id: 8 });
-        let (state, _) = update(
-            state,
-            Msg::JobProgress {
-                job_id: 8,
-                stage: Stage::Converting,
-                tokens: None,
-                bytes: None,
-                content_preview: Some("partial".to_string()),
-            },
-        );
-        let (state, _) = update(
-            state,
-            Msg::JobDone {
-                job_id: 8,
-                result: JobResultKind::Success,
-                content_preview: Some("final".to_string()),
-                extracted_links: Vec::new(),
-                fetched_utc: None,
-            },
-        );
-
-        let view = state.view();
-        assert!(view
-            .preview_text
-            .unwrap()
-            .contains("No Analysis Available Yet"));
-        let header = view.preview_header.expect("header present");
-        assert_eq!(header.stage, Stage::Done);
-    }
-
-    #[test]
-    fn preview_quality_counts_headings_and_skips_nav_indicator_when_low_density() {
-        let content =
-            "# Title\n## Section\nBody text with a [link](http://example.com).\nMore words here.";
-        let quality = PreviewQuality::from_markdown(content);
-        assert_eq!(quality.heading_count, 2);
-        assert!(!quality.nav_heavy());
-    }
-
-    #[test]
-    fn preview_quality_marks_nav_heavy_when_link_density_high() {
-        let content = "[a](x) [b](x) [c](x) [d](x) [e](x)";
-        let quality = PreviewQuality::from_markdown(content);
-        assert!(quality.nav_heavy());
     }
 
     #[test]
@@ -456,7 +275,6 @@ mod app_state_tests {
             Msg::JobDone {
                 job_id: 9,
                 result: JobResultKind::Success,
-                content_preview: None,
                 extracted_links: links,
                 fetched_utc: None,
             },
@@ -472,68 +290,6 @@ mod app_state_tests {
             "https://other.example/path".to_string()
         );
         assert_eq!(stored_links[1].index, 2);
-    }
-
-    #[test]
-    fn collect_indirect_links_filters_navigation_and_share_noise() {
-        let mut state = AppState::new();
-        state.jobs.insert(
-            9,
-            JobState {
-                url: "https://mashable.com/article/april-5-microsoft-windows-11-pro".to_string(),
-                stage: Stage::Done,
-                origin: JobOrigin::Direct,
-                links: vec![
-                    LinkRecord {
-                        index: 0,
-                        url: "https://mashable.com/tech".to_string(),
-                        anchor_text: None,
-                        kind: LinkKind::Hyperlink,
-                        download_state: LinkDownloadState::NotDownloaded,
-                        age_estimate: None,
-                    },
-                    LinkRecord {
-                        index: 1,
-                        url: "https://twitter.com/intent/tweet?url=https://mashable.com/article/april-5-microsoft-windows-11-pro".to_string(),
-                        anchor_text: None,
-                        kind: LinkKind::Hyperlink,
-                        download_state: LinkDownloadState::NotDownloaded,
-                        age_estimate: None,
-                    },
-                    LinkRecord {
-                        index: 2,
-                        url: "https://example.com/news/follow-up-story".to_string(),
-                        anchor_text: None,
-                        kind: LinkKind::Hyperlink,
-                        download_state: LinkDownloadState::NotDownloaded,
-                        age_estimate: None,
-                    },
-                ],
-                ..Default::default()
-            },
-        );
-
-        state.begin_indirect_link_generation();
-        state.collect_indirect_links_from_job(9);
-
-        let drained = state.drain_indirect_links();
-        assert_eq!(drained.len(), 1);
-        assert_eq!(drained[0].url, "https://example.com/news/follow-up-story");
-    }
-
-    #[test]
-    fn indirect_link_pool_dedupes_normalized_urls() {
-        let mut pool = IndirectLinkPool::new();
-
-        assert!(pool.add_link(IndirectLink {
-            url: "https://Example.com/path/".to_string(),
-            source_job_id: 1,
-        }));
-        assert!(!pool.add_link(IndirectLink {
-            url: "https://example.com/path".to_string(),
-            source_job_id: 2,
-        }));
-        assert_eq!(pool.len(), 1);
     }
 
     #[test]
@@ -620,7 +376,8 @@ mod app_state_tests {
         state.select_job(1);
         let view = state.view();
         assert!(view
-            .preview_text
+            .right_pane
+            .summary_markdown
             .as_deref()
             .unwrap_or("")
             .contains("Article summary text"));
@@ -802,7 +559,7 @@ mod app_state_tests {
         let mut state = make_state_with_summarized_job();
         state.select_job(10);
         let view = state.view();
-        let text = view.preview_text.unwrap_or_default();
+        let text = view.right_pane.summary_markdown.unwrap_or_default();
         assert!(text.contains("My summary"));
         assert!(text.contains("Point A"));
         assert!(text.contains("## Key Points"));
@@ -823,18 +580,18 @@ mod app_state_tests {
         );
         state.select_job(11);
         let view = state.view();
-        let text = view.preview_text.unwrap_or_default();
-        assert!(text.contains("No Analysis Available Yet"));
+        let text = view.right_pane.summary_markdown.unwrap_or_default();
+        assert!(text.is_empty());
     }
 
     #[test]
-    fn selecting_job_sets_preview_mode_to_selected_job_summary() {
+    fn reselecting_job_keeps_its_summary() {
         let mut state = make_state_with_summarized_job();
         state.select_job(10);
         let mut s2 = make_state_with_summarized_job();
         s2.select_job(10);
         let view = s2.view();
-        let text = view.preview_text.unwrap_or_default();
+        let text = view.right_pane.summary_markdown.unwrap_or_default();
         assert!(text.contains("My summary"), "should show summary");
     }
 
@@ -958,7 +715,10 @@ mod app_state_tests {
         state.select_job(10);
         let view = state.view();
         assert_eq!(
-            view.selected_url,
+            view.desktop_job_list
+                .selected_job
+                .as_ref()
+                .map(|job| job.url.clone()),
             Some("https://summarized.example/article".to_string())
         );
     }
@@ -990,7 +750,10 @@ mod app_state_tests {
         state.select_job(14);
         let view = state.view();
         assert_eq!(
-            view.selected_url,
+            view.desktop_job_list
+                .selected_job
+                .as_ref()
+                .map(|job| job.url.clone()),
             Some("https://unsummarized.example".to_string())
         );
     }
@@ -999,81 +762,58 @@ mod app_state_tests {
     fn view_selected_url_none_when_no_selection() {
         let state = make_state_with_summarized_job();
         let view = state.view();
-        assert!(view.selected_url.is_none());
+        assert!(view
+            .desktop_job_list
+            .selected_job
+            .as_ref()
+            .map(|job| job.url.clone())
+            .is_none());
     }
 
     #[test]
-    fn ai_warning_banner_present_for_missing_api_key() {
+    fn missing_api_key_disables_ai_and_explains_why() {
         let mut state = AppState::new();
         state.set_ai_availability(AiAvailability::Unavailable {
             reason: AiUnavailableReason::MissingApiKey,
         });
-
-        let view = state.view();
         assert_eq!(
-            view.ai_warning_banner,
-            Some(crate::InlineWarningView {
-                title: "AI features are disabled".to_string(),
-                body: "Set OPENAI_API_KEY in the launch environment and restart to enable triage and briefing.".to_string(),
-            })
+            state.view().ai_unavailable_message.as_deref(),
+            Some("AI features unavailable: OPENAI_API_KEY is not set")
         );
         assert_eq!(
-            view.triage_blocked_reason,
-            Some("AI setup is incomplete because OPENAI_API_KEY is not set".to_string())
+            state.view().llm_quota.severity,
+            crate::llm_quota_view::LlmQuotaSeverity::Unavailable
         );
-        assert_eq!(view.briefing_blocked_reason, None);
-        assert_eq!(
-            view.right_pane.triage_markdown,
-            Some(
-                "AI setup required\n\nTriage is disabled because `OPENAI_API_KEY` is not set.\n\nSet `OPENAI_API_KEY` in the launch environment and restart the app to enable article triage.".to_string()
-            )
-        );
+        assert!(!state.triage_ai_available());
+        assert!(!state.briefing_ai_available());
     }
 
     #[test]
-    fn ai_warning_banner_absent_when_ai_available() {
-        let state = AppState::new();
-
-        let view = state.view();
-        assert!(view.ai_warning_banner.is_none());
-    }
-
-    #[test]
-    fn provider_alert_banner_shown_when_ai_available() {
+    fn available_ai_has_no_unavailable_message() {
         let mut state = AppState::new();
-        state.note_provider_out_of_credits("provider quota exhausted: billing".into());
-
-        let view = state.view();
-        let banner = view.ai_warning_banner.expect("provider warning banner");
-        assert!(banner.title.contains("credits"));
+        state.set_ai_availability(AiAvailability::Available);
+        assert!(state.view().ai_unavailable_message.is_none());
+        assert_ne!(
+            state.view().llm_quota.severity,
+            crate::llm_quota_view::LlmQuotaSeverity::Unavailable
+        );
     }
 
     #[test]
-    fn missing_api_key_banner_takes_priority_over_provider_alert() {
-        let mut state = AppState::new();
-        state.set_ai_availability(AiAvailability::Unavailable {
-            reason: AiUnavailableReason::MissingApiKey,
-        });
-        state.note_provider_out_of_credits("provider quota exhausted: billing".into());
-
-        let view = state.view();
-        let banner = view.ai_warning_banner.expect("missing-key warning banner");
-        assert_eq!(banner.title, "AI features are disabled");
-    }
-
-    #[test]
-    fn ai_warning_banner_absent_for_non_key_ai_unavailability() {
+    fn missing_triage_model_disables_ai_and_explains_why() {
         let mut state = AppState::new();
         state.set_ai_availability(AiAvailability::Unavailable {
             reason: AiUnavailableReason::NoTriageModel,
         });
-
-        let view = state.view();
-        assert!(view.ai_warning_banner.is_none());
         assert_eq!(
-            view.right_pane.triage_markdown,
-            Some("Article triage is unavailable because no triage model is available.".to_string())
+            state.view().ai_unavailable_message.as_deref(),
+            Some("AI features unavailable: no triage model is available")
         );
+        assert_eq!(
+            state.view().llm_quota.severity,
+            crate::llm_quota_view::LlmQuotaSeverity::Unavailable
+        );
+        assert!(!state.triage_ai_available());
     }
 
     #[test]
@@ -1108,7 +848,7 @@ mod app_state_tests {
         state.set_triage(triage);
 
         let view = state.view();
-        assert_eq!(view.session, SessionState::Running);
+        assert_eq!(state.session, SessionState::Running);
         assert!(
             !view.stop_finish_button.is_enabled(),
             "settled triage should not leave Stop / Finish active"
@@ -1150,7 +890,7 @@ mod app_state_tests {
     }
 
     #[test]
-    fn resolve_preview_prefers_summary_over_triage() {
+    fn summary_resolution_prefers_live_summary_over_triage() {
         use crate::briefing::{ArticleSummaryResult, LoadedArticle};
         use crate::triage::ArticleTriageResult;
 
@@ -1203,48 +943,9 @@ mod app_state_tests {
         );
         state.set_triage(triage);
 
-        let (kind, content) = state.resolve_best_preview(url);
-        assert_eq!(kind, PreviewContentKind::Summary);
+        let summary = state.summary_result_for_url(url).unwrap();
+        let content = crate::preview::format_summary_for_preview(summary);
         assert!(content.contains("Summary text"));
-    }
-
-    #[test]
-    fn resolve_preview_uses_triage_when_summary_missing() {
-        use crate::briefing::LoadedArticle;
-        use crate::triage::ArticleTriageResult;
-
-        let mut state = AppState::new();
-        let url = "https://test.example/article";
-
-        let mut triage = crate::triage::TriageSession::new_loading(None);
-        triage.set_articles(vec![LoadedArticle {
-            url: url.to_string(),
-            source_title: Some("Source headline".to_string()),
-            prepared_text: "text".to_string(),
-            content_hash: "hash".to_string(),
-            fetched_utc: None,
-        }]);
-        triage.transition_to_triaging();
-        triage.start_article(0, 1);
-        triage.complete_article(
-            0,
-            ArticleTriageResult {
-                category: "Security".to_string(),
-                priority: 7,
-                tags: vec!["test-tag".to_string()],
-                rationale: "Test rationale".to_string(),
-                input_tokens: 10,
-                output_tokens: 5,
-            },
-        );
-        state.set_triage(triage);
-
-        let (kind, content) = state.resolve_best_preview(url);
-        assert_eq!(kind, PreviewContentKind::Triage);
-        assert!(content.contains("# Source headline"));
-        assert!(content.contains("Security · Priority P7"));
-        assert!(content.contains("## Why It Matters"));
-        assert!(content.contains("Test rationale"));
     }
 
     #[test]
@@ -1291,50 +992,6 @@ mod app_state_tests {
             state.job_filter_status(12),
             Some(JobFilterStatus::AutoIncluded)
         );
-    }
-
-    #[test]
-    fn resolve_preview_uses_fallback_when_nothing_available() {
-        let state = AppState::new();
-        let url = "https://test.example/article";
-
-        let (kind, content) = state.resolve_best_preview(url);
-        assert_eq!(kind, PreviewContentKind::Fallback);
-        assert!(content.contains("No Analysis Available Yet"));
-    }
-
-    #[test]
-    fn resolve_preview_returns_correct_kind() {
-        use crate::briefing::{ArticleSummaryResult, LoadedArticle};
-
-        let mut state = AppState::new();
-        let url = "https://test.example/article";
-
-        let mut briefing = crate::briefing::BriefingSession::new_loading();
-        briefing.set_articles(vec![LoadedArticle {
-            url: url.to_string(),
-            source_title: None,
-            prepared_text: "text".to_string(),
-            content_hash: "hash".to_string(),
-            fetched_utc: None,
-        }]);
-        briefing.transition_to_summarizing();
-        briefing.start_article(0, 1);
-        briefing.complete_article(
-            0,
-            ArticleSummaryResult {
-                title: "Test".to_string(),
-                summary: "Summary".to_string(),
-                key_points: vec![],
-                input_tokens: 10,
-                output_tokens: 5,
-                entities: Default::default(),
-            },
-        );
-        state.set_briefing(briefing);
-
-        let (kind, _) = state.resolve_best_preview(url);
-        assert_eq!(kind, PreviewContentKind::Summary);
     }
 
     #[path = "../signal_candidate_tests.rs"]
@@ -1535,7 +1192,7 @@ mod app_state_tests {
 
         let view = state.view();
 
-        assert!(view.triage_results_reorder_suppressed);
+        assert!(state.triage_reorder_suppressed());
         assert_eq!(
             view.desktop_job_list
                 .rows
@@ -1547,7 +1204,8 @@ mod app_state_tests {
 
         state.triage_mut().complete();
         let settled_view = state.view();
-        assert!(!settled_view.triage_results_reorder_suppressed);
+
+        assert!(!state.triage_reorder_suppressed());
         assert_eq!(
             settled_view
                 .desktop_job_list
@@ -1940,7 +1598,13 @@ mod app_state_tests {
         assert_eq!(view.desktop_job_list.scoped_count, 0);
         assert_eq!(view.desktop_job_list.visible_count, 0);
         assert!(!view.desktop_job_list.truncated);
-        assert_eq!(view.selected_job_id, Some(1));
+        assert_eq!(
+            view.desktop_job_list
+                .selected_job
+                .as_ref()
+                .map(|job| job.job_id),
+            Some(1)
+        );
         assert_eq!(
             view.desktop_job_list
                 .selected_job
@@ -2153,7 +1817,14 @@ mod app_state_tests {
         set_fetched_utc(&mut outside, &[(1, Some(utc("2026-04-30T00:00:00Z")))]);
         outside.select_job(1);
         let outside_view = outside.view();
-        assert_eq!(outside_view.selected_job_id, Some(1));
+        assert_eq!(
+            outside_view
+                .desktop_job_list
+                .selected_job
+                .as_ref()
+                .map(|job| job.job_id),
+            Some(1)
+        );
         assert_eq!(
             outside_view
                 .desktop_job_list
@@ -2170,7 +1841,14 @@ mod app_state_tests {
         mismatch.select_job(1);
         mismatch.set_jobs_search_query("other".to_string());
         let mismatch_view = mismatch.view();
-        assert_eq!(mismatch_view.selected_job_id, Some(1));
+        assert_eq!(
+            mismatch_view
+                .desktop_job_list
+                .selected_job
+                .as_ref()
+                .map(|job| job.job_id),
+            Some(1)
+        );
         assert_eq!(
             mismatch_view
                 .desktop_job_list
@@ -2198,7 +1876,14 @@ mod app_state_tests {
         }
         capped.select_job(1);
         let capped_view = capped.view();
-        assert_eq!(capped_view.selected_job_id, Some(1));
+        assert_eq!(
+            capped_view
+                .desktop_job_list
+                .selected_job
+                .as_ref()
+                .map(|job| job.job_id),
+            Some(1)
+        );
         assert_eq!(
             capped_view
                 .desktop_job_list
@@ -2213,7 +1898,14 @@ mod app_state_tests {
         insert_done_job(&mut visible, 1, "https://example.com/visible");
         visible.select_job(1);
         let visible_view = visible.view();
-        assert_eq!(visible_view.selected_job_id, Some(1));
+        assert_eq!(
+            visible_view
+                .desktop_job_list
+                .selected_job
+                .as_ref()
+                .map(|job| job.job_id),
+            Some(1)
+        );
         assert_eq!(
             visible_view
                 .desktop_job_list
@@ -2536,12 +2228,24 @@ mod app_state_tests {
         state.set_jobs_search_query("kube".to_string());
 
         let view = state.view();
-        assert_eq!(view.selected_job_id, Some(1));
+        assert_eq!(
+            view.desktop_job_list
+                .selected_job
+                .as_ref()
+                .map(|job| job.job_id),
+            Some(1)
+        );
         assert!(view.desktop_job_list.selected_job.is_some());
 
         state.set_jobs_search_query("rust".to_string());
         let view = state.view();
-        assert_eq!(view.selected_job_id, Some(1));
+        assert_eq!(
+            view.desktop_job_list
+                .selected_job
+                .as_ref()
+                .map(|job| job.job_id),
+            Some(1)
+        );
         assert_eq!(view.desktop_job_list.rows[0].job_id, 2);
         assert!(matches!(
             view.desktop_job_list.selected_job,
@@ -2588,7 +2292,7 @@ mod app_state_tests {
     }
 
     #[test]
-    fn preview_metadata_for_selected_done_job_exposes_source_and_status() {
+    fn selected_done_job_exposes_url_stage_and_outcome() {
         let mut state = AppState::new();
         state.jobs.insert(
             1,
@@ -2603,13 +2307,10 @@ mod app_state_tests {
 
         let view = state.view();
 
-        let preview_context = view
-            .preview_context
-            .as_ref()
-            .expect("expected preview metadata for selected job");
-        assert_eq!(preview_context.source_label, "epochai.substack.com");
-        assert_eq!(preview_context.status_label, "Done");
-        assert_eq!(preview_context.attention_label, None);
+        let selected = view.desktop_job_list.selected_job.unwrap();
+        assert_eq!(selected.url, "https://epochai.substack.com/p/what");
+        assert_eq!(selected.stage, Stage::Done);
+        assert_eq!(selected.outcome, Some(JobResultKind::Success));
     }
 }
 
@@ -2670,48 +2371,14 @@ mod poll_stats_view_tests {
         );
         assert_eq!(after_cooldown.skipped, 0);
     }
-
-    #[test]
-    fn ingest_indirect_links_skips_blacklisted_domain() {
-        use harvester_engine::FetchOutcomeClass;
-        let mut state = AppState::new();
-        let now = chrono::DateTime::from_timestamp(0, 0).unwrap();
-        for _ in 0..3 {
-            state.blacklist.record_outcome(
-                "bloomberg.com",
-                FetchOutcomeClass::PermanentBlock,
-                Some("http status 403"),
-                now,
-            );
-        }
-        let result = state.ingest_indirect_links(
-            vec![
-                IndirectLink {
-                    url: "https://www.bloomberg.com/news/article".to_string(),
-                    source_job_id: 1,
-                },
-                IndirectLink {
-                    url: "https://example.com/allowed".to_string(),
-                    source_job_id: 1,
-                },
-            ],
-            now,
-        );
-        assert_eq!(result.enqueued, 1);
-        assert!(result.skipped >= 1);
-        let enqueued_id = result.enqueued_job_ids[0];
-        let job = state.jobs.get(&enqueued_id).expect("enqueued job exists");
-        assert_eq!(job.url, "https://example.com/allowed");
-        assert!(matches!(job.origin, JobOrigin::Indirect { .. }));
-    }
 }
 
 #[cfg(test)]
-mod trends_view_tests {
+mod selected_article_context_tests {
     use super::*;
 
     #[test]
-    fn trends_workspace_keeps_selected_article_context() {
+    fn changing_list_mode_keeps_selected_article_context() {
         let mut state = AppState::new();
         state.jobs.insert(
             1,
@@ -2723,15 +2390,13 @@ mod trends_view_tests {
             },
         );
         state.select_job(1);
-        state.set_workspace_view(crate::WorkspaceView::Trends);
+        state.set_job_list_mode(crate::JobListMode::Last24Hours);
 
         let view = state.view();
 
-        assert!(
-            view.preview_context
-                .as_ref()
-                .is_some_and(|context| context.source_label == "epochai.substack.com"),
-            "selected article metadata may still exist in state"
+        assert_eq!(
+            view.desktop_job_list.selected_job.unwrap().url,
+            "https://epochai.substack.com/p/what"
         );
     }
 }

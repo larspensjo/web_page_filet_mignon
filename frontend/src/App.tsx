@@ -54,8 +54,7 @@ export function App() {
 		return cancelPendingSearchDispatch;
 	}, [mode, query, cancelPendingSearchDispatch]);
 
-	// Focus is frontend-local: after RevealJobsSearch is dispatched, the
-	// search box is focused once it exists in the DOM.
+	// Search focus stays local to the frontend and waits for the input to mount.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: mode re-runs the focus once the input mounts.
 	useEffect(() => {
 		if (searchFocusRequests === 0) return;
@@ -88,7 +87,6 @@ export function App() {
 				setAddUrlOpen(true);
 			} else if (isShortcut(event, "f")) {
 				event.preventDefault();
-				void dispatchIntent({ type: "RevealJobsSearch" });
 				setSearchFocusRequests((count) => count + 1);
 			}
 		};

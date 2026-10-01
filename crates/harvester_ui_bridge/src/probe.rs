@@ -5,10 +5,10 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use harvester_core::{
     ActivityEntry, ActivityOutcome, AppViewModel, DesktopJobListView, JobFilterStatus, JobListMode,
-    JobListRowView, JobOrigin, JobResultKind, LinkDownloadState, LinkRowView, PipelineStage,
-    RunProgressView, ScoreBand, SelectedJobView, SelectedJobVisibility, SignalCandidateOutcome,
-    SignalCandidateRow, SignalCandidateRowState, Stage, StageProgress, StageStatus,
-    TriageAnnotationView, ACTIVITY_FEED_CAPACITY, DESKTOP_JOB_LIST_MAX_ROWS, MAX_EXTRACTED_LINKS,
+    JobListRowView, JobOrigin, JobResultKind, LinkRowView, PipelineStage, RunProgressView,
+    ScoreBand, SelectedJobView, SelectedJobVisibility, SignalCandidateOutcome, SignalCandidateRow,
+    SignalCandidateRowState, Stage, StageProgress, StageStatus, TriageAnnotationView,
+    ACTIVITY_FEED_CAPACITY, DESKTOP_JOB_LIST_MAX_ROWS, MAX_EXTRACTED_LINKS,
 };
 use harvester_engine::{llm::dto::SourceTier, LinkKind};
 use serde::{Deserialize, Serialize};
@@ -147,11 +147,6 @@ pub fn synthetic_view(case: ProbeCase, generation: u64) -> AppViewModel {
     let results = matches!(case, ProbeCase::PopulatedResults);
     AppViewModel {
         job_count: PROBE_CORPUS_JOBS,
-        job_list_mode: if results {
-            JobListMode::Results
-        } else {
-            JobListMode::SinceCheckpoint
-        },
         desktop_job_list: DesktopJobListView {
             mode: if results {
                 JobListMode::Results
@@ -228,7 +223,6 @@ fn synthetic_job_list_row(index: usize, generation: u64) -> JobListRowView {
         tokens: Some(1_024 + index as u32),
         bytes: Some(32_768 + index as u64),
         link_count: 3,
-        downloaded_link_count: 1,
         origin: JobOrigin::Direct,
         triage_annotation: Some(TriageAnnotationView {
             priority: 3,
@@ -277,8 +271,6 @@ fn synthetic_selected_job(generation: u64, link_count: usize) -> SelectedJobView
                 ),
                 label: format!("Linked evidence {index} for the selected probe article"),
                 kind: LinkKind::Hyperlink,
-                download_state: LinkDownloadState::NotDownloaded,
-                age_suspect: false,
             })
             .collect(),
     }

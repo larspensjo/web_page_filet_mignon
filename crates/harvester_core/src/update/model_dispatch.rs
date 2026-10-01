@@ -129,9 +129,8 @@ fn dispatch_triage(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
             result: cached,
             stored_model_id,
         } => {
-            let themes = cached.tags.clone();
             let url = state.triage().articles()[next_idx].url.clone();
-            let fetched_utc = state.triage().articles()[next_idx].fetched_utc.clone();
+
             let triage_priority = cached.priority;
             let result = cached.clone();
             let stored_model_id = stored_model_id.to_string();
@@ -155,15 +154,8 @@ fn dispatch_triage(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
                 url,
                 enqueued
             );
-            state.refresh_selected_preview();
+
             state.mark_dirty();
-            effects.push(Effect::UpsertEntityIndexEntry {
-                url,
-                fetched_utc,
-                content_hash: Some(content_hash.clone()),
-                summary_entities: None,
-                themes: Some(themes),
-            });
             return true;
         }
         TriageCacheLookupResult::Miss => {
@@ -253,9 +245,6 @@ fn dispatch_summary(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
                 .briefing_mut()
                 .set_article_cache_key(next_idx, Some(key.clone()));
             if let Some(cached_result) = state.try_reuse_summary(&key) {
-                let article_entities = cached_result.entities.clone();
-                let url = state.briefing().articles()[next_idx].url.clone();
-                let fetched_utc = state.briefing().articles()[next_idx].fetched_utc.clone();
                 let result = cached_result.clone();
                 state.record_summary_cache_hit();
                 engine_info!(
@@ -267,15 +256,8 @@ fn dispatch_summary(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
                         content_hash_short
                     );
                 state.briefing_mut().complete_article(next_idx, result);
-                state.refresh_selected_preview();
+
                 state.mark_dirty();
-                effects.push(Effect::UpsertEntityIndexEntry {
-                    url,
-                    fetched_utc,
-                    content_hash: Some(content_hash.clone()),
-                    summary_entities: Some(article_entities),
-                    themes: None,
-                });
                 let article_url = state.briefing().articles()[next_idx].url.clone();
                 let _ = crate::update::signal_candidate::try_enqueue(state, &article_url);
                 // Cache hit: slot not consumed, continue filling.

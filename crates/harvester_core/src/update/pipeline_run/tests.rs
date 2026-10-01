@@ -304,7 +304,6 @@ fn prepare_pipeline(
                     stage: Stage::Downloading,
                     tokens: None,
                     bytes: Some(1_024),
-                    content_preview: None,
                 },
             )
             .0;
@@ -321,7 +320,7 @@ fn prepare_pipeline(
                         reason: format!("download failure {index}"),
                     }
                 },
-                content_preview: None,
+
                 extracted_links: Vec::new(),
                 fetched_utc: Some("2026-09-07T12:00:00Z".into()),
             },
@@ -644,7 +643,10 @@ fn accepted_stop_drains_an_in_flight_score_before_terminalizing_the_run() {
         .all(|e| !matches!(e, Effect::RequestLlmCompletion { .. })));
     assert!(state.run_progress().unwrap().terminal);
     assert_eq!(state.pipeline_run_phase(), PipelineRunPhase::Idle);
-    assert_eq!(state.view().session, crate::SessionState::Idle);
+    assert_eq!(
+        state.batch_observation().session_state,
+        crate::SessionState::Idle
+    );
     assert_eq!(state.run_state(), crate::RunState::Idle);
     assert!(state
         .run_progress()
@@ -951,7 +953,10 @@ fn accepted_stop_during_poll_drains_the_poll_without_ingesting_its_urls() {
         .all(|stage| stage.status != StageStatus::Active));
     assert!(!state.view().run_progress.run_active);
     assert!(matches!(state.pipeline_run_phase(), PipelineRunPhase::Idle));
-    assert_eq!(state.view().session, crate::SessionState::Idle);
+    assert_eq!(
+        state.batch_observation().session_state,
+        crate::SessionState::Idle
+    );
 }
 
 #[test]
@@ -998,7 +1003,10 @@ fn post_stop_poll_urls_persist_and_full_run_reingests_before_polling_after_resto
     );
     let state = crate::update(state, Msg::AllSourcesPollEnded).0;
     assert!(state.run_progress().unwrap().terminal);
-    assert_eq!(state.view().session, crate::SessionState::Idle);
+    assert_eq!(
+        state.batch_observation().session_state,
+        crate::SessionState::Idle
+    );
 
     let restored = crate::update(
         AppState::new(),
@@ -1075,7 +1083,7 @@ fn stop_preserves_downloads_that_were_queued_but_never_started() {
             result: crate::JobResultKind::Failed {
                 reason: harvester_engine::FailureKind::Cancelled.to_string(),
             },
-            content_preview: None,
+
             extracted_links: Vec::new(),
             fetched_utc: None,
         },
@@ -1130,7 +1138,6 @@ fn pending_url_completed_successfully_during_stop_is_not_downloaded_again() {
         Msg::JobDone {
             job_id: 1,
             result: crate::JobResultKind::Success,
-            content_preview: None,
             extracted_links: Vec::new(),
             fetched_utc: None,
         },
@@ -1261,7 +1268,10 @@ fn accepted_stop_during_triage_drains_before_terminalizing_waiting_stages() {
         "the in-flight completion must count during the Stop drain"
     );
     assert_eq!(state.pipeline_run_phase(), PipelineRunPhase::Idle);
-    assert_eq!(state.view().session, crate::SessionState::Idle);
+    assert_eq!(
+        state.batch_observation().session_state,
+        crate::SessionState::Idle
+    );
     assert!(state
         .run_progress()
         .unwrap()

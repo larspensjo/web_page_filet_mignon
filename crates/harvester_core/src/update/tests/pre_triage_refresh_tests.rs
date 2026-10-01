@@ -57,7 +57,6 @@ fn complete_job_for_test(state: AppState, job_id: crate::JobId) -> AppState {
         Msg::JobDone {
             job_id,
             result: crate::JobResultKind::Success,
-            content_preview: None,
             extracted_links: Vec::new(),
             fetched_utc: None,
         },
@@ -250,11 +249,11 @@ fn restore_completed_jobs_blocks_triage_during_startup_preparation() {
     let (state, _) = update(AppState::new(), Msg::RestoreCompletedJobs(snapshot));
     let state = apply_pending_pre_triage_refresh_evaluation(state);
 
-    let view = state.view();
-    assert_eq!(
-        view.triage_blocked_reason,
-        Some("Triage is unavailable while startup prepares the article set".to_string())
-    );
+    assert!(state.pre_triage_coordinator.refresh_pending());
+    assert!(state.pre_triage().entries().is_empty());
+    let (state, _request_id) = tick_until_dispatch(state);
+    assert!(state.pre_triage().entries().is_empty());
+    assert!(state.triage_in_flight_request_id().is_some());
 }
 
 #[test]

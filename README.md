@@ -86,7 +86,6 @@ The Harvester tools operate on an `output/` directory containing harvested artic
 
 - `harvester-corpus.json`
 - `.sources.ron`
-- `.entity_index.ron`
 - `.summary_cache.ron`
 - `.triage_cache.ron`
 

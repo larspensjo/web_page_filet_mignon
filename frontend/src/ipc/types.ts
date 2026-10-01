@@ -8,7 +8,7 @@ export type Stage =
 	| "Writing"
 	| "Done";
 export type JobResultKind = "Success" | { Failed: { reason: string } };
-export type JobOrigin = "Direct" | { Indirect: { source_job_id: number } };
+export type JobOrigin = "Direct";
 export type SelectedJobVisibility =
 	| "Visible"
 	| "OutsideScope"
@@ -27,11 +27,7 @@ export type JobFilterStatus =
 	| { ReviewNeeded: { reasons: FilterReason[] } }
 	| "AutoIncluded";
 
-export type BodyKey =
-	| "Preview"
-	| "TriageMarkdown"
-	| "SummaryMarkdown"
-	| "PollStatsMarkdown";
+export type BodyKey = "SummaryMarkdown";
 
 export type BodyRef = {
 	key: BodyKey;
@@ -58,7 +54,6 @@ export type JobListRowView = {
 	tokens: number | null;
 	bytes: number | null;
 	link_count: number;
-	downloaded_link_count: number;
 	origin: JobOrigin;
 	triage_annotation: TriageAnnotationView | null;
 	has_summary: boolean;
@@ -93,12 +88,6 @@ export type ExtractedLinkView = {
 	url: string;
 	label: string;
 	kind: "Hyperlink" | "Image" | "Email";
-	download_state:
-		| "NotDownloaded"
-		| "Downloading"
-		| { Downloaded: { path: string } }
-		| { Failed: { error: string } };
-	age_suspect: boolean;
 };
 
 export type DesktopJobListView = {
@@ -195,8 +184,6 @@ export type StopFinishButtonState =
 	| "Disabled"
 	| { Enabled: { policy: "Finish" | "Immediate" } };
 
-export type WorkspaceView = "Review" | "Trends" | "PollStats" | "Blacklist";
-
 export type ArchivePartialCoverageView = {
 	triaged: number;
 	actionable_total: number;
@@ -257,7 +244,6 @@ export type SnapshotEnvelope = {
 	generation: number;
 	schema_version: number;
 	view: {
-		workspace_view: WorkspaceView;
 		job_count: number;
 		archive_filtered_count: number;
 		archive_token_estimate: number;
@@ -267,11 +253,8 @@ export type SnapshotEnvelope = {
 		llm_quota: LlmQuotaView;
 		last_paste_stats: LastPasteStats | null;
 		checkpoint_status_message: string | null;
-		preview_text: BodyRef | null;
 		right_pane: {
-			triage_markdown: BodyRef | null;
 			summary_markdown: BodyRef | null;
-			poll_stats_markdown: BodyRef | null;
 		};
 		desktop_job_list: DesktopJobListView;
 		signal_candidate_rows: SignalCandidateRow[];
@@ -286,6 +269,6 @@ export type SnapshotEnvelope = {
 		unfinished_work: UnfinishedWork;
 		reprocess_notice: ReprocessNoticeView | null;
 		stop_finish_button: StopFinishButtonState;
-	} & Record<string, unknown>;
+	};
 	fatal_message: string | null;
 };

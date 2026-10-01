@@ -327,7 +327,6 @@ fn seed_populated_run_progress() -> AppState {
                 stage: Stage::Downloading,
                 tokens: None,
                 bytes: Some(32_768),
-                content_preview: None,
             },
         )
         .0;
@@ -336,7 +335,6 @@ fn seed_populated_run_progress() -> AppState {
             Msg::JobDone {
                 job_id,
                 result: JobResultKind::Success,
-                content_preview: None,
                 extracted_links: Vec::new(),
                 fetched_utc: Some("2026-09-05T12:00:00Z".into()),
             },

@@ -1,12 +1,9 @@
 use crate::effect::StopPolicy;
 use crate::pre_triage_filter::FilterReason;
-use crate::preview::PreviewContentKind;
-use crate::state::{JobOrigin, LinkDownloadState};
-use crate::tabs::{JobListMode, TrendCategory};
-use crate::trends::{CategoryTrend, EntityTrendData};
+use crate::state::JobOrigin;
+use crate::tabs::JobListMode;
 use crate::{
-    JobId, JobResultKind, RunCompletionNotice, RunProgressView, RunState, SessionState, Stage,
-    UnfinishedWork,
+    JobId, JobResultKind, RunCompletionNotice, RunProgressView, RunState, Stage, UnfinishedWork,
 };
 use chrono::{DateTime, Utc};
 use harvester_engine::llm::dto::SourceTier;
@@ -80,14 +77,6 @@ pub struct SignalCandidateRow {
     pub outcome: Option<SignalCandidateOutcome>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SignalCandidatePreviewView {
-    pub signal_key: String,
-    pub duplicate_urls: Vec<String>,
-    pub exclude_checked: bool,
-    pub state_label: String,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum StopFinishButtonState {
     #[default]
@@ -110,148 +99,15 @@ impl StopFinishButtonState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PreviewHeaderView {
-    pub domain: String,
-    pub tokens: Option<u32>,
-    pub bytes: Option<u64>,
-    pub stage: Stage,
-    pub outcome: Option<JobResultKind>,
-    pub heading_count: usize,
-    pub link_density: f64,
-    pub nav_heavy: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum IndirectLinkPhase {
-    Collecting,
-    Ready,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct IndirectLinkSummary {
-    pub count: usize,
-    pub phase: IndirectLinkPhase,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PreviewContextView {
-    pub source_label: String,
-    pub status_label: String,
-    pub attention_label: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InlineWarningView {
-    pub title: String,
-    pub body: String,
-}
-
-/// View data for one entity in the trends tab.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EntityLineView {
-    pub label: String,
-    pub weekly_counts: Vec<u32>,
-    pub total_count: u32,
-}
-
-/// View data for one category in the trends tab.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CategoryTrendView {
-    /// Week display labels (oldest first).
-    pub weeks: Vec<String>,
-    /// Top-N entities.
-    pub lines: Vec<EntityLineView>,
-    /// Total number of entities (before top-N truncation).
-    pub total_entity_count: usize,
-}
-
-/// View state for the Trends tab.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TrendsTabView {
-    /// True when entity index has not yet loaded or been rebuilt.
-    pub is_loading: bool,
-    /// The currently selected trend category.
-    pub active_category: TrendCategory,
-    /// Data for the selected category; `None` when `is_loading` is true.
-    pub category_data: Option<CategoryTrendView>,
-}
-
-impl Default for TrendsTabView {
-    fn default() -> Self {
-        Self {
-            is_loading: true,
-            active_category: TrendCategory::default(),
-            category_data: None,
-        }
-    }
-}
-
-/// View state for the right-pane tab content area.
+/// Summary body rendered by the reading pane.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct RightPaneView {
-    /// Markdown content for the Triage tab (formatted triage result).
-    pub triage_markdown: Option<String>,
-    /// Markdown content for the Summary tab.
     pub summary_markdown: Option<String>,
-    /// Trends tab view data.
-    pub trends: TrendsTabView,
-    /// Formatted text for the Poll Stats tab. None until the first poll completes.
-    pub poll_stats_markdown: Option<String>,
-}
-
-fn category_trend_to_view(trend: &CategoryTrend) -> CategoryTrendView {
-    CategoryTrendView {
-        weeks: trend.weeks.iter().map(|w| w.label.clone()).collect(),
-        lines: trend
-            .top_entities
-            .iter()
-            .map(|e| EntityLineView {
-                label: e.display_label.clone(),
-                weekly_counts: e.weekly_counts.clone(),
-                total_count: e.total_count,
-            })
-            .collect(),
-        total_entity_count: trend.total_entity_count,
-    }
-}
-
-pub(crate) fn build_trends_tab_view(
-    entity_trend_data: Option<&EntityTrendData>,
-    active_category: TrendCategory,
-) -> TrendsTabView {
-    match entity_trend_data {
-        None => TrendsTabView {
-            is_loading: true,
-            active_category,
-            category_data: None,
-        },
-        Some(data) => {
-            let trend = match active_category {
-                TrendCategory::Companies => &data.companies,
-                TrendCategory::Technologies => &data.technologies,
-                TrendCategory::Products => &data.products,
-                TrendCategory::Themes => &data.themes,
-            };
-            TrendsTabView {
-                is_loading: false,
-                active_category,
-                category_data: Some(category_trend_to_view(trend)),
-            }
-        }
-    }
 }
 
 /// Default desktop window dimensions.
 pub const DEFAULT_WINDOW_WIDTH: i32 = 960;
 pub const DEFAULT_WINDOW_HEIGHT: i32 = 720;
-
-/// View state for the desktop job-list controls.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-pub struct LeftPaneView {
-    /// Current Jobs-tab search query.
-    pub jobs_search_query: String,
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ArchivePartialCoverageView {
@@ -267,15 +123,9 @@ pub struct ReprocessNoticeView {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppViewModel {
-    pub workspace_view: crate::WorkspaceView,
-    pub job_list_mode: crate::JobListMode,
-    pub session: SessionState,
-    pub queued_urls: Vec<String>,
     pub job_count: usize,
     pub desktop_job_list: DesktopJobListView,
     pub last_paste_stats: Option<LastPasteStats>,
-    pub dirty: bool,
-    pub total_tokens: u64,
     pub token_limit: u64,
     /// Summary-mode archive size over the filtered corpus: cached summary tokens
     /// where available, raw article tokens otherwise. Drives the token meter bar.
@@ -287,21 +137,9 @@ pub struct AppViewModel {
     /// Archive-eligible articles that lack a cached summary (`filtered` minus
     /// the summary-coverage count).
     pub raw_unprocessed_count: usize,
-    pub preview_text: Option<String>,
-    pub selected_job_id: Option<crate::JobId>,
-    pub preview_header: Option<PreviewHeaderView>,
-    pub preview_context: Option<PreviewContextView>,
-    pub ai_warning_banner: Option<InlineWarningView>,
-    pub preview_source: Option<PreviewContentKind>,
-    pub briefing_generate_enabled: bool,
-    pub next_item_enabled: bool,
     pub stop_finish_button: StopFinishButtonState,
-    pub triage_results_reorder_suppressed: bool,
     pub signal_candidate_rows: Vec<SignalCandidateRow>,
-    pub signal_candidate_preview: Option<SignalCandidatePreviewView>,
     pub ai_unavailable_message: Option<String>,
-    pub triage_blocked_reason: Option<String>,
-    pub briefing_blocked_reason: Option<String>,
     /// Reducer-owned cumulative timeline for the desktop pipeline experience.
     pub run_progress: RunProgressView,
     pub archive_enabled: bool,
@@ -314,55 +152,27 @@ pub struct AppViewModel {
     /// Stored reducer summary; the view never classifies work.
     pub unfinished_work: UnfinishedWork,
     pub reprocess_notice: Option<ReprocessNoticeView>,
-    pub poll_indirect_links_enabled: bool,
     pub checkpoint_status_message: Option<String>,
-    /// URL of the currently selected job, only when it has a completed summary.
-    pub selected_url: Option<String>,
-    pub left_pane: LeftPaneView,
-    pub is_pre_triage_reviewing: bool,
-    pub indirect_link_summary: Option<IndirectLinkSummary>,
-    /// Per-model LLM token usage, sorted alphabetically by model name. Only Miss runs counted.
-    pub llm_usage_by_model: Vec<LlmModelUsageView>,
     /// Session LLM call quota meter.
     pub llm_quota: LlmQuotaView,
     /// Right-pane tab content area view.
     pub right_pane: RightPaneView,
-    /// Blacklist tab content.
-    pub blacklist: BlacklistTabView,
 }
 
 impl Default for AppViewModel {
     fn default() -> Self {
         Self {
-            workspace_view: crate::WorkspaceView::default(),
-            job_list_mode: crate::JobListMode::default(),
-            session: SessionState::Idle,
-            queued_urls: Vec::new(),
             job_count: 0,
             desktop_job_list: DesktopJobListView::default(),
             last_paste_stats: None,
-            dirty: false,
-            total_tokens: 0,
             token_limit: TOKEN_LIMIT,
             archive_token_estimate: 0,
             archive_filtered_count: 0,
             archive_partial_coverage: None,
             raw_unprocessed_count: 0,
-            preview_text: None,
-            selected_job_id: None,
-            preview_header: None,
-            preview_context: None,
-            ai_warning_banner: None,
-            preview_source: None,
-            briefing_generate_enabled: false,
-            next_item_enabled: false,
             stop_finish_button: StopFinishButtonState::Disabled,
-            triage_results_reorder_suppressed: false,
             signal_candidate_rows: Vec::new(),
-            signal_candidate_preview: None,
             ai_unavailable_message: None,
-            triage_blocked_reason: None,
-            briefing_blocked_reason: None,
             run_progress: RunProgressView::default(),
             archive_enabled: true,
             run_state: RunState::Idle,
@@ -372,87 +182,17 @@ impl Default for AppViewModel {
             resume_disabled_reason: Some("Unfinished work is not known yet.".to_string()),
             unfinished_work: UnfinishedWork::Unknown,
             reprocess_notice: None,
-            poll_indirect_links_enabled: false,
             checkpoint_status_message: None,
-            selected_url: None,
-            left_pane: LeftPaneView::default(),
-            is_pre_triage_reviewing: false,
-            indirect_link_summary: None,
-            llm_usage_by_model: Vec::new(),
             llm_quota: crate::build_llm_quota_view(&crate::LlmQuotaState::default()),
             right_pane: RightPaneView::default(),
-            blacklist: BlacklistTabView::default(),
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Blacklist tab view types
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BlacklistRowView {
-    pub domain: String,
-    pub strikes: u32,
-    pub status: String,
-    pub last_failure: String,
-    pub next_retry: String,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BlacklistTabView {
-    pub rows: Vec<BlacklistRowView>,
-    pub blacklisted_count: usize,
-}
-
-impl BlacklistTabView {
-    pub fn from_state(
-        state: &crate::blacklist::BlacklistState,
-        now: chrono::DateTime<chrono::Utc>,
-    ) -> Self {
-        let mut blacklisted_count = 0;
-        let rows = state
-            .rows()
-            .into_iter()
-            .map(|(domain, rec)| {
-                let blocked = state.is_blocked(domain, now);
-                if blocked {
-                    blacklisted_count += 1;
-                }
-                let status = match rec.cooldown_until {
-                    Some(until) if now < until => format!("Cooling down ({} strikes)", rec.strikes),
-                    Some(_) => "Probe pending".to_string(),
-                    None => "Tracking".to_string(),
-                };
-                let next_retry = match rec.cooldown_until {
-                    Some(until) if now < until => until.format("%Y-%m-%d %H:%M UTC").to_string(),
-                    _ => "—".to_string(),
-                };
-                BlacklistRowView {
-                    domain: domain.clone(),
-                    strikes: rec.strikes,
-                    status,
-                    last_failure: rec
-                        .last_failure_kind
-                        .clone()
-                        .unwrap_or_else(|| "—".to_string()),
-                    next_retry,
-                }
-            })
-            .collect();
-        BlacklistTabView {
-            rows,
-            blacklisted_count,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
-    fn blacklist_view_marks_active_and_cooldown() {
+    fn blacklist_records_active_cooldown_and_failure() {
         use crate::blacklist::BlacklistState;
         use harvester_engine::FetchOutcomeClass;
         let now = chrono::Utc::now();
@@ -465,16 +205,16 @@ mod tests {
                 now,
             );
         }
-        let view = BlacklistTabView::from_state(&bl, now);
-        assert_eq!(view.blacklisted_count, 1);
-        let row = &view.rows[0];
-        assert_eq!(row.domain, "bloomberg.com");
-        assert_eq!(row.strikes, 3);
-        assert!(
-            row.status.to_lowercase().contains("cool")
-                || row.status.to_lowercase().contains("blacklist")
-        );
-        assert_eq!(row.last_failure, "http status 403");
+        assert!(bl.is_blocked("bloomberg.com", now));
+        let rows = bl.rows();
+        assert_eq!(rows.len(), 1);
+        let (domain, record) = rows[0];
+        assert_eq!(domain, "bloomberg.com");
+        assert_eq!(record.strikes, 3);
+        assert_eq!(record.last_failure_kind.as_deref(), Some("http status 403"));
+        let until = record.cooldown_until.expect("cooldown armed");
+        assert!(until > now);
+        assert!(!bl.is_blocked("bloomberg.com", until));
     }
 }
 
@@ -487,7 +227,6 @@ pub struct JobRowView {
     pub tokens: Option<u32>,
     pub bytes: Option<u64>,
     pub link_count: usize,
-    pub downloaded_link_count: usize,
     pub links: Vec<LinkRowView>,
     pub origin: JobOrigin,
     pub triage_annotation: Option<TriageAnnotationView>,
@@ -528,7 +267,6 @@ pub struct JobListRowView {
     pub tokens: Option<u32>,
     pub bytes: Option<u64>,
     pub link_count: usize,
-    pub downloaded_link_count: usize,
     pub origin: JobOrigin,
     pub triage_annotation: Option<TriageAnnotationView>,
     pub has_summary: bool,
@@ -550,7 +288,6 @@ impl JobListRowView {
             tokens: row.tokens,
             bytes: row.bytes,
             link_count: row.link_count,
-            downloaded_link_count: row.downloaded_link_count,
             origin: row.origin.clone(),
             triage_annotation: row.triage_annotation.clone(),
             has_summary: row.has_summary,
@@ -639,8 +376,6 @@ pub struct LinkRowView {
     pub url: String,
     pub label: String,
     pub kind: LinkKind,
-    pub download_state: LinkDownloadState,
-    pub age_suspect: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

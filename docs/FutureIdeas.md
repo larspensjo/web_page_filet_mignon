@@ -144,7 +144,7 @@ Related: FI-Architecture-BatchOrchestration-0006, FI-LLM-Briefing-0001
 ### DownloadPipeline
 
 #### [FI-Architecture-DownloadPipeline-0001] Unified download path for linked pages
-Status: Candidate
+Status: Retired
 TopLevel: Architecture
 SubLevel: DownloadPipeline
 Priority: P2
@@ -160,6 +160,7 @@ Rationale: Keeps policy/quota enforcement consistent and reduces duplicate downl
 SuccessCriteria:
 - Linked-page downloads are scheduled as tagged jobs in the engine.
 - All download paths share the same URL policy and quota enforcement.
+Retirement: 2026-09-30. Trends, the entity index, linked-page download and the indirect-link pool are removed; this idea is no longer planned.
 
 ### DtoBoundaries
 
@@ -375,7 +376,7 @@ SuccessCriteria:
 ### PdfPipeline
 
 #### [FI-Ingestion-PdfPipeline-0001] PDF ingestion for preview pipeline
-Status: Candidate
+Status: Retired
 TopLevel: Ingestion
 SubLevel: PdfPipeline
 Priority: P3
@@ -391,6 +392,8 @@ Rationale: Enables previewing and triaging PDF sources with the same UI.
 SuccessCriteria:
 - PDF sources produce markdown suitable for preview.
 - Preview flow works for PDF-derived content without disk reads in-session.
+
+Retirement: 2026-09-30. The article-preview pipeline is removed; the reading pane displays summaries only, so this idea is no longer planned.
 
 ### RssTriage
 
@@ -1210,7 +1213,7 @@ SuccessCriteria:
 - A debug mode can persist the last generated RTF payload to a temporary file for troubleshooting.
 
 #### [FI-Observability-PreviewRendering-0002] Preview truncation telemetry in status bar
-Status: Candidate
+Status: Retired
 TopLevel: Observability
 SubLevel: PreviewRendering
 Priority: P3
@@ -1227,6 +1230,8 @@ SuccessCriteria:
 - Status UI indicates when preview content is truncated.
 - Telemetry includes original length, displayed length, and truncation reason.
 - Truncation status is deterministic and test-covered.
+
+Retirement: 2026-09-30. The article-preview pipeline is removed; the reading pane displays summaries only, so this idea is no longer planned.
 
 ### ReplayDiagnostics
 
@@ -1666,7 +1671,7 @@ SuccessCriteria:
 ### PreviewCache
 
 #### [FI-Storage-PreviewCache-0001] LRU cache for preview content
-Status: Candidate
+Status: Retired
 TopLevel: Storage
 SubLevel: PreviewCache
 Priority: P3
@@ -1683,10 +1688,12 @@ SuccessCriteria:
 - Recently viewed previews are served from cache when available.
 - Cache invalidates on job re-run or file deletion.
 
+Retirement: 2026-09-30. The article-preview pipeline is removed; the reading pane displays summaries only, so this idea is no longer planned.
+
 ### PreviewLoading
 
 #### [FI-Storage-PreviewLoading-0001] Cold-path preview loading from disk
-Status: Candidate
+Status: Retired
 TopLevel: Storage
 SubLevel: PreviewLoading
 Priority: P2
@@ -1702,6 +1709,9 @@ Rationale: Enables preview after app restart without re-running jobs.
 SuccessCriteria:
 - Selecting a restored job loads its preview file with a size limit.
 - Preview loading is async and does not block UI.
+
+Retirement: 2026-09-30. The article-preview pipeline is removed; the reading pane displays summaries only, so this idea is no longer planned.
+
 
 #### [FI-Storage-PreviewLoading-0002] Extended cut reason tracking with ExclusionRecord
 Status: Candidate
@@ -2193,7 +2203,7 @@ Related: FI-Architecture-BatchOrchestration-0007
 ### TrendInsights
 
 #### [FI-UX-TrendInsights-0001] Configurable trend time windows
-Status: Candidate
+Status: Retired
 TopLevel: UX
 SubLevel: TrendInsights
 Priority: P2
@@ -2210,9 +2220,10 @@ SuccessCriteria:
 - Trends UI exposes predefined window toggles.
 - Selecting a window recomputes and rerenders trend data deterministically.
 - Reducer and trend computation tests cover window switching behavior.
+Retirement: 2026-09-30. Trends, the entity index, linked-page download and the indirect-link pool are removed; this idea is no longer planned.
 
 #### [FI-UX-TrendInsights-0002] Weighted trend counting mode
-Status: Candidate
+Status: Retired
 TopLevel: UX
 SubLevel: TrendInsights
 Priority: P2
@@ -2229,9 +2240,10 @@ SuccessCriteria:
 - Trends UI provides Counts and Weighted modes.
 - Weighted mode applies a documented deterministic priority-to-weight mapping.
 - Tests verify ranking and totals differ as expected between modes.
+Retirement: 2026-09-30. Trends, the entity index, linked-page download and the indirect-link pool are removed; this idea is no longer planned.
 
 #### [FI-UX-TrendInsights-0003] Entity alias canonicalization for trends
-Status: Candidate
+Status: Retired
 TopLevel: UX
 SubLevel: TrendInsights
 Priority: P1
@@ -2248,9 +2260,10 @@ SuccessCriteria:
 - Alias mappings are loaded from a dedicated config source.
 - Trend grouping uses canonical keys while preserving a stable display label.
 - Tests verify aliases merge into one series without data loss.
+Retirement: 2026-09-30. Trends, the entity index, linked-page download and the indirect-link pool are removed; this idea is no longer planned.
 
 #### [FI-UX-TrendInsights-0004] Export trends view to CSV
-Status: Candidate
+Status: Retired
 TopLevel: UX
 SubLevel: TrendInsights
 Priority: P3
@@ -2267,9 +2280,10 @@ SuccessCriteria:
 - UI provides an explicit export trends action.
 - Exported CSV includes the active window and category data with stable column names.
 - Export path and write failures are surfaced to the user.
+Retirement: 2026-09-30. Trends, the entity index, linked-page download and the indirect-link pool are removed; this idea is no longer planned.
 
 #### [FI-UX-TrendInsights-0005] Trend smoothing overlay
-Status: Candidate
+Status: Retired
 TopLevel: UX
 SubLevel: TrendInsights
 Priority: P3
@@ -2286,9 +2300,10 @@ SuccessCriteria:
 - UI supports toggling raw and smoothed line display.
 - Smoothing algorithm and window are deterministic and documented.
 - Tests cover boundary handling at the start of the selected window.
+Retirement: 2026-09-30. Trends, the entity index, linked-page download and the indirect-link pool are removed; this idea is no longer planned.
 
 #### [FI-UX-TrendInsights-0006] Highlight newly emerging entities
-Status: Candidate
+Status: Retired
 TopLevel: UX
 SubLevel: TrendInsights
 Priority: P3
@@ -2305,9 +2320,10 @@ SuccessCriteria:
 - Trend rows/lines include a deterministic new-entrant marker.
 - Marker logic uses prior-week absence within the configured window definition.
 - Tests verify marker behavior for first appearance and repeat appearance cases.
+Retirement: 2026-09-30. Trends, the entity index, linked-page download and the indirect-link pool are removed; this idea is no longer planned.
 
 #### [FI-UX-TrendInsights-0007] Chart annotations for notable events
-Status: Candidate
+Status: Retired
 TopLevel: UX
 SubLevel: TrendInsights
 Priority: P3
@@ -2324,9 +2340,10 @@ SuccessCriteria:
 - Users can create, edit, and remove week-level annotations.
 - Annotation persistence survives restart and loads with the trends view.
 - Rendering and persistence behavior is covered by tests.
+Retirement: 2026-09-30. Trends, the entity index, linked-page download and the indirect-link pool are removed; this idea is no longer planned.
 
 #### [FI-UX-TrendInsights-0008] Cross-entity co-occurrence analytics
-Status: Candidate
+Status: Retired
 TopLevel: UX
 SubLevel: TrendInsights
 Priority: P3
@@ -2343,9 +2360,10 @@ SuccessCriteria:
 - View displays co-occurrence strength for entity pairs in the active window.
 - Computation is deterministic and scalable for expected archive sizes.
 - Tests validate pair counting and tie ordering rules.
+Retirement: 2026-09-30. Trends, the entity index, linked-page download and the indirect-link pool are removed; this idea is no longer planned.
 
 #### [FI-UX-TrendInsights-0009] Surprise-score ranking mode
-Status: Candidate
+Status: Retired
 TopLevel: UX
 SubLevel: TrendInsights
 Priority: P3
@@ -2362,6 +2380,7 @@ SuccessCriteria:
 - Trends UI offers Top by Count and Top by Surprise modes.
 - Surprise calculation method is documented and deterministic.
 - Tests verify expected ordering on synthetic baseline-and-spike datasets.
+Retirement: 2026-09-30. Trends, the entity index, linked-page download and the indirect-link pool are removed; this idea is no longer planned.
 
 ### TriageUi
 

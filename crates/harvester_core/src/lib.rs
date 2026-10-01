@@ -5,7 +5,6 @@ mod briefing;
 
 mod cache_utils;
 mod effect;
-pub mod entity_index;
 #[doc(hidden)]
 pub mod fixture_support;
 pub mod import_session;
@@ -22,12 +21,10 @@ mod source_state;
 mod state;
 mod summary_cache;
 mod tabs;
-pub mod trends;
 mod triage;
 mod triage_cache;
 mod ui_intent;
 mod update;
-mod url_age;
 mod view_model;
 pub mod working_corpus;
 
@@ -38,12 +35,11 @@ pub use briefing::{
 
 pub use cache_utils::model_ids_compatible;
 pub use effect::{Effect, PersistenceSnapshot, StopPolicy};
-pub use entity_index::{EntityIndex, EntityIndexEntry};
 pub use harvester_engine::llm::SummaryEntities;
 pub use import_session::{ImportPhase, ImportSessionState};
 pub use llm_quota_view::{
-    build_llm_quota_view, build_poll_quota_warning, LlmQuotaLimits, LlmQuotaSeverity,
-    LlmQuotaState, LlmQuotaUsage, LlmQuotaView, PollQuotaWarning,
+    build_llm_quota_view, LlmQuotaLimits, LlmQuotaSeverity, LlmQuotaState, LlmQuotaUsage,
+    LlmQuotaView,
 };
 pub use msg::{LlmResultKind, Msg};
 pub use poll_stats_fmt::format_poll_stats;
@@ -51,7 +47,6 @@ pub use pre_triage_filter::{
     ArticleFilterEntry, ArticleFilterKey, AutoVerdict, FilterReason, ManualDecision,
     PreTriagePhase, PreTriagePolicy, PreTriageSession,
 };
-pub use preview::PreviewContentKind;
 pub use run_progress::{
     ActivityEntry, ActivityOutcome, PipelineActivity, PipelineRunPhase, PipelineStage,
     RunCompletionNotice, RunProgress, RunProgressView, RunState, StageProgress, StageRecord,
@@ -71,21 +66,16 @@ pub use source_state::{SourceInstanceState, SourcePollStat, SourceStateIndex};
 pub use state::{
     evaluate_reprocess_notice, normalize_url_for_dedupe, AiAvailability, AiUnavailableReason,
     AppState, ArchiveTokenEstimates, BatchObservation, BatchStatus, CompletedJobSnapshot, JobId,
-    JobOrigin, JobResultKind, LinkDownloadState, LinkSnapshotRecord, LlmRequestState,
-    LlmResultIndex, PreTriageActionability, ProviderAlert, SessionState, Stage,
-    UnfinishedStageVerdict, UnfinishedStageVerdicts, UnfinishedWork, UnfinishedWorkClass,
-    UnfinishedWorkSummary, DEFAULT_REPROCESS_NOTICE_ARTICLE_THRESHOLD,
-    DEFAULT_REPROCESS_NOTICE_QUOTA_PERCENT, MAX_EXTRACTED_LINKS,
+    JobOrigin, JobResultKind, LinkSnapshotRecord, LlmRequestState, LlmResultIndex,
+    PreTriageActionability, SessionState, Stage, UnfinishedStageVerdict, UnfinishedStageVerdicts,
+    UnfinishedWork, UnfinishedWorkClass, UnfinishedWorkSummary,
+    DEFAULT_REPROCESS_NOTICE_ARTICLE_THRESHOLD, DEFAULT_REPROCESS_NOTICE_QUOTA_PERCENT,
+    MAX_EXTRACTED_LINKS,
 };
 pub use ui_intent::{HostAction, IntentContext, IntentEffect, UiIntent};
 // ImportPhase is re-exported from import_session above; BatchObservation uses it.
 pub use summary_cache::{
     context_hash, SummaryCache, SummaryCacheEntry, SummaryCacheKey, SummaryCacheKeyError,
-};
-pub use tabs::{JobListMode, TrendCategory, WorkspaceView};
-pub use trends::{
-    choose_display_label, compute_trends, normalize_entity_key, CategoryTrend, EntityLine,
-    EntityTrendData, IsoWeek,
 };
 pub use triage::{
     ArticleTriageResult, ArticleTriageState, TriageArticle, TriageArticleId, TriagePhase,
@@ -94,14 +84,12 @@ pub use triage::{
 pub use triage_cache::{TriageCache, TriageCacheEntry, TriageCacheKey, TriageCacheKeyError};
 pub use update::update;
 pub use view_model::{
-    AppViewModel, ArchivePartialCoverageView, CategoryTrendView, DesktopJobListView,
-    EntityLineView, IndirectLinkPhase, IndirectLinkSummary, InlineWarningView, JobFilterStatus,
-    JobListRowView, JobRowView, LeftPaneView, LinkRowView, LlmModelUsageView, PreviewContextView,
-    PreviewHeaderView, ReprocessNoticeView, RightPaneView, ScoreBand, SelectedJobView,
-    SelectedJobVisibility, SignalCandidateOutcome, SignalCandidatePreviewView, SignalCandidateRow,
-    SignalCandidateRowState, StopFinishButtonState, TrendsTabView, TriageAnnotationView,
-    DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH, DESKTOP_JOB_LIST_MAX_ROWS,
-    DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS, TOKEN_LIMIT,
+    AppViewModel, ArchivePartialCoverageView, DesktopJobListView, JobFilterStatus, JobListRowView,
+    JobRowView, LinkRowView, LlmModelUsageView, ReprocessNoticeView, RightPaneView, ScoreBand,
+    SelectedJobView, SelectedJobVisibility, SignalCandidateOutcome, SignalCandidateRow,
+    SignalCandidateRowState, StopFinishButtonState, TriageAnnotationView, DEFAULT_WINDOW_HEIGHT,
+    DEFAULT_WINDOW_WIDTH, DESKTOP_JOB_LIST_MAX_ROWS, DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS,
+    TOKEN_LIMIT,
 };
 pub use working_corpus::{CurrentWorkingCorpus, CurrentWorkingCorpusSource};
 
@@ -110,3 +98,7 @@ pub use pipeline_waves::{PipelineRunScope, PipelineWave, PipelineWaves};
 
 pub mod result_store;
 pub use result_store::{ResultStore, SavedResult};
+
+pub use tabs::JobListMode;
+
+pub use preview::format_summary_for_preview;

@@ -74,7 +74,6 @@ fn completed_download_blocks_settlement_before_refresh_evaluation_is_served() {
         Msg::JobDone {
             job_id: id,
             result: crate::JobResultKind::Success,
-            content_preview: None,
             extracted_links: vec![],
             fetched_utc: None,
         },

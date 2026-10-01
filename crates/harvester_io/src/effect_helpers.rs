@@ -1,24 +1,17 @@
 use std::io::Read;
-use std::path::{Path, PathBuf};
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    mpsc, Arc,
-};
+use std::path::Path;
+use std::sync::mpsc;
 use std::{error::Error as StdError, fmt};
 
-use chrono::Utc;
 use engine_logging::{engine_info, engine_warn};
 use harvester_core::{LlmQuotaUsage, LlmResultKind, Msg, Stage};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::{LlmCompletionError, LlmError, LlmEvent, LlmRunMetadata};
 use harvester_engine::{
-    build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
-    poll_rss_source, write_corpus_manifest, AtomicFileWriter, BraveSeenSet, DecodeError,
-    ExtractionPipeline, ExtractionPolicy, FetchSettings, RssSeenSet, SourceId, UrlPolicy,
-    WhitespaceTokenCounter,
+    poll_rss_source, BraveSeenSet, FetchSettings, RssSeenSet, SourceId, UrlPolicy,
 };
 use reqwest::blocking::Client;
-use reqwest::header::{ACCEPT, CONTENT_TYPE};
+use reqwest::header::ACCEPT;
 use reqwest::redirect::Policy;
 use url::Url;
 
@@ -234,121 +227,6 @@ pub fn fetch_feed(
     }
 
     Ok(buffer)
-}
-
-pub fn download_link_page(
-    url: &str,
-    output_dir: &Path,
-    url_policy: &UrlPolicy,
-    fetch_settings: &FetchSettings,
-) -> Result<PathBuf, String> {
-    let linked_dir = output_dir.join("linked");
-    ensure_output_dir(&linked_dir).map_err(|err| format!("linked output dir error: {}", err))?;
-
-    let parsed = reqwest::Url::parse(url)
-        .map_err(|err| format!("url parsing failed for {}: {}", url, err))?;
-    if let Err(violation) = url_policy.check(&parsed) {
-        return Err(format!(
-            "url policy violation for linked page: {}",
-            violation
-        ));
-    }
-
-    let redirect_limit = fetch_settings.redirect_limit;
-    let redirect_counter = Arc::new(AtomicUsize::new(0));
-    let policy = Policy::custom({
-        let counter = redirect_counter.clone();
-        move |attempt| {
-            let count = attempt.previous().len();
-            counter.store(count, Ordering::Relaxed);
-            if count >= redirect_limit {
-                attempt.error("redirect limit exceeded")
-            } else {
-                attempt.follow()
-            }
-        }
-    });
-
-    let client = Client::builder()
-        .connect_timeout(fetch_settings.connect_timeout)
-        .timeout(fetch_settings.request_timeout)
-        .redirect(policy)
-        .user_agent(fetch_settings.user_agent.clone())
-        .build()
-        .map_err(|err| err.to_string())?;
-    let mut response = client
-        .get(parsed.clone())
-        .send()
-        .map_err(|err| err.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!(
-            "HTTP error {} for linked page {}",
-            response.status(),
-            url
-        ));
-    }
-
-    let content_type = response
-        .headers()
-        .get(CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .map(|value| value.to_string());
-    if let Some(ref content_type) = content_type {
-        let ct = content_type
-            .split(';')
-            .next()
-            .unwrap_or(content_type)
-            .trim();
-        if !fetch_settings
-            .allowed_content_types
-            .iter()
-            .any(|allowed| allowed.eq_ignore_ascii_case(ct))
-        {
-            return Err(format!("unsupported content type '{}'", ct));
-        }
-    }
-
-    let final_url = response.url().to_string();
-    let mut bytes = Vec::new();
-    let mut buffer = [0u8; 8192];
-    loop {
-        let read = response.read(&mut buffer).map_err(|err| err.to_string())?;
-        if read == 0 {
-            break;
-        }
-        let next_len = bytes.len() + read;
-        if next_len as u64 > fetch_settings.max_bytes {
-            return Err(format!(
-                "response too large for linked page {} (limit {} bytes)",
-                url, fetch_settings.max_bytes
-            ));
-        }
-        bytes.extend_from_slice(&buffer[..read]);
-    }
-
-    let decoded =
-        decode_html(&bytes, content_type.as_deref()).map_err(|err: DecodeError| err.to_string())?;
-
-    let pipeline = ExtractionPipeline::new(ExtractionPolicy::default());
-    let extracted_article = pipeline.extract(&decoded.html, Some(final_url.as_str()));
-    let token_counter = WhitespaceTokenCounter;
-    let fetched_utc = Utc::now().to_rfc3339();
-    let (_tokens, doc) = build_markdown_document(
-        &final_url,
-        extracted_article.title.as_deref(),
-        &decoded.encoding_label,
-        &fetched_utc,
-        &extracted_article.markdown,
-        &token_counter,
-    );
-
-    let filename = deterministic_filename(extracted_article.title.as_deref(), &final_url);
-    let writer = AtomicFileWriter::new(linked_dir);
-    let path = writer
-        .write(&filename, &doc)
-        .map_err(|err| err.to_string())?;
-    write_corpus_manifest(output_dir).map_err(|err| err.to_string())?;
-    Ok(path)
 }
 
 pub fn map_stage(stage: harvester_engine::Stage) -> Stage {

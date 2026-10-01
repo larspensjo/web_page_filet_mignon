@@ -66,7 +66,7 @@ pub(super) fn handle_articles_loaded(
     let job_url_pairs = state.job_url_pairs();
     state.pre_triage_mut().merge_delta(delta, &policy);
     state.pre_triage_mut().bind_job_ids(&job_url_pairs);
-    state.refresh_selected_preview();
+
     state.mark_dirty();
     let effects = super::processing::resume(state);
     if state.pipeline_ready() && state.processing_start.is_none() {
@@ -184,7 +184,7 @@ pub(super) fn dispatch_pre_triage_if_due(
 }
 
 pub(super) fn start_triage_from_pretriage(state: &mut AppState) -> Vec<Effect> {
-    state.clear_provider_alert();
+    state.reset_provider_rate_limit_failures();
     state.reset_provider_model_dispatch_halt();
     // Consumes the pre-triage articles via a phase-guarded helper that atomically
     // resets pre-triage to Idle, ensuring it cannot remain action-ready after

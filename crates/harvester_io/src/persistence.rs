@@ -38,6 +38,22 @@ struct PersistedState {
     desktop_window_height: Option<i32>,
 }
 
+/// Settings retained while replacing the completed-job snapshot. Deliberately
+/// omits completed jobs so saves do not deserialize the old link collection.
+#[derive(Debug, Deserialize, Default)]
+struct PersistedRuntimeSettings {
+    #[serde(default)]
+    pending_intake: Vec<String>,
+    #[serde(default)]
+    window_width: Option<i32>,
+    #[serde(default)]
+    window_height: Option<i32>,
+    #[serde(default)]
+    desktop_window_width: Option<i32>,
+    #[serde(default)]
+    desktop_window_height: Option<i32>,
+}
+
 pub fn load_completed_jobs(state_path: &Path) -> Vec<CompletedJobSnapshot> {
     let content = match fs::read_to_string(state_path) {
         Ok(text) => text,
@@ -107,52 +123,6 @@ pub fn load_pending_intake(state_path: &Path) -> Vec<String> {
     match ron::from_str::<PersistedState>(&content) {
         Ok(state) => state.pending_intake,
         Err(_) => Vec::new(),
-    }
-}
-
-pub fn load_window_size(state_path: &Path) -> Option<(i32, i32)> {
-    let content = match fs::read_to_string(state_path) {
-        Ok(text) => text,
-        Err(_) => return None,
-    };
-    let state: PersistedState = match ron::from_str(&content) {
-        Ok(s) => s,
-        Err(_) => return None,
-    };
-    match (state.window_width, state.window_height) {
-        (Some(w), Some(h)) => Some((w, h)),
-        _ => None,
-    }
-}
-
-pub fn persist_window_size(state_path: &Path, width: i32, height: i32) {
-    let content = fs::read_to_string(state_path).unwrap_or_default();
-    let mut state: PersistedState = ron::from_str(&content).unwrap_or_default();
-    state.window_width = Some(width);
-    state.window_height = Some(height);
-
-    let output_dir = state_path.parent().unwrap_or_else(|| Path::new("."));
-    if let Err(err) = ensure_output_dir(output_dir) {
-        engine_error!("Failed to ensure output dir {:?}: {}", output_dir, err);
-        return;
-    }
-
-    let pretty = ron::ser::PrettyConfig::new();
-    let serialized = match ron::ser::to_string_pretty(&state, pretty) {
-        Ok(text) => text,
-        Err(err) => {
-            engine_error!("Failed to serialize window size: {}", err);
-            return;
-        }
-    };
-
-    let writer = AtomicFileWriter::new(PathBuf::from(output_dir));
-    let filename = state_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(".harvester_state.ron");
-    if let Err(err) = writer.write(filename, &serialized) {
-        engine_error!("Failed to write window size to {:?}: {}", state_path, err);
     }
 }
 
@@ -244,7 +214,7 @@ pub fn try_persist_runtime_state(
     state_path: &Path,
     completed: &[CompletedJobSnapshot],
 ) -> Result<(), String> {
-    let existing: PersistedState = fs::read_to_string(state_path)
+    let existing: PersistedRuntimeSettings = fs::read_to_string(state_path)
         .ok()
         .and_then(|text| ron::from_str(&text).ok())
         .unwrap_or_default();
@@ -261,8 +231,8 @@ pub fn try_persist_runtime_state_with_pending(
     let output_dir = state_path.parent().unwrap_or_else(|| Path::new("."));
     ensure_output_dir(output_dir).map_err(|err| format!("ensure output dir: {err}"))?;
 
-    // Carry forward both hosts' window sizes from existing state to avoid clobbering.
-    let existing: PersistedState = fs::read_to_string(state_path)
+    // Read settings only: old completed jobs and downloaded paths are not carried forward.
+    let existing: PersistedRuntimeSettings = fs::read_to_string(state_path)
         .ok()
         .and_then(|text| ron::from_str(&text).ok())
         .unwrap_or_default();
@@ -274,7 +244,7 @@ fn persist_runtime_state_with_existing(
     state_path: &Path,
     completed: &[CompletedJobSnapshot],
     pending_intake: &[String],
-    existing: PersistedState,
+    existing: PersistedRuntimeSettings,
 ) -> Result<(), String> {
     let output_dir = state_path.parent().unwrap_or_else(|| Path::new("."));
     ensure_output_dir(output_dir).map_err(|err| format!("ensure output dir: {err}"))?;
@@ -557,43 +527,24 @@ mod tests {
         let completed = load_completed_jobs(&path);
         assert_eq!(completed.len(), 1);
         assert_eq!(completed[0].url, "https://example.com/completed");
-        assert_eq!(load_window_size(&path), Some((1200, 900)));
-    }
-
-    #[test]
-    fn persist_and_load_window_size_roundtrips() {
-        let temp = tempdir().expect("tempdir");
-        let path = state_path(temp.path());
-        persist_window_size(&path, 1200, 900);
-        let loaded = load_window_size(&path);
-        assert_eq!(loaded, Some((1200, 900)));
-    }
-
-    #[test]
-    fn persist_window_size_preserves_existing_jobs() {
-        let temp = tempdir().expect("tempdir");
-        let path = state_path(temp.path());
-        let snapshot = vec![CompletedJobSnapshot {
-            url: "https://example.com".to_string(),
-            tokens: Some(10),
-            bytes: Some(512),
-            links: vec![],
-            fetched_utc: None,
-        }];
-        persist_completed_jobs(&path, &snapshot);
-        persist_window_size(&path, 1200, 900);
-        let loaded_jobs = load_completed_jobs(&path);
-        assert_eq!(loaded_jobs.len(), 1);
-        assert_eq!(loaded_jobs[0].url, "https://example.com");
-        let loaded_size = load_window_size(&path);
-        assert_eq!(loaded_size, Some((1200, 900)));
+        assert_eq!(
+            {
+                let state: PersistedState =
+                    ron::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+                state.window_width.zip(state.window_height)
+            },
+            Some((1200, 900))
+        );
     }
 
     #[test]
     fn persist_runtime_state_preserves_window_size() {
         let temp = tempdir().expect("tempdir");
         let path = state_path(temp.path());
-        persist_window_size(&path, 1200, 900);
+        write_state(
+            temp.path(),
+            "(completed: [], window_width: Some(1200), window_height: Some(900))",
+        );
         let jobs = vec![CompletedJobSnapshot {
             url: "https://example.com".to_string(),
             tokens: Some(10),
@@ -602,7 +553,10 @@ mod tests {
             fetched_utc: None,
         }];
         persist_completed_jobs(&path, &jobs);
-        let loaded_size = load_window_size(&path);
+        let loaded_size = {
+            let state: PersistedState = ron::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+            state.window_width.zip(state.window_height)
+        };
         assert_eq!(loaded_size, Some((1200, 900)));
     }
 
@@ -610,11 +564,21 @@ mod tests {
     fn desktop_window_size_roundtrips_without_changing_legacy_window_size() {
         let temp = tempdir().expect("tempdir");
         let path = state_path(temp.path());
-        persist_window_size(&path, 1200, 900);
+        write_state(
+            temp.path(),
+            "(completed: [], window_width: Some(1200), window_height: Some(900))",
+        );
 
         persist_desktop_window_size(&path, 960, 720);
 
-        assert_eq!(load_window_size(&path), Some((1200, 900)));
+        assert_eq!(
+            {
+                let state: PersistedState =
+                    ron::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+                state.window_width.zip(state.window_height)
+            },
+            Some((1200, 900))
+        );
         assert_eq!(load_desktop_window_size(&path), Some((960, 720)));
     }
 
@@ -663,5 +627,75 @@ mod tests {
         assert_eq!(snapshot.len(), 1);
         assert!(snapshot[0].links.len() == 1);
         assert!(snapshot[0].links[0].downloaded_path.is_none());
+    }
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn old_link_paths_load_but_runtime_saves_drop_them_and_preserve_geometry() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".harvester_state.ron");
+        fs::write(&path, r#"(completed: [(url: "https://example.com/article", tokens: Some(42), bytes: Some(1024), links: [(url: "https://example.com/link", downloaded_path: Some("linked/old.md"))], fetched_utc: Some("2026-09-20T09:15:00Z"))], window_width: Some(1280), window_height: Some(800), desktop_window_width: Some(1512), desktop_window_height: Some(982))"#).unwrap();
+        let loaded = load_completed_jobs(&path);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(
+            loaded[0].links[0].downloaded_path.as_deref(),
+            Some("linked/old.md")
+        );
+        let (state, _) = harvester_core::update(
+            harvester_core::AppState::new(),
+            harvester_core::Msg::RestoreCompletedJobs(loaded),
+        );
+        let (state, _) =
+            harvester_core::update(state, harvester_core::Msg::JobSelected { job_id: 1 });
+        assert_eq!(
+            state.view().desktop_job_list.selected_job.unwrap().links[0].url,
+            "https://example.com/link"
+        );
+        let snapshot = state.completed_jobs_snapshot();
+        assert!(snapshot[0].links[0].downloaded_path.is_none());
+        persist_runtime_state(&path, &snapshot);
+        assert!(load_completed_jobs(&path)[0].links[0]
+            .downloaded_path
+            .is_none());
+        assert_eq!(load_desktop_window_size(&path), Some((1512, 982)));
+        let persisted: PersistedState = ron::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            persisted.window_width.zip(persisted.window_height),
+            Some((1280, 800))
+        );
+    }
+
+    #[test]
+    fn runtime_save_ignores_old_completed_payload_and_preserves_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".harvester_state.ron");
+        fs::write(&path, r#"(completed: "not a job collection", pending_intake: ["https://pending.example"], desktop_window_width: Some(960), desktop_window_height: Some(720))"#).unwrap();
+        let completed = vec![CompletedJobSnapshot {
+            url: "https://new.example/article".into(),
+            tokens: Some(42),
+            bytes: Some(1024),
+            links: vec![LinkSnapshotRecord {
+                url: "https://new.example/link".into(),
+                downloaded_path: None,
+            }],
+            fetched_utc: Some("2026-09-20T09:15:00Z".into()),
+        }];
+
+        try_persist_runtime_state(&path, &completed).unwrap();
+        let loaded = load_completed_jobs(&path);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].url, completed[0].url);
+        assert_eq!(loaded[0].links[0].url, completed[0].links[0].url);
+        assert!(loaded[0].links[0].downloaded_path.is_none());
+        assert_eq!(load_pending_intake(&path), vec!["https://pending.example"]);
+        assert_eq!(load_desktop_window_size(&path), Some((960, 720)));
+
+        try_persist_runtime_state_with_pending(&path, &completed, &[]).unwrap();
+        assert!(load_pending_intake(&path).is_empty());
+        assert_eq!(load_desktop_window_size(&path), Some((960, 720)));
     }
 }

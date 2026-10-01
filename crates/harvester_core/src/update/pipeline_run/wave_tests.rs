@@ -320,7 +320,10 @@ fn stop_withdraws_pending_triage_and_keeps_the_in_flight_result() {
     assert_eq!(state.triage().phase(), &crate::TriagePhase::Complete);
     assert!(state.run_progress().unwrap().terminal);
     assert_eq!(state.pipeline_run_phase(), crate::PipelineRunPhase::Idle);
-    assert_eq!(state.view().session, crate::SessionState::Idle);
+    assert_eq!(
+        state.batch_observation().session_state,
+        crate::SessionState::Idle
+    );
     assert_eq!(state.run_state(), crate::RunState::Idle);
     assert!(state.view().archive_enabled);
     assert_eq!(state.triage_cache().len(), 1);
@@ -405,7 +408,10 @@ fn stop_drains_overlapping_triage_and_summary_without_downstream_dispatch() {
         .all(|effect| !matches!(effect, Effect::RequestLlmCompletion { .. })));
     assert!(state.run_progress().unwrap().terminal);
     assert_eq!(state.pipeline_run_phase(), crate::PipelineRunPhase::Idle);
-    assert_eq!(state.view().session, crate::SessionState::Idle);
+    assert_eq!(
+        state.batch_observation().session_state,
+        crate::SessionState::Idle
+    );
     assert_eq!(state.run_state(), crate::RunState::Idle);
     assert!(state.view().archive_enabled);
     assert_eq!(state.triage_cache().len(), 2);
@@ -489,7 +495,6 @@ fn run_requested_during_continuous_downloads_starts_triage_before_downloads_end(
             Msg::JobDone {
                 job_id: jobs[index],
                 result: JobResultKind::Success,
-                content_preview: None,
                 extracted_links: vec![],
                 fetched_utc: articles[index].fetched_utc.clone(),
             },
@@ -628,7 +633,6 @@ fn three_download_bursts_release_overlapping_waves_and_monotonic_totals() {
             Msg::JobDone {
                 job_id: jobs[burst],
                 result: JobResultKind::Success,
-                content_preview: None,
                 extracted_links: vec![],
                 fetched_utc: articles[burst].fetched_utc.clone(),
             },

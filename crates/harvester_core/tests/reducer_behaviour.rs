@@ -25,10 +25,15 @@ fn urls_pasted_trims_and_ignores_empty() {
     let (next, effects) = submit_urls(state, input);
     let view = next.view();
 
-    assert_eq!(view.session, SessionState::Running);
-    assert_eq!(view.queued_urls, Vec::<String>::new());
+    assert_eq!(
+        next.batch_observation().session_state,
+        SessionState::Running
+    );
     assert_eq!(view.job_count, 2);
-    assert!(view.dirty);
+    assert!({
+        let mut state = next.clone();
+        state.consume_dirty()
+    });
     assert_eq!(
         effects,
         vec![
@@ -56,13 +61,19 @@ fn stop_finish_moves_running_to_finishing() {
     let (state, _effects) = submit_urls(state, "https://example.com\n");
     let (state, _effects) = update(state, Msg::StopFinishClicked);
 
-    assert_eq!(state.view().session, SessionState::Finishing);
+    assert_eq!(
+        state.batch_observation().session_state,
+        SessionState::Finishing
+    );
     assert_eq!(
         state.view().run_state,
         harvester_core::RunState::Stopping { in_flight: 0 }
     );
     assert!(!state.view().archive_enabled);
-    assert!(state.view().dirty);
+    assert!({
+        let mut snapshot = state.clone();
+        snapshot.consume_dirty()
+    });
 }
 
 #[test]
@@ -99,7 +110,10 @@ fn stop_finish_click_is_ignored_after_work_has_already_settled() {
 
     let (next, effects) = update(state, Msg::StopFinishClicked);
 
-    assert_eq!(next.view().session, SessionState::Finishing);
+    assert_eq!(
+        next.batch_observation().session_state,
+        SessionState::Finishing
+    );
     assert!(effects.is_empty());
 }
 
@@ -120,18 +134,21 @@ fn urls_pasted_again_after_stop_drain() {
             result: harvester_core::JobResultKind::Failed {
                 reason: "cancelled from Stop queue drain".into(),
             },
-            content_preview: None,
+
             extracted_links: Vec::new(),
             fetched_utc: None,
         },
     );
-    assert_eq!(state.view().session, SessionState::Idle);
+    assert_eq!(state.batch_observation().session_state, SessionState::Idle);
     assert_eq!(state.view().run_state, harvester_core::RunState::Idle);
     assert!(state.consume_dirty());
 
     let (next, effects) = submit_urls(state, "https://a.example.com\n");
 
-    assert_eq!(next.view().session, SessionState::Running);
+    assert_eq!(
+        next.batch_observation().session_state,
+        SessionState::Running
+    );
     assert_eq!(next.view().job_count, 2);
     assert!(effects.iter().any(|effect| matches!(
         effect,
@@ -143,68 +160,23 @@ fn urls_pasted_again_after_stop_drain() {
 }
 
 #[test]
-fn indirect_links_are_not_polled_during_stop_drain() {
-    init_logging();
-    let (state, _) = submit_urls(
-        AppState::new(),
-        "https://source.example/article\nhttps://pending.example/article\n",
-    );
-    let (state, _) = update(
-        state,
-        Msg::JobDone {
-            job_id: 1,
-            result: harvester_core::JobResultKind::Success,
-            content_preview: None,
-            extracted_links: vec![ExtractedLink {
-                url: "https://linked.example/article/one".into(),
-                text: None,
-                kind: LinkKind::Hyperlink,
-            }],
-            fetched_utc: None,
-        },
-    );
-    let (state, _) = update(state, Msg::StopFinishClicked);
-    assert!(matches!(
-        state.view().run_state,
-        harvester_core::RunState::Stopping { .. }
-    ));
-    let job_count = state.view().job_count;
-    let (state, effects) = update(state, Msg::PollIndirectLinks);
-    assert!(effects.is_empty());
-    assert_eq!(state.view().job_count, job_count);
-    let (state, _) = update(
-        state,
-        Msg::JobDone {
-            job_id: 2,
-            result: harvester_core::JobResultKind::Failed {
-                reason: "cancelled from Stop queue drain".into(),
-            },
-            content_preview: None,
-            extracted_links: Vec::new(),
-            fetched_utc: None,
-        },
-    );
-    let (state, effects) = update(state, Msg::PollIndirectLinks);
-    assert_eq!(state.view().job_count, job_count + 1);
-    assert!(matches!(effects.first(), Some(Effect::StartSession)));
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        Effect::EnqueueUrl { url, .. } if url == "https://linked.example/article/one"
-    )));
-}
-
-#[test]
 fn urls_pasted_while_running_stays_running() {
     init_logging();
     let state = AppState::new();
     // First paste: Idle -> Running
     let (state, effects) = submit_urls(state, "https://first.example.com\n");
-    assert_eq!(state.view().session, SessionState::Running);
+    assert_eq!(
+        state.batch_observation().session_state,
+        SessionState::Running
+    );
     assert_eq!(effects.len(), 2); // StartSession + EnqueueUrl
 
     // Second paste while Running: should stay Running, no StartSession
     let (state, effects) = submit_urls(state, "https://second.example.com\n");
-    assert_eq!(state.view().session, SessionState::Running);
+    assert_eq!(
+        state.batch_observation().session_state,
+        SessionState::Running
+    );
     assert_eq!(state.view().job_count, 2);
     assert_eq!(
         effects,
@@ -457,4 +429,66 @@ fn request_ids_monotonically_increase() {
     );
     let request_id_b = extract_request_id(&effects_b[0]);
     assert!(request_id_b > request_id_a);
+}
+
+#[test]
+fn extracted_links_do_not_bypass_stop_intake_drain() {
+    init_logging();
+    let (state, _) = submit_urls(
+        AppState::new(),
+        "https://source.example/article\nhttps://pending.example/article\n",
+    );
+    let (state, _) = update(
+        state,
+        Msg::JobDone {
+            job_id: 1,
+            result: harvester_core::JobResultKind::Success,
+            extracted_links: vec![ExtractedLink {
+                url: "https://linked.example/article/one".into(),
+                text: None,
+                kind: LinkKind::Hyperlink,
+            }],
+            fetched_utc: None,
+        },
+    );
+    let (state, _) = update(state, Msg::StopFinishClicked);
+    assert!(matches!(
+        state.view().run_state,
+        harvester_core::RunState::Stopping { .. }
+    ));
+    let job_count = state.view().job_count;
+    let (_, open_effects) = update(
+        state.clone(),
+        Msg::ExtractedLinkOpenRequested {
+            job_id: 1,
+            link_index: 0,
+        },
+    );
+    assert_eq!(
+        open_effects,
+        vec![Effect::OpenUrlInBrowser {
+            url: "https://linked.example/article/one".into()
+        }]
+    );
+    let (state, effects) = submit_urls(state, "https://linked.example/article/one");
+    assert!(effects.is_empty());
+    assert_eq!(state.view().job_count, job_count);
+    let (state, _) = update(
+        state,
+        Msg::JobDone {
+            job_id: 2,
+            result: harvester_core::JobResultKind::Failed {
+                reason: "cancelled from Stop queue drain".into(),
+            },
+            extracted_links: Vec::new(),
+            fetched_utc: None,
+        },
+    );
+    let (state, effects) = submit_urls(state, "https://linked.example/article/one");
+    assert_eq!(state.view().job_count, job_count + 1);
+    assert!(matches!(effects.first(), Some(Effect::StartSession)));
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::EnqueueUrl { url, .. } if url == "https://linked.example/article/one"
+    )));
 }

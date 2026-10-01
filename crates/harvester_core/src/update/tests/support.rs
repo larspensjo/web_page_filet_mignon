@@ -381,7 +381,6 @@ pub(super) fn add_completed_job_for_test(state: AppState, url: &str) -> AppState
         Msg::JobDone {
             job_id,
             result: JobResultKind::Success,
-            content_preview: None,
             extracted_links: Vec::new(),
             fetched_utc: None,
         },
@@ -412,7 +411,6 @@ pub(super) fn add_completed_job_with_tokens_for_test(
             stage: crate::Stage::Tokenizing,
             tokens: Some(tokens),
             bytes: None,
-            content_preview: None,
         },
     );
     let (state, _) = update(
@@ -420,7 +418,6 @@ pub(super) fn add_completed_job_with_tokens_for_test(
         Msg::JobDone {
             job_id,
             result: JobResultKind::Success,
-            content_preview: None,
             extracted_links: Vec::new(),
             fetched_utc: None,
         },

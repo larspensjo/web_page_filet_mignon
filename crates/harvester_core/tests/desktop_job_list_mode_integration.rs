@@ -1,4 +1,4 @@
-use harvester_core::{update, AppState, JobListMode, JobResultKind, Msg, WorkspaceView};
+use harvester_core::{update, AppState, JobListMode, JobResultKind, Msg};
 use std::collections::BTreeSet;
 
 fn submit_urls(state: AppState, input: &str) -> AppState {
@@ -12,7 +12,6 @@ fn mark_done(state: AppState, job_id: u64) -> AppState {
         Msg::JobDone {
             job_id,
             result: JobResultKind::Success,
-            content_preview: None,
             extracted_links: Vec::new(),
             fetched_utc: Some("2026-03-03T10:00:00Z".to_string()),
         },
@@ -21,44 +20,12 @@ fn mark_done(state: AppState, job_id: u64) -> AppState {
 }
 
 #[test]
-fn mode_toggling_across_desktop_workspaces_preserves_mode() {
-    let (state, _) = update(
-        AppState::new(),
-        Msg::JobListModeSet {
-            mode: JobListMode::Last24Hours,
-        },
-    );
-    let (state, _) = update(
-        state,
-        Msg::WorkspaceViewSet {
-            view: WorkspaceView::Trends,
-        },
-    );
-    let (state, _) = update(
-        state,
-        Msg::WorkspaceViewSet {
-            view: WorkspaceView::Blacklist,
-        },
-    );
-    let (state, _) = update(state, Msg::JobsSearchRevealRequested);
-
-    assert_eq!(state.job_list_mode(), JobListMode::Last24Hours);
-    assert_eq!(state.workspace_view(), WorkspaceView::Review);
-}
-
-#[test]
-fn burst_updates_with_mode_and_workspace_switches_keep_desktop_rows_unique() {
+fn burst_updates_with_mode_and_search_changes_keep_desktop_rows_unique() {
     let mut state = submit_urls(
         AppState::new(),
         "https://example.com/a\nhttps://example.com/b\nhttps://example.com/c\n",
     );
-    state = update(
-        state,
-        Msg::WorkspaceViewSet {
-            view: WorkspaceView::Trends,
-        },
-    )
-    .0;
+    state = update(state, Msg::JobsSearchQueryChanged("example".into())).0;
     state = update(
         state,
         Msg::JobListModeSet {
@@ -68,13 +35,7 @@ fn burst_updates_with_mode_and_workspace_switches_keep_desktop_rows_unique() {
     .0;
 
     state = mark_done(state, 1);
-    state = update(
-        state,
-        Msg::WorkspaceViewSet {
-            view: WorkspaceView::Blacklist,
-        },
-    )
-    .0;
+    state = update(state, Msg::JobsSearchQueryChanged("example.com".into())).0;
     state = mark_done(state, 2);
     state = update(
         state,
@@ -85,7 +46,10 @@ fn burst_updates_with_mode_and_workspace_switches_keep_desktop_rows_unique() {
     .0;
     state = mark_done(state, 3);
 
-    let rows = state.view().desktop_job_list.rows;
+    let view = state.view();
+    assert_eq!(view.desktop_job_list.query, "example.com");
+    assert_eq!(view.desktop_job_list.mode, JobListMode::SinceCheckpoint);
+    let rows = view.desktop_job_list.rows;
     let ids: Vec<u64> = rows.iter().map(|row| row.job_id).collect();
     let unique: BTreeSet<u64> = ids.iter().copied().collect();
     assert_eq!(ids.len(), 3, "expected exactly three visible jobs");

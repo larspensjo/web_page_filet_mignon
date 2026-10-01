@@ -811,7 +811,8 @@ Work:
    against `frontend/src` and the bridge projection before removing;
    `ai_unavailable_message` is read by the page from Phase 2 on and stays), the preview pipeline
    (`content_preview` up to 40 KB per job, `crates/harvester_engine/src/preview.rs`), keeping
-   `format_summary_for_preview` and `format_triage_for_preview` used by the reading pane,
+   `format_summary_for_preview` used by the summary-only reading pane; remove the unread
+   `format_triage_for_preview` and its tests,
    `crates/harvester_core/src/url_age.rs`, and unused body keys (Preview, TriageMarkdown,
    PollStatsMarkdown).
 3. Linked-page download and delete (`Effect::DownloadLinkedPage`, `Effect::DeleteLinkedPage`,
@@ -2204,6 +2205,298 @@ Phase 5 removed tests (156), by file:
 | Removed test | Feature covered |
 | --- | --- |
 | `briefing_history_path_is_in_output_dir` | Briefing history persistence: briefing history path is in output dir |
+
+
+Phase 6 notes (2026-09-30; implementation complete):
+
+- Removed trends, entity-index state/store/worker writes, workspace selection, linked-page download/delete and their unreachable runner/completion/marking chain, indirect-link intake, article preview payloads/quality metadata, URL-age guesses and legacy window-size effects/loading. No entity sidecar is read or written. The selected job retains its extracted links and reducer-resolved browser opening.
+- Frontend consumer and bridge projection audit found **23 of 48** top-level fields consumed, rather than the plan's earlier 22. `ai_unavailable_message` is read and stays. The page's rendered workflow and styles are unchanged. The frontend types now state the exact contract, without a permissive index signature. ReadingPaneMode/SetReadingPaneMode and the AppTab/LeftTab jumps were already absent from both the page and surviving hosts; WorkspaceView/SetWorkspaceView had no consumer and are removed.
+- The reading pane keeps summary formatting and live-session-first, then newest content-hash result under any key. `format_summary_for_preview` remains; the unread triage formatter and its five tests are removed alongside the raw article-preview pipeline and fallback/exclusion presentation. RightPaneView carries only summary_markdown; SummaryMarkdown is the sole body key. Link rows no longer contain download state or URL-age hints.
+- IPC_SCHEMA_VERSION is 13 in Rust and TypeScript. Regenerated all 13 snapshot fixtures, including run_finished_with_notice.json and ai_unavailable.json, using `UPDATE_UI_FIXTURES=1 cargo test --offline -p harvester_ui_bridge`. The projection comparison no longer blanks retired fields and compares the entire projected fixture. Updated synthetic probe views without changing delivery gates. Removed intents and body keys are rejected by decoding; the surviving frontend command decoder and components needed no behavioral changes.
+- Saved-state layout remains unchanged. Old downloaded_path values and both geometry pairs still deserialize. Runtime links ignore downloaded paths, and saves no longer carry old paths forward. Saves deserialize only pending intake and geometry settings, skipping old completed-job records without allocating their jobs/links or normalizing URLs. Only desktop geometry has a host loader/writer. Carry-over assertions retain saved jobs, fetch times, link URLs, geometry, seen entries and paid results; rewritten snapshots assert downloaded paths are absent, as specified; the legacy geometry assertion uses a test-local reader after removal of the production loader. Archive golden fixtures and carry-over fixture files are unmodified; archive output and paid-result fixture byte comparisons pass.
+- Preserved tests now observe scoped/selected job records, consumed dirty state, per-job tokens, batch session observations and model-usage accessors instead of removed view fields. AI availability tests assert the real message/quota state; provider-credit, rate-limit and session-budget tests assert halt reasons, dispatch effects and pending work. Removed presentation helpers are not retained as test-only implementations. Blacklist coverage asserts actual records and cooldown expiry. The Stop regression opens an extracted link during draining, rejects new intake until drain completes, then accepts intake; duplicate Resume and in-run selection preserve a non-default list mode.
+- Updated Architecture, README, article-search design guidance, DecisionLog, EngineeringDiary and FutureIdeas. Retired backlog entries specific to linked-page downloads, trend insights and the article-preview pipeline. VisualDesignSpec names no removed surface and needs no change. The marker already lists only archive.md/archive-*.md, so neither it nor CORPUS_SCHEMA_VERSION changes. Launch scripts are unchanged. Runtime-state restructuring and the link store remain Phase 7 work.
+- Verification passed: `cargo build --offline`; touched-crate tests followed by full root `cargo test --offline`; `cargo test --offline -p harvester_ui`; `cargo clippy --offline --all-targets -- -D warnings`; `cargo clippy --offline -p harvester_ui --all-targets -- -D warnings`; `cargo fmt` and `cargo fmt --check`. From frontend/: `npm run check`, `npm run build`, `npm run fmt` passed, including 97 Vitest tests. Pester, the GUI IPC probe, scripts/project-stats.ps1 and git writes cannot run in this environment; Claude/owner must run the probe and desktop walkthrough. Test attributes were counted directly using Count-RustTests' regex. No keys, live model APIs or real output folder were used. Changes remain uncommitted.
+- Both replay harnesses completed on temporary synthetic carry-over copies with one held-back article, zero model latency and synchronous requests: batch 37.6 ms, desktop 82.1 ms. These are smoke checks, not corpus-sized performance comparisons; no fresh pre-change benchmark was run. The prior Phase 5 smoke numbers are recorded above, but are not a matched before/after comparison. Reports: .local/bench/desktop-slim-batch/report.json and .local/bench/desktop-slim-desktop/report.json. Check logs: .local/bench/desktop-slim-checks/. Full-corpus size/performance rows remain owner follow-up.
+
+- Review follow-up: removed the unread PollQuotaWarning builder/formatting branch, ProviderAlert storage/getter/setters, MetricsState.total_tokens, domain_from_url and their feature-only tests after workspace-wide caller searches including both hosts and frontend/src. The rate-limit failure counter, owned-success reset, model halt reasons and session quota remain covered. `scan_archive_article_metadata` survives because `harvester_batch/examples/replay_support/mod.rs:read_article_files` uses it for replay corpus metadata; its comment now names that caller. `JobOrigin::Direct` remains because JobRowView, JobListRowView and SelectedJobView serialize it into the desktop JSON contract; no persisted-format change or origin migration is introduced.
+- Removed RevealJobsSearch from UiIntent and JobsSearchRevealRequested from Msg/mapping. Ctrl+F focuses/selects the search input locally without dispatch; its frontend test now pins that contract. There was no separate TypeScript UiIntent union or intent fixture carrying it (dispatchIntent accepts a string). Added RevealJobsSearch to removed_desktop_intents_fail_closed. Snapshot fixture content is unchanged in this review pass; full Rust byte comparison and Vitest fixture checks pass at IPC 13.
+- Deleted the four reveal-only reducer tests instead of renaming them into new no-ops. The burst test now changes actual search queries and pins the final query, mode and unique deterministic rows. Removed duplicated AI-message assertions and the meaningless unselected summary-settlement pane assertion. Added a state-level pasted-input clearing regression with a nonempty precondition and a second empty submit.
+- Review verification: full root `cargo test --offline` passes 1,218 tests with 2 ignored; separate `cargo test --offline -p harvester_ui` passes 8; Rust test attributes total 1,228. `cargo build --offline`, both offline Clippy commands with all targets and warnings denied, `cargo fmt`, and frontend check/build/fmt pass (97 Vitest tests). The first test run exposed the obsolete carry-forward expectation in the replay carry-over test; it now asserts preserved link URLs and absent retired paths, with all paid-result byte assertions intact. Final logs are under `.local/review-fixes/`. No network, keys, launchers, Pester, GUI probe or git writes were used. Existing line-ending noise is left for Claude.
+
+Phase 6 audited snapshot fields:
+
+- Kept (23): `job_count`, `desktop_job_list`, `last_paste_stats`, `token_limit`, `archive_token_estimate`, `archive_filtered_count`, `archive_partial_coverage`, `raw_unprocessed_count`, `stop_finish_button`, `signal_candidate_rows`, `ai_unavailable_message`, `run_progress`, `archive_enabled`, `run_state`, `run_completion_notice`, `run_enabled`, `resume_enabled`, `resume_disabled_reason`, `unfinished_work`, `reprocess_notice`, `checkpoint_status_message`, `llm_quota`, `right_pane`.
+- Removed (25): `ai_warning_banner`, `blacklist`, `briefing_blocked_reason`, `briefing_generate_enabled`, `dirty`, `indirect_link_summary`, `is_pre_triage_reviewing`, `job_list_mode`, `left_pane`, `llm_usage_by_model`, `next_item_enabled`, `poll_indirect_links_enabled`, `preview_context`, `preview_header`, `preview_source`, `preview_text`, `queued_urls`, `selected_job_id`, `selected_url`, `session`, `signal_candidate_preview`, `total_tokens`, `triage_blocked_reason`, `triage_results_reorder_suppressed`, `workspace_view`.
+- Consumers: frontend/src/App.tsx, components/, ipc/useSnapshot.ts and components/ReadingPane.tsx; bridge projection: crates/harvester_ui_bridge/src/snapshot.rs. Selected job identity/URL and list mode remain inside desktop_job_list, rather than duplicate top-level fields. The activity feed remains capped at 50 entries and the desktop list at 400 rows plus one independent selected record.
+
+Phase 6 test-count reconciliation (baseline commit feab6cd):
+
+| Count | Baseline | Added | Removed | Final |
+| --- | ---: | ---: | ---: | ---: |
+| Rust test attributes | 1,319 | 7 | 98 | 1,228 |
+| Root passing tests | 1,309 | 7 | 98 | 1,218 |
+| Root ignored tests | 2 | 0 | 0 | 2 |
+| harvester_ui passing / attributes (outside default members) | 8 | 0 | 0 | 8 |
+| Vitest passing tests | 96 | 1 | 0 | 97 |
+
+**1,319 + 7 - 98 = 1,228 attributes** and **1,309 + 7 - 98 = 1,218 root passing tests**.
+The difference remains eight desktop-host tests plus two ignored tests. Forty-seven removals
+are in the previously permitted wholesale deletions; 51 are edited out of surviving files.
+No additional source or test file was deleted in the review pass. The renamed/moved tests
+below have no count effect. No surviving quota, halt, Stop, cutoff, cache-key, export-byte,
+ordering, job-list-mode, IPC-decoding, link-opening or saved-state-loading contract was dropped.
+
+| Crate | Root passed before | Added | Removed | Root passed after | Ignored before / after |
+| --- | ---: | ---: | ---: | ---: | --- |
+| harvester_batch | 104 | 0 | 0 | 104 | 0 / 0 |
+| harvester_core | 596 | 2 | 79 | 519 | 0 / 0 |
+| harvester_engine | 417 | 0 | 6 | 411 | 1 / 1 |
+| harvester_io | 129 | 2 | 13 | 118 | 0 / 0 |
+| harvester_ui_bridge | 33 | 3 | 0 | 36 | 0 / 0 |
+| openai_provider_kit | 30 | 0 | 0 | 30 | 1 / 1 |
+| engine_logging | 0 | 0 | 0 | 0 | 0 / 0 |
+
+Phase 6 review-pass reconciliation (baseline: the uncommitted implementation reviewed):
+
+| Count | Review baseline | Added | Removed | Final |
+| --- | ---: | ---: | ---: | ---: |
+| Rust test attributes | 1,246 | 2 | 20 | 1,228 |
+| Root passing tests | 1,236 | 2 | 20 | 1,218 |
+| Root ignored tests | 2 | 0 | 0 | 2 |
+| harvester_ui passing tests | 8 | 0 | 0 | 8 |
+| Vitest passing tests | 97 | 0 | 0 | 97 |
+
+The review pass adds one core and one I/O regression, removes 20 core tests, and renames
+four Rust tests plus the Ctrl+F frontend test without a count change. Its root per-crate
+change is core 538 + 1 - 20 = 519 and I/O 117 + 1 = 118; all other counts are unchanged.
+
+Phase 6 added regressions (7 Rust, 1 frontend):
+
+| File | Added test | Contract |
+| --- | --- | --- |
+| `crates/harvester_core/tests/persistence.rs` | `selected_job_keeps_extracted_links_after_completion` | Selected completed record retains indexed extracted links and browser opening resolves the chosen link |
+| `crates/harvester_io/src/persistence.rs` | `old_link_paths_load_but_runtime_saves_drop_them_and_preserve_geometry` | Old paths load and runtime links ignore them; runtime saves drop paths while both geometry pairs survive and desktop geometry stays distinct |
+| `crates/harvester_ui_bridge/src/ipc.rs` | `removed_desktop_intents_fail_closed` | Reject every removed workspace/trend/indirect intent, RevealJobsSearch, plus retired reading-pane and tab jumps |
+| `crates/harvester_ui_bridge/src/ipc.rs` | `removed_body_keys_fail_closed` | Reject Preview, TriageMarkdown and PollStatsMarkdown body-key requests |
+| `crates/harvester_ui_bridge/src/snapshot.rs` | `desktop_snapshot_pins_only_rendered_fields` | Exact 23-field contract, including AI unavailability and summary-only right pane |
+| `frontend/src/App.test.tsx` | `pins the reduced IPC 13 snapshot in every bridge fixture` | All 13 fixtures have schema 13, the exact retained field set and only summary_markdown in right_pane |
+| `crates/harvester_core/src/update/mod.rs` | `urls_submitted_clears_the_pasted_input_buffer` | Nonempty buffer becomes empty after submit; trimmed URLs enqueue once and a second empty submit emits no effects |
+| `crates/harvester_io/src/persistence.rs` | `runtime_save_ignores_old_completed_payload_and_preserves_settings` | Save does not depend on old completed payload decoding; preserves pending intake and desktop geometry while replacing jobs/links |
+
+Phase 6 renamed/moved baseline tests (23; no count effect):
+
+| File | Original test | Surviving test |
+| --- | --- | --- |
+| `crates/harvester_core/src/state/tests/mod.rs` | `selecting_job_with_preview_updates_view_model` | `selecting_completed_job_updates_selected_record` |
+| `crates/harvester_core/src/state/tests/mod.rs` | `selecting_job_without_preview_only_sets_header` | `selecting_in_progress_job_exposes_its_stage` |
+| `crates/harvester_core/src/state/tests/mod.rs` | `selecting_job_sets_preview_mode_to_selected_job_summary` | `reselecting_job_keeps_its_summary` |
+| `crates/harvester_core/src/state/tests/mod.rs` | `ai_warning_banner_present_for_missing_api_key` | `missing_api_key_disables_ai_and_explains_why` |
+| `crates/harvester_core/src/state/tests/mod.rs` | `ai_warning_banner_absent_when_ai_available` | `available_ai_has_no_unavailable_message` |
+| `crates/harvester_core/src/state/tests/mod.rs` | `ai_warning_banner_absent_for_non_key_ai_unavailability` | `missing_triage_model_disables_ai_and_explains_why` |
+| `crates/harvester_core/src/state/tests/mod.rs` | `resolve_preview_prefers_summary_over_triage` | `summary_resolution_prefers_live_summary_over_triage` |
+| `crates/harvester_core/src/state/tests/mod.rs` | `preview_metadata_for_selected_done_job_exposes_source_and_status` | `selected_done_job_exposes_url_stage_and_outcome` |
+| `crates/harvester_core/src/state/tests/mod.rs` | `trends_workspace_keeps_selected_article_context` | `changing_list_mode_keeps_selected_article_context` |
+| `crates/harvester_core/src/update/tests/import_tests.rs` | `poll_ended_preserves_the_current_desktop_workspace` | `poll_ended_preserves_the_current_list_and_selection` |
+| `crates/harvester_core/src/update/tests/provider_alert_tests.rs` | `three_consecutive_rate_limited_summaries_stop_run_and_raise_banner` | `three_consecutive_rate_limited_summaries_stop_run_and_retain_reason` |
+| `crates/harvester_core/src/update/tests/provider_alert_tests.rs` | `provider_quota_exhausted_summary_raises_credits_banner_immediately` | `provider_quota_exhausted_summary_halts_immediately_with_credit_reason` |
+| `crates/harvester_core/src/update/tests/provider_alert_tests.rs` | `session_budget_quota_exhausted_stops_run_with_session_limit_banner` | `session_budget_quota_exhausted_stops_run_with_session_limit_reason` |
+| `crates/harvester_core/src/update/tests/provider_alert_tests.rs` | `session_quota_halt_persists_across_triage_start_with_visible_reason` | `session_quota_halt_persists_across_triage_start_with_original_reason` |
+| `crates/harvester_core/src/update/tests/ui_state_tests.rs` | `duplicate_resume_request_keeps_desktop_workspace_stable_during_run` | `duplicate_resume_request_keeps_list_mode_stable_during_run` |
+| `crates/harvester_core/src/update/tests/ui_state_tests.rs` | `job_selection_during_run_preserves_the_current_workspace` | `job_selection_during_run_preserves_list_mode` |
+| `crates/harvester_core/src/view_model.rs` | `blacklist_view_marks_active_and_cooldown` | `blacklist_records_active_cooldown_and_failure` |
+| `crates/harvester_core/tests/desktop_job_list_mode_integration.rs` | `burst_updates_with_mode_and_workspace_switches_keep_desktop_rows_unique` | `burst_updates_with_mode_and_search_changes_keep_desktop_rows_unique` |
+| `crates/harvester_core/tests/persistence.rs` | `restore_completed_job_records_downloaded_link_paths` | `restore_completed_job_ignores_downloaded_paths_and_keeps_links` |
+| `crates/harvester_core/tests/reducer_behaviour.rs` | `indirect_links_are_not_polled_during_stop_drain` | `extracted_links_do_not_bypass_stop_intake_drain` |
+| `crates/harvester_core/src/state/provider_alert.rs` | `rate_limit_threshold_raises_alert_after_three_consecutive_failures` | `rate_limit_threshold_stops_after_three_consecutive_failures` |
+| `crates/harvester_core/src/state/provider_alert.rs` | `clear_provider_alert_resets_alert_and_counter` | `reset_provider_rate_limit_failures_resets_counter` |
+| `crates/harvester_core/src/update/tests/provider_alert_tests.rs` | `stale_quota_completion_after_new_run_start_does_not_raise_banner` | `stale_quota_completion_after_new_run_start_does_not_halt_dispatch` |
+
+Review-pass renames without count effect: the three surviving baseline tests above;
+`old_link_paths_and_legacy_geometry_load_and_survive_without_runtime_use` to
+`old_link_paths_load_but_runtime_saves_drop_them_and_preserve_geometry` (an added regression,
+now pins the approved drop-on-save contract); and frontend `Ctrl+F dispatches RevealJobsSearch
+and focuses the search box locally` to `Ctrl+F focuses the search box locally without
+dispatching an intent`. The four reveal-only tests and the token-total test are removals,
+not renames or moves.
+
+Phase 6 removed tests (98), each named with the retired feature it covered:
+
+The original 78 removals are listed below, followed by the 20 additional review-pass removals.
+
+**`crates/harvester_core/src/preview.rs` (2)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `exclusion_formatter_includes_decision_source` | Retired article-preview payload, quality or fallback presentation: exclusion formatter includes decision source |
+| `fallback_formatter_provides_guidance` | Retired article-preview payload, quality or fallback presentation: fallback formatter provides guidance |
+
+**`crates/harvester_core/src/state/tests/mod.rs` (13)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `job_done_success_stores_preview` | Retired article-preview payload, quality or fallback presentation: job done success stores preview |
+| `job_done_failure_clears_preview` | Retired article-preview payload, quality or fallback presentation: job done failure clears preview |
+| `job_progress_with_preview_updates_selected_preview` | Retired article-preview payload, quality or fallback presentation: job progress with preview updates selected preview |
+| `job_progress_with_preview_stores_content_when_not_selected` | Retired article-preview payload, quality or fallback presentation: job progress with preview stores content when not selected |
+| `job_done_after_inprogress_promotes_preview_to_available` | Retired article-preview payload, quality or fallback presentation: job done after inprogress promotes preview to available |
+| `preview_quality_counts_headings_and_skips_nav_indicator_when_low_density` | Retired article-preview payload, quality or fallback presentation: preview quality counts headings and skips nav indicator when low density |
+| `preview_quality_marks_nav_heavy_when_link_density_high` | Retired article-preview payload, quality or fallback presentation: preview quality marks nav heavy when link density high |
+| `collect_indirect_links_filters_navigation_and_share_noise` | Indirect-link collection, filtering, deduplication or admission: collect indirect links filters navigation and share noise |
+| `indirect_link_pool_dedupes_normalized_urls` | Indirect-link collection, filtering, deduplication or admission: indirect link pool dedupes normalized urls |
+| `resolve_preview_uses_triage_when_summary_missing` | Retired article-preview payload, quality or fallback presentation: resolve preview uses triage when summary missing |
+| `resolve_preview_uses_fallback_when_nothing_available` | Retired article-preview payload, quality or fallback presentation: resolve preview uses fallback when nothing available |
+| `resolve_preview_returns_correct_kind` | Retired article-preview payload, quality or fallback presentation: resolve preview returns correct kind |
+| `ingest_indirect_links_skips_blacklisted_domain` | Indirect-link collection, filtering, deduplication or admission: ingest indirect links skips blacklisted domain |
+
+**`crates/harvester_core/src/tabs.rs` (2)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `trend_category_round_trip` | Trend category, weekly aggregation or ranking: trend category round trip |
+| `trend_category_from_index_out_of_range_returns_none` | Trend category, weekly aggregation or ranking: trend category from index out of range returns none |
+
+**`crates/harvester_core/src/trends.rs` (24)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `normalize_trims_and_lowercases` | Trend category, weekly aggregation or ranking: normalize trims and lowercases |
+| `normalize_collapses_whitespace` | Trend category, weekly aggregation or ranking: normalize collapses whitespace |
+| `normalize_empty_stays_empty` | Trend category, weekly aggregation or ranking: normalize empty stays empty |
+| `display_label_most_frequent` | Trend category, weekly aggregation or ranking: display label most frequent |
+| `display_label_tie_resolves_lexically` | Trend category, weekly aggregation or ranking: display label tie resolves lexically |
+| `display_label_empty_input` | Trend category, weekly aggregation or ranking: display label empty input |
+| `trends_week_count` | Trend category, weekly aggregation or ranking: trends week count |
+| `trends_current_week_is_last` | Trend category, weekly aggregation or ranking: trends current week is last |
+| `trends_oldest_week_is_window_minus_1_weeks_back` | Trend category, weekly aggregation or ranking: trends oldest week is window minus 1 weeks back |
+| `trends_buckets_article_in_correct_week` | Trend category, weekly aggregation or ranking: trends buckets article in correct week |
+| `trends_article_outside_window_is_skipped` | Trend category, weekly aggregation or ranking: trends article outside window is skipped |
+| `trends_missing_fetched_utc_skipped_no_panic` | Trend category, weekly aggregation or ranking: trends missing fetched utc skipped no panic |
+| `trends_counts_at_most_once_per_article` | Trend category, weekly aggregation or ranking: trends counts at most once per article |
+| `trends_top_n_tie_breaking_deterministic` | Trend category, weekly aggregation or ranking: trends top n tie breaking deterministic |
+| `trends_month_year_boundary_week` | Trend category, weekly aggregation or ranking: trends month year boundary week |
+| `trends_total_entity_count_is_full_population` | Trend category, weekly aggregation or ranking: trends total entity count is full population |
+| `recent_mover_outranks_stale_spike` | Trend category, weekly aggregation or ranking: recent mover outranks stale spike |
+| `identical_latest_falls_back_to_weighted_recent` | Trend category, weekly aggregation or ranking: identical latest falls back to weighted recent |
+| `ordering_is_deterministic_on_equal_scores` | Trend category, weekly aggregation or ranking: ordering is deterministic on equal scores |
+| `short_window_ranks_deterministically` | Trend category, weekly aggregation or ranking: short window ranks deterministically |
+| `recency_score_weights_latest_most` | Trend category, weekly aggregation or ranking: recency score weights latest most |
+| `recency_score_short_slice_rewards_previous_week_activity` | Trend category, weekly aggregation or ranking: recency score short slice rewards previous week activity |
+| `recency_score_single_element_increases_with_latest_activity` | Trend category, weekly aggregation or ranking: recency score single element increases with latest activity |
+| `recency_score_empty_slice` | Trend category, weekly aggregation or ranking: recency score empty slice |
+
+**`crates/harvester_core/src/update/mod.rs` (1)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `trends_view_opened_loads_the_entity_index` | Entity-index loading, upsert, rebuild or worker writes: trends view opened loads the entity index |
+
+**`crates/harvester_core/src/update/tests/entity_index_tests.rs` (3)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `entity_index_loaded_populates_trend_data` | Entity-index loading, upsert, rebuild or worker writes: entity index loaded populates trend data |
+| `entity_index_load_failed_triggers_rebuild` | Entity-index loading, upsert, rebuild or worker writes: entity index load failed triggers rebuild |
+| `trend_category_selected_updates_active_category_no_effects` | Trend category, weekly aggregation or ranking: trend category selected updates active category no effects |
+
+**`crates/harvester_core/src/update/tests/import_tests.rs` (1)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `window_resize_completed_emits_persist_effect` | Legacy window resize/persistence workflow: window resize completed emits persist effect |
+
+**`crates/harvester_core/src/update/tests/ui_state_tests.rs` (4)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `briefing_generate_enabled_false_when_triage_incomplete_or_corpus_empty` | Unread retired aggregate-briefing control projection: briefing generate enabled false when triage incomplete or corpus empty |
+| `briefing_generate_enabled_false_when_summaries_not_settled` | Unread retired aggregate-briefing control projection: briefing generate enabled false when summaries not settled |
+| `briefing_generate_enabled_false_when_signal_scoring_in_progress` | Unread retired aggregate-briefing control projection: briefing generate enabled false when signal scoring in progress |
+| `retired_briefing_controls_are_empty_when_summaries_settled` | Unread retired aggregate-briefing control projection: retired briefing controls are empty when summaries settled |
+
+**`crates/harvester_core/src/url_age.rs` (7)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `guess_age_from_url_parses_slash_pattern` | URL-derived link age estimation: guess age from url parses slash pattern |
+| `guess_age_from_url_parses_slash_pattern_with_extension` | URL-derived link age estimation: guess age from url parses slash pattern with extension |
+| `guess_age_from_url_parses_hyphen_pattern` | URL-derived link age estimation: guess age from url parses hyphen pattern |
+| `guess_age_from_url_parses_hyphen_pattern_with_time_suffix` | URL-derived link age estimation: guess age from url parses hyphen pattern with time suffix |
+| `guess_age_from_url_parses_compact_pattern` | URL-derived link age estimation: guess age from url parses compact pattern |
+| `guess_age_from_url_ignores_invalid_date` | URL-derived link age estimation: guess age from url ignores invalid date |
+| `guess_age_from_url_requires_digit_boundaries` | URL-derived link age estimation: guess age from url requires digit boundaries |
+
+**`crates/harvester_core/tests/jobs.rs` (2)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `link_download_completed_updates_state` | Linked-page download/delete effect and completion chain: link download completed updates state |
+| `link_download_failed_sets_failed_state` | Linked-page download/delete effect and completion chain: link download failed sets failed state |
+
+**`crates/harvester_engine/src/preview.rs` (6)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `short_content_kept_as_is` | Raw article-preview truncation/frontmatter pipeline: short content kept as is |
+| `truncated_content_appends_marker` | Raw article-preview truncation/frontmatter pipeline: truncated content appends marker |
+| `exact_max_content_is_unmodified` | Raw article-preview truncation/frontmatter pipeline: exact max content is unmodified |
+| `strips_frontmatter_and_trims_blank_line` | Raw article-preview truncation/frontmatter pipeline: strips frontmatter and trims blank line |
+| `malformed_frontmatter_is_ignored` | Raw article-preview truncation/frontmatter pipeline: malformed frontmatter is ignored |
+| `strips_frontmatter_with_crlf` | Raw article-preview truncation/frontmatter pipeline: strips frontmatter with crlf |
+
+**`crates/harvester_io/src/effect_runner/tests.rs` (4)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `download_link_page_rejects_disallowed_scheme_before_request` | Linked-page download/delete effect and completion chain: download link page rejects disallowed scheme before request |
+| `download_link_page_effect_is_rejected_by_authorization` | Linked-page download/delete effect and completion chain: download link page effect is rejected by authorization |
+| `delete_linked_page_effect_is_rejected_on_unsafe_path` | Linked-page download/delete effect and completion chain: delete linked page effect is rejected on unsafe path |
+| `entity_index_worker_writes_a_queued_burst_once` | Entity-index loading, upsert, rebuild or worker writes: entity index worker writes a queued burst once |
+
+**`crates/harvester_io/src/entity_index_store.rs` (7)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `upsert_entry_partial_summary_preserves_existing_themes` | Entity-index loading, upsert, rebuild or worker writes: upsert entry partial summary preserves existing themes |
+| `upsert_entry_partial_themes_preserves_existing_entities` | Entity-index loading, upsert, rebuild or worker writes: upsert entry partial themes preserves existing entities |
+| `upsert_entry_idempotent_same_patch_twice` | Entity-index loading, upsert, rebuild or worker writes: upsert entry idempotent same patch twice |
+| `upsert_entry_deduplicates_company_names_in_patch` | Entity-index loading, upsert, rebuild or worker writes: upsert entry deduplicates company names in patch |
+| `load_missing_file_returns_default` | Entity-index loading, upsert, rebuild or worker writes: load missing file returns default |
+| `load_corrupt_file_returns_default` | Entity-index loading, upsert, rebuild or worker writes: load corrupt file returns default |
+| `roundtrip_save_and_load` | Entity-index loading, upsert, rebuild or worker writes: roundtrip save and load |
+
+**`crates/harvester_io/src/persistence.rs` (2)**
+
+| Removed test | Feature covered |
+| --- | --- |
+| `persist_and_load_window_size_roundtrips` | Legacy window resize/persistence workflow: persist and load window size roundtrips |
+| `persist_window_size_preserves_existing_jobs` | Legacy window resize/persistence workflow: persist window size preserves existing jobs |
+
+
+Phase 6 additional review-pass removed tests (20):
+
+| File at review baseline | Removed test at review baseline | Original baseline name when different | Reason |
+| --- | --- | --- | --- |
+| `crates/harvester_core/src/llm_quota_view.rs` | `poll_warning_rules_follow_remaining_quota` | Same name | Unread PollStatsMarkdown quota-warning builder retired |
+| `crates/harvester_core/src/poll_stats_fmt.rs` | `can_prepend_quota_warning` | Same name | Unread PollStatsMarkdown quota-warning formatting retired |
+| `crates/harvester_core/src/preview.rs` | `triage_formatter_produces_stable_markdown` | Same name | Unread triage-preview formatter retired by owner decision |
+| `crates/harvester_core/src/preview.rs` | `triage_formatter_no_json_leakage` | Same name | Unread triage-preview formatter retired by owner decision |
+| `crates/harvester_core/src/preview.rs` | `triage_formatter_sanitizes_backticks_in_tag_text` | Same name | Unread triage-preview formatter retired by owner decision |
+| `crates/harvester_core/src/preview.rs` | `triage_formatter_sanitizes_newlines_in_tag_text` | Same name | Unread triage-preview formatter retired by owner decision |
+| `crates/harvester_core/src/preview.rs` | `triage_formatter_drops_empty_tags_after_sanitization` | Same name | Unread triage-preview formatter retired by owner decision |
+| `crates/harvester_core/tests/desktop_job_list_mode_integration.rs` | `search_reveal_preserves_list_mode` | `mode_toggling_across_desktop_workspaces_preserves_mode` | Exercised only the retired search-reveal reducer no-op |
+| `crates/harvester_core/src/state/provider_alert.rs` | `out_of_credits_raises_alert_immediately` | Same name | Write-only ProviderAlert state retired; rate-limit counter and halt behavior remain tested |
+| `crates/harvester_core/src/state/provider_alert.rs` | `out_of_credits_retains_provider_detail` | `banner_text_for_out_of_credits_mentions_credits_and_detail` | Write-only ProviderAlert state retired; rate-limit counter and halt behavior remain tested |
+| `crates/harvester_core/src/state/provider_alert.rs` | `rate_limit_alert_remains_until_explicit_reset` | `rate_limited_banner_describes_best_effort_stop` | Write-only ProviderAlert state retired; rate-limit counter and halt behavior remain tested |
+| `crates/harvester_core/src/update/mod.rs` | `jobs_search_reveal_preserves_list_mode_and_selection` | `jobs_search_reveal_changes_only_the_desktop_workspace` | Exercised only the retired search-reveal reducer no-op |
+| `crates/harvester_core/src/update/tests/provider_alert_tests.rs` | `prepare_summaries_start_clears_provider_alert` | Same name | Only tested setting/clearing unread ProviderAlert state; real run halt/reset tests remain |
+| `crates/harvester_core/src/update/tests/provider_alert_tests.rs` | `triage_start_clears_provider_alert` | Same name | Only tested setting/clearing unread ProviderAlert state; real run halt/reset tests remain |
+| `crates/harvester_core/src/update/tests/ui_state_tests.rs` | `job_list_mode_persists_across_search_reveal` | `job_list_mode_persists_across_workspace_switches` | Exercised only the retired search-reveal reducer no-op |
+| `crates/harvester_core/src/update/tests/ui_state_tests.rs` | `jobs_search_query_persists_across_search_reveal` | `jobs_search_query_persists_across_workspace_switch` | Exercised only the retired search-reveal reducer no-op |
+| `crates/harvester_core/src/state/tests/mod.rs` | `domain_from_url_handles_various_inputs` | Same name | Test-only URL domain helper retired |
+| `crates/harvester_core/src/state/tests/mod.rs` | `provider_alert_retains_detail_without_changing_ai_setup` | `provider_alert_banner_shown_when_ai_available` | Unread provider-alert detail/setup combination retired; AI setup/message tests remain |
+| `crates/harvester_core/src/state/tests/mod.rs` | `missing_api_key_message_survives_provider_alert` | `missing_api_key_banner_takes_priority_over_provider_alert` | Unread alert/message precedence retired; real missing-key message and action gates remain |
+| `crates/harvester_core/src/state/tests/mod.rs` | `token_totals_accumulate_and_replace_previous_values` | Same name; moved from `tests/jobs.rs` | Write-only MetricsState.total_tokens retired; per-job token and archive-estimate contracts remain |
 
 
 ## Open questions

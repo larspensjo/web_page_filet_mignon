@@ -533,7 +533,6 @@ fn prepared_article_state_with_source_failure(
             stage: harvester_core::Stage::Downloading,
             tokens: None,
             bytes: Some(1024),
-            content_preview: None,
         },
     );
     let state = reduce(
@@ -541,9 +540,6 @@ fn prepared_article_state_with_source_failure(
         Msg::JobDone {
             job_id,
             result: harvester_core::JobResultKind::Success,
-            content_preview: Some(
-                "# Fixture raw text\n\n[Fixture link](https://fixture.invalid/link)".into(),
-            ),
             extracted_links: vec![harvester_engine::ExtractedLink {
                 url: "https://fixture.invalid/link".into(),
                 text: Some("Fixture link".into()),
@@ -748,29 +744,8 @@ mod tests {
                 std::fs::create_dir_all(&root).unwrap();
                 std::fs::write(&path, actual).unwrap();
             } else {
-                // Keep the schema-12 fixtures as decoder inputs. Only the retired
-                // control values change; all other fields still compare byte for byte.
-                let mut expected: SnapshotEnvelope = serde_json::from_str(
-                    &std::fs::read_to_string(&path).expect("checked-in UI fixture"),
-                )
-                .unwrap();
-                for field in ["briefing_generate_enabled", "next_item_enabled"] {
-                    assert!(expected.view[field].is_boolean(), "{name}: {field}");
-                    assert_eq!(
-                        envelope.view[field],
-                        serde_json::json!(false),
-                        "{name}: {field}"
-                    );
-                    expected.view[field] = serde_json::json!(false);
-                }
-                assert!(
-                    expected.view["briefing_blocked_reason"].is_null()
-                        || expected.view["briefing_blocked_reason"].is_string()
-                );
-                assert!(envelope.view["briefing_blocked_reason"].is_null());
-                expected.view["briefing_blocked_reason"] = serde_json::Value::Null;
                 assert_eq!(
-                    serde_json::to_string_pretty(&expected).unwrap() + "\n",
+                    std::fs::read_to_string(&path).expect("checked-in UI fixture"),
                     actual,
                     "regenerate with UPDATE_UI_FIXTURES=1 cargo test -p harvester_ui_bridge"
                 );

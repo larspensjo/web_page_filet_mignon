@@ -186,25 +186,6 @@ fn import_failed_sets_failed_phase() {
 }
 
 #[test]
-fn window_resize_completed_emits_persist_effect() {
-    let state = AppState::default();
-    let (_, effects) = update(
-        state,
-        Msg::WindowResizeCompleted {
-            outer_width: 1200,
-            outer_height: 900,
-        },
-    );
-    assert_eq!(
-        effects,
-        vec![Effect::PersistWindowSize {
-            width: 1200,
-            height: 900,
-        }]
-    );
-}
-
-#[test]
 fn desktop_window_resize_completed_emits_desktop_persist_effect() {
     let state = AppState::default();
     let (_, effects) = update(
@@ -367,7 +348,7 @@ fn poll_failed_increments_progress() {
 }
 
 #[test]
-fn poll_ended_preserves_the_current_desktop_workspace() {
+fn poll_ended_preserves_the_current_list_and_selection() {
     let state = AppState::new();
     let (state, _) = crate::update::test_support::update(
         state,
@@ -376,5 +357,6 @@ fn poll_ended_preserves_the_current_desktop_workspace() {
         },
     );
     let (state, _) = update(state, Msg::AllSourcesPollEnded);
-    assert_eq!(state.workspace_view(), crate::WorkspaceView::Review);
+    assert_eq!(state.job_list_mode(), crate::JobListMode::SinceCheckpoint);
+    assert_eq!(state.selected_job_id(), None);
 }

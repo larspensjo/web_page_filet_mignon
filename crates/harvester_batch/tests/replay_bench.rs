@@ -4,8 +4,8 @@ mod replay_support;
 use harvester_engine::{build_markdown_document, WhitespaceTokenCounter};
 use harvester_io::{
     load_brave_seen_set, load_completed_jobs, load_desktop_window_size, load_seen_set,
-    load_signal_candidate_cache, load_summary_cache, load_triage_cache, load_window_size,
-    persist_brave_seen_set, persist_seen_set,
+    load_signal_candidate_cache, load_summary_cache, load_triage_cache, persist_brave_seen_set,
+    persist_seen_set,
 };
 use replay_support::{run_benchmark, BenchmarkHost, HarnessOptions};
 use std::collections::BTreeMap;
@@ -332,9 +332,10 @@ fn carry_over_replay_preserves_restored_state_seen_sets_and_paid_results() {
         );
         assert_eq!(job.links.len(), 1);
         assert_eq!(
-            job.links[0].downloaded_path.as_deref(),
-            Some("linked/carry-over-resource.md")
+            job.links[0].url,
+            "https://carry-over.synthetic/linked-resource"
         );
+        assert!(job.links[0].downloaded_path.is_none());
     }
     assert_eq!(
         load_window_size(&work.join(".harvester_state.ron")),
@@ -344,4 +345,20 @@ fn carry_over_replay_preserves_restored_state_seen_sets_and_paid_results() {
         load_desktop_window_size(&work.join(".harvester_state.ron")),
         Some((1512, 982))
     );
+}
+
+// Inspect the compatibility pair; completed-job loading already validates this RON file.
+fn load_window_size(path: &Path) -> Option<(i32, i32)> {
+    let text = fs::read_to_string(path).ok()?;
+    let dimension = |name: &str| {
+        text.lines().find_map(|line| {
+            line.trim()
+                .strip_prefix(name)?
+                .strip_prefix(": Some(")?
+                .strip_suffix("),")?
+                .parse::<i32>()
+                .ok()
+        })
+    };
+    dimension("window_width").zip(dimension("window_height"))
 }

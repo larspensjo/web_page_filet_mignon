@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{JobId, JobListMode, Msg, TrendCategory, WorkspaceView};
+use crate::{JobId, JobListMode, Msg};
 
 /// The deliberately restricted frontend vocabulary.
 ///
@@ -14,9 +14,6 @@ pub enum UiIntent {
     SelectJob {
         job_id: JobId,
     },
-    SetWorkspaceView {
-        view: WorkspaceView,
-    },
     SetJobListMode {
         mode: JobListMode,
     },
@@ -24,13 +21,7 @@ pub enum UiIntent {
         text: String,
     },
     ClearJobsSearch,
-    RevealJobsSearch,
-    SetTrendCategory {
-        category: TrendCategory,
-    },
-    TrendsViewOpened,
     DismissRunFinishedNotice,
-    PollIndirectLinks,
     RunPipeline,
     ResumeUnfinishedWork,
     StopOrFinish,
@@ -79,15 +70,10 @@ impl UiIntent {
         use UiIntent::*;
         let message = match self {
             SelectJob { job_id } => Msg::JobSelected { job_id },
-            SetWorkspaceView { view } => Msg::WorkspaceViewSet { view },
             SetJobListMode { mode } => Msg::JobListModeSet { mode },
             SetJobsSearchQuery { text } => Msg::JobsSearchQueryChanged(text),
             ClearJobsSearch => Msg::JobsSearchCleared,
-            RevealJobsSearch => Msg::JobsSearchRevealRequested,
-            SetTrendCategory { category } => Msg::TrendCategorySelected { category },
-            TrendsViewOpened => Msg::TrendsViewOpened,
             DismissRunFinishedNotice => Msg::RunFinishedNoticeDismissed,
-            PollIndirectLinks => Msg::PollIndirectLinks,
             RunPipeline => Msg::PipelineRunRequested {
                 scope: crate::PipelineRunScope::Full,
             },
@@ -130,7 +116,7 @@ mod tests {
     use chrono::{DateTime, Utc};
 
     use super::{HostAction, IntentContext, IntentEffect, UiIntent};
-    use crate::{JobListMode, Msg, TrendCategory, WorkspaceView};
+    use crate::{JobListMode, Msg};
 
     #[test]
     fn every_ui_intent_maps_to_its_exact_effect() {
@@ -142,14 +128,6 @@ mod tests {
             (
                 UiIntent::SelectJob { job_id: 7 },
                 IntentEffect::Dispatch(Msg::JobSelected { job_id: 7 }),
-            ),
-            (
-                UiIntent::SetWorkspaceView {
-                    view: WorkspaceView::Blacklist,
-                },
-                IntentEffect::Dispatch(Msg::WorkspaceViewSet {
-                    view: WorkspaceView::Blacklist,
-                }),
             ),
             (
                 UiIntent::SetJobListMode {
@@ -178,28 +156,8 @@ mod tests {
                 IntentEffect::Dispatch(Msg::JobsSearchCleared),
             ),
             (
-                UiIntent::RevealJobsSearch,
-                IntentEffect::Dispatch(Msg::JobsSearchRevealRequested),
-            ),
-            (
-                UiIntent::SetTrendCategory {
-                    category: TrendCategory::Themes,
-                },
-                IntentEffect::Dispatch(Msg::TrendCategorySelected {
-                    category: TrendCategory::Themes,
-                }),
-            ),
-            (
-                UiIntent::TrendsViewOpened,
-                IntentEffect::Dispatch(Msg::TrendsViewOpened),
-            ),
-            (
                 UiIntent::DismissRunFinishedNotice,
                 IntentEffect::Dispatch(Msg::RunFinishedNoticeDismissed),
-            ),
-            (
-                UiIntent::PollIndirectLinks,
-                IntentEffect::Dispatch(Msg::PollIndirectLinks),
             ),
             (
                 UiIntent::RunPipeline,

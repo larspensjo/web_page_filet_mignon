@@ -5,10 +5,7 @@ use harvester_core::AppViewModel;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum BodyKey {
-    Preview,
-    TriageMarkdown,
     SummaryMarkdown,
-    PollStatsMarkdown,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BodyRef {
@@ -61,24 +58,11 @@ pub fn project(view: &AppViewModel) -> (ProjectedSnapshot, BodyTable) {
     let mut value = serde_json::to_value(view)
         .expect("AppViewModel serialization is an IPC contract and must not fail");
     let mut bodies = BodyTable::new();
-    replace_body(&mut value, &mut bodies, "/preview_text", BodyKey::Preview);
-    replace_body(
-        &mut value,
-        &mut bodies,
-        "/right_pane/triage_markdown",
-        BodyKey::TriageMarkdown,
-    );
     replace_body(
         &mut value,
         &mut bodies,
         "/right_pane/summary_markdown",
         BodyKey::SummaryMarkdown,
-    );
-    replace_body(
-        &mut value,
-        &mut bodies,
-        "/right_pane/poll_stats_markdown",
-        BodyKey::PollStatsMarkdown,
     );
     (
         ProjectedSnapshot {
@@ -129,12 +113,8 @@ mod tests {
     #[test]
     fn project_preserves_the_full_view_except_for_the_explicit_contract_paths() {
         let view = AppViewModel {
-            preview_text: Some("preview".to_string()),
             right_pane: harvester_core::RightPaneView {
-                triage_markdown: Some("triage".to_string()),
                 summary_markdown: Some("summary".to_string()),
-                poll_stats_markdown: Some("stats".to_string()),
-                ..Default::default()
             },
             ..Default::default()
         };
@@ -143,12 +123,7 @@ mod tests {
         let envelope = projected.with_generation(42);
         assert_eq!(
             table.keys().copied().collect::<Vec<_>>(),
-            vec![
-                BodyKey::Preview,
-                BodyKey::TriageMarkdown,
-                BodyKey::SummaryMarkdown,
-                BodyKey::PollStatsMarkdown
-            ]
+            vec![BodyKey::SummaryMarkdown,]
         );
         let raw_paths = value_paths(&raw);
         let envelope_paths = value_paths(&envelope.view);
@@ -170,12 +145,7 @@ mod tests {
             expected_removed
         );
 
-        let replaced = BTreeSet::from([
-            "/preview_text".to_string(),
-            "/right_pane/triage_markdown".to_string(),
-            "/right_pane/summary_markdown".to_string(),
-            "/right_pane/poll_stats_markdown".to_string(),
-        ]);
+        let replaced = BTreeSet::from(["/right_pane/summary_markdown".to_string()]);
         let raw_leaf_paths = leaf_paths(&raw);
         let changed = raw_leaf_paths
             .iter()
@@ -247,5 +217,52 @@ mod tests {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod desktop_shape_tests {
+    #[test]
+    fn desktop_snapshot_pins_only_rendered_fields() {
+        let (snapshot, _) = super::project(&harvester_core::AppViewModel::default());
+        let actual = snapshot
+            .view
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        let expected = [
+            "job_count",
+            "desktop_job_list",
+            "last_paste_stats",
+            "token_limit",
+            "archive_token_estimate",
+            "archive_filtered_count",
+            "archive_partial_coverage",
+            "raw_unprocessed_count",
+            "stop_finish_button",
+            "signal_candidate_rows",
+            "ai_unavailable_message",
+            "run_progress",
+            "archive_enabled",
+            "run_state",
+            "run_completion_notice",
+            "run_enabled",
+            "resume_enabled",
+            "resume_disabled_reason",
+            "unfinished_work",
+            "reprocess_notice",
+            "checkpoint_status_message",
+            "llm_quota",
+            "right_pane",
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(actual, expected);
+        assert_eq!(
+            snapshot.view["right_pane"],
+            serde_json::json!({"summary_markdown": null})
+        );
     }
 }

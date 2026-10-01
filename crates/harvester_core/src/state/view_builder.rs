@@ -1,5 +1,5 @@
 use super::batch::archive_token_estimates_from_parts;
-use super::{domain_from_url, map_job_filter_status, AppState, JobResultKind, JobState, Stage};
+use super::{map_job_filter_status, AppState, JobState};
 use crate::archive_display::ArchiveCoverage;
 use crate::briefing::ArticleSummaryResult;
 use crate::pre_triage_filter::PreTriagePhase;
@@ -11,10 +11,9 @@ use crate::signal_candidate::{
 use crate::tabs::JobListMode;
 use crate::triage::TriagePhase;
 use crate::view_model::{
-    AppViewModel, DesktopJobListView, IndirectLinkPhase, IndirectLinkSummary, JobFilterStatus,
-    JobListRowView, JobRowView, PreviewContextView, PreviewHeaderView, RightPaneView, ScoreBand,
-    SelectedJobView, SelectedJobVisibility, SignalCandidateOutcome, SignalCandidatePreviewView,
-    SignalCandidateRow, SignalCandidateRowState, TriageAnnotationView, DESKTOP_JOB_LIST_MAX_ROWS,
+    AppViewModel, DesktopJobListView, JobFilterStatus, JobListRowView, JobRowView, RightPaneView,
+    ScoreBand, SelectedJobView, SelectedJobVisibility, SignalCandidateOutcome, SignalCandidateRow,
+    SignalCandidateRowState, TriageAnnotationView, DESKTOP_JOB_LIST_MAX_ROWS,
     DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS, TOKEN_LIMIT,
 };
 use chrono::{DateTime, Duration, Utc};
@@ -43,44 +42,13 @@ impl AppState {
     fn build_view(&self) -> AppViewModel {
         let summary_lookup = self.build_summary_lookup();
 
-        let selected_job_id = self.ui.selected_job_id();
-        let selected_url = selected_job_id
-            .and_then(|job_id| self.jobs.get(&job_id))
-            .map(|job| job.url.clone());
         let signal_candidate_rows = self.build_signal_candidate_rows();
         let desktop_job_list = self.build_desktop_job_list_view(
             &signal_candidate_rows,
             self.jobs_search_query(),
             &summary_lookup,
         );
-        let signal_candidate_preview =
-            self.signal_candidate_preview_for_selected_job(selected_job_id);
-        let preview_text = self.ui.preview_content().map(ToOwned::to_owned);
-        let preview_header = self
-            .ui
-            .selected_job_id()
-            .and_then(|job_id| self.jobs.get(&job_id))
-            .map(|job| {
-                let quality = job.preview_quality.unwrap_or_default();
-                PreviewHeaderView {
-                    domain: domain_from_url(&job.url),
-                    tokens: job.tokens,
-                    bytes: job.bytes,
-                    stage: job.stage,
-                    outcome: job.outcome.clone(),
-                    heading_count: quality.heading_count,
-                    link_density: quality.link_density,
-                    nav_heavy: quality.nav_heavy(),
-                }
-            });
-        let jobs_search_query = self.jobs_search_query().to_string();
-        let preview_context = preview_header.as_ref().map(build_preview_context_view);
-        let preview_source = self.ui.preview.content_kind();
-        let ai_warning_banner = self
-            .ai_warning_banner()
-            .or_else(|| self.provider_alert_banner());
         let ai_unavailable_message = self.ai_unavailable_message();
-        let triage_blocked_reason = self.triage_blocked_reason();
 
         let stop_finish_button = self.stop_finish_button_state();
         let archive_display = self.archive_display_counts();
@@ -184,35 +152,17 @@ impl AppState {
                 },
             );
         AppViewModel {
-            workspace_view: self.workspace_view(),
-            job_list_mode: self.job_list_mode(),
-            session: self.session,
-            queued_urls: self.ui.urls.clone(),
             job_count: self.jobs.len(),
             desktop_job_list,
             last_paste_stats: self.last_paste_stats.clone(),
-            dirty: self.dirty,
-            total_tokens: self.metrics.total_tokens,
             token_limit: TOKEN_LIMIT,
             archive_token_estimate,
             archive_filtered_count,
             archive_partial_coverage,
             raw_unprocessed_count,
-            preview_text,
-            selected_job_id,
-            preview_header,
-            preview_context,
-            ai_warning_banner,
-            preview_source,
-            briefing_generate_enabled: false,
-            next_item_enabled: false,
             stop_finish_button,
-            triage_results_reorder_suppressed: self.triage_reorder_suppressed(),
             signal_candidate_rows,
-            signal_candidate_preview,
             ai_unavailable_message,
-            triage_blocked_reason,
-            briefing_blocked_reason: None,
             run_progress: self
                 .run_progress
                 .as_ref()
@@ -225,21 +175,9 @@ impl AppState {
             resume_disabled_reason,
             unfinished_work,
             reprocess_notice,
-            poll_indirect_links_enabled: !self.indirect_link_pool.is_empty()
-                && !self.indirect_poll_in_progress(),
             checkpoint_status_message: self.briefing_checkpoint_status_message.clone(),
-            selected_url,
-            left_pane: crate::view_model::LeftPaneView { jobs_search_query },
-            is_pre_triage_reviewing: self.pre_triage.is_interactive(),
-            indirect_link_summary: self.build_indirect_link_summary(),
-            llm_usage_by_model: self.llm_usage_rows(),
             llm_quota: crate::build_llm_quota_view(self.llm_quota()),
             right_pane: self.build_right_pane_view(),
-            blacklist: crate::view_model::BlacklistTabView::from_state(
-                self.blacklist(),
-                self.last_observed_utc()
-                    .unwrap_or(chrono::DateTime::UNIX_EPOCH),
-            ),
         }
     }
 
@@ -444,7 +382,7 @@ impl AppState {
         )
     }
 
-    fn triage_reorder_suppressed(&self) -> bool {
+    pub fn triage_reorder_suppressed(&self) -> bool {
         matches!(self.triage.phase(), TriagePhase::Triaging)
     }
 
@@ -671,116 +609,14 @@ impl AppState {
         rows
     }
 
-    fn signal_candidate_preview_for_selected_job(
-        &self,
-        selected_job_id: Option<crate::JobId>,
-    ) -> Option<SignalCandidatePreviewView> {
-        let job_id = selected_job_id?;
-        let job = self.jobs.get(&job_id)?;
-        let state = self.signal_candidate.state_for(&job.url)?;
-        let SignalCandidateState::Completed { result } = state else {
-            return None;
-        };
-        let signal_key = result.signal_key.clone();
-        let cluster_key = canonical_signal_key(&signal_key);
-        let mut duplicate_urls: Vec<String> = self
-            .signal_candidate
-            .iter_completed()
-            .filter(|(url, candidate)| {
-                *url != job.url && canonical_signal_key(&candidate.signal_key) == cluster_key
-            })
-            .map(|(url, _)| url.to_string())
-            .collect();
-        duplicate_urls.insert(0, job.url.clone());
-        duplicate_urls[1..].sort();
-        let exclude_checked = self
-            .active_version_for(harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate)
-            .map(|prompt_version| {
-                is_signal_key_excluded(
-                    self.signal_candidate.excluded(),
-                    &signal_key,
-                    prompt_version,
-                )
-            })
-            .unwrap_or(false);
-        Some(SignalCandidatePreviewView {
-            signal_key,
-            duplicate_urls,
-            exclude_checked,
-            state_label: String::from("Scored"),
-        })
-    }
-
     fn build_right_pane_view(&self) -> RightPaneView {
-        let selected_url = self
+        let summary_markdown = self
             .ui
             .selected_job_id()
             .and_then(|job_id| self.jobs.get(&job_id))
-            .map(|job| job.url.as_str());
-
-        let triage_markdown = selected_url.and_then(|url| {
-            let title = crate::preview::best_effort_article_title(
-                self.triage.source_title_for_url(url),
-                url,
-            );
-            self.triage
-                .result_for_url(url)
-                .map(|result| crate::preview::format_triage_for_preview(title.as_deref(), result))
-        });
-
-        let summary_markdown = selected_url
-            .and_then(|url| self.briefing.summary_for_url(url))
+            .and_then(|job| self.briefing.summary_for_url(&job.url))
             .map(format_summary_for_preview);
-
-        let triage_placeholder = if triage_markdown.is_none() {
-            match self.ai_unavailable_reason() {
-                Some(crate::AiUnavailableReason::MissingApiKey) => Some(
-                    "AI setup required\n\nTriage is disabled because `OPENAI_API_KEY` is not set.\n\nSet `OPENAI_API_KEY` in the launch environment and restart the app to enable article triage.".to_string(),
-                ),
-                _ => self
-                    .triage_blocked_reason()
-                    .map(|reason| format!("Article triage is unavailable because {reason}.")),
-            }
-        } else {
-            None
-        };
-        let trends = crate::view_model::build_trends_tab_view(
-            self.entity_trend_data.as_ref(),
-            self.active_trend_category,
-        );
-
-        let poll_stats_markdown = {
-            let stats = self.source_states.last_completed_poll_stats();
-            if stats.is_empty() {
-                None
-            } else {
-                let warning = crate::build_poll_quota_warning(stats, self.llm_quota());
-                Some(crate::poll_stats_fmt::format_poll_stats_with_warning(
-                    stats,
-                    warning.as_ref(),
-                ))
-            }
-        };
-
-        RightPaneView {
-            triage_markdown: triage_markdown.or(triage_placeholder),
-            summary_markdown,
-            trends,
-            poll_stats_markdown,
-        }
-    }
-
-    fn build_indirect_link_summary(&self) -> Option<IndirectLinkSummary> {
-        let count = self.indirect_link_pool.len();
-        if count == 0 && self.indirect_link_pool.generation() == 0 && !self.is_poll_in_progress() {
-            return None;
-        }
-        let phase = if self.is_poll_in_progress() {
-            IndirectLinkPhase::Collecting
-        } else {
-            IndirectLinkPhase::Ready
-        };
-        Some(IndirectLinkSummary { count, phase })
+        RightPaneView { summary_markdown }
     }
 }
 
@@ -922,39 +758,6 @@ fn job_matches_search_query(url: &str, summary_title: Option<&str>, query_lower:
         || url.to_lowercase().contains(query_lower)
 }
 
-fn build_preview_context_view(header: &PreviewHeaderView) -> PreviewContextView {
-    let source_label = if header.domain.is_empty() {
-        "(unknown source)".to_string()
-    } else {
-        header.domain.clone()
-    };
-    let status_label = match &header.outcome {
-        Some(JobResultKind::Failed { reason }) => format!("Failed ({reason})"),
-        Some(JobResultKind::Success) => "Done".to_string(),
-        None => match header.stage {
-            Stage::Queued => "Queued",
-            Stage::Downloading => "Downloading",
-            Stage::Sanitizing => "Sanitizing",
-            Stage::Converting => "Converting",
-            Stage::Tokenizing => "Tokenizing",
-            Stage::Writing => "Writing",
-            Stage::Done => "Done",
-        }
-        .to_string(),
-    };
-    let attention_label = if header.nav_heavy {
-        Some("navigation-heavy".to_string())
-    } else {
-        None
-    };
-
-    PreviewContextView {
-        source_label,
-        status_label,
-        attention_label,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -962,6 +765,7 @@ mod tests {
         ArticleSummaryResult, ArticleTriageResult, JobOrigin, SummaryCache, SummaryCacheEntry,
         SummaryCacheKey, TriageSession,
     };
+    use crate::{JobResultKind, Stage};
 
     #[test]
     fn archive_view_estimates_track_triage_job_url_cache_and_checkpoint_inputs() {
@@ -1152,7 +956,6 @@ mod tests {
                 stage: Stage::Downloading,
                 tokens: Some(300),
                 bytes: None,
-                content_preview: None,
             },
         )
         .0;

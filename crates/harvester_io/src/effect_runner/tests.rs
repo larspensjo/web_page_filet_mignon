@@ -8,10 +8,10 @@ use harvester_core::{AppState, Effect, JobResultKind, Msg, PersistenceSnapshot};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI;
 use harvester_engine::llm::{LlmCompletionError, LlmEvent};
-use harvester_engine::{FailureKind, FetchSettings, Stage, UrlPolicy};
+use harvester_engine::{FailureKind, Stage};
 use tempfile::tempdir;
 
-use crate::effect_helpers::{download_link_page, map_llm_event};
+use crate::effect_helpers::map_llm_event;
 use crate::{load_completed_jobs, NoOpRuntimePersistenceSink, PersistenceWorker, RuntimePaths};
 
 use super::{is_actionable_job_failure, EffectRunner, NoOpPlatformHandler};
@@ -29,7 +29,6 @@ fn make_test_runtime_paths(base: &Path) -> RuntimePaths {
         signal_candidate_overrides_path: base.join(".signal_candidate_overrides.ron"),
         state_path: base.join("state.json"),
         briefing_checkpoint_path: base.join(".briefing_checkpoint.ron"),
-        entity_index_path: base.join(".entity_index.ron"),
         brave_seen_set_path: base.join(".brave_seen_set.ron"),
         brave_metadata_path: base.join(".brave_metadata.ron"),
         blacklist_path: base.join(".domain_blacklist.ron"),
@@ -209,7 +208,6 @@ fn runner_without_persistence_does_not_write_runtime_state() {
         Msg::JobDone {
             job_id: 1,
             result: JobResultKind::Success,
-            content_preview: None,
             extracted_links: Vec::new(),
             fetched_utc: None,
         },
@@ -366,21 +364,6 @@ fn load_prompt_contexts_fails_when_required_triage_context_is_invalid() {
 }
 
 #[test]
-fn download_link_page_rejects_disallowed_scheme_before_request() {
-    let temp = tempdir().expect("tempdir");
-    let fetch_settings = FetchSettings::default();
-    let policy = UrlPolicy::default();
-    let err = download_link_page("file:///etc/passwd", temp.path(), &policy, &fetch_settings)
-        .unwrap_err();
-
-    assert!(
-        err.contains("url policy violation"),
-        "expected url policy error, got '{}'",
-        err
-    );
-}
-
-#[test]
 fn enqueue_url_effect_is_rejected_by_url_policy() {
     let temp = tempdir().expect("tempdir");
     let (runner, rx) = runner_with_receiver(temp.path());
@@ -402,64 +385,6 @@ fn enqueue_url_effect_is_rejected_by_url_policy() {
         } => {
             assert_eq!(received, job_id);
             assert!(reason.contains("url policy"));
-        }
-        other => panic!("unexpected message: {:?}", other),
-    }
-}
-
-#[test]
-fn download_link_page_effect_is_rejected_by_authorization() {
-    let temp = tempdir().expect("tempdir");
-    let (runner, rx) = runner_with_receiver(temp.path());
-    let job_id = 7;
-    let link_index = 1;
-    runner.enqueue(vec![Effect::DownloadLinkedPage {
-        job_id,
-        link_index,
-        url: "file:///tmp/secret".to_string(),
-    }]);
-
-    let msg = rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("expected link download failed msg");
-
-    match msg {
-        Msg::LinkDownloadFailed {
-            job_id: received,
-            link_index: received_index,
-            error,
-        } => {
-            assert_eq!(received, job_id);
-            assert_eq!(received_index, link_index);
-            assert!(error.contains("url policy"));
-        }
-        other => panic!("unexpected message: {:?}", other),
-    }
-}
-
-#[test]
-fn delete_linked_page_effect_is_rejected_on_unsafe_path() {
-    let temp = tempdir().expect("tempdir");
-    let (runner, rx) = runner_with_receiver(temp.path());
-    let job_id = 11;
-    let link_index = 3;
-    runner.enqueue(vec![Effect::DeleteLinkedPage {
-        job_id,
-        link_index,
-        path: std::path::PathBuf::from("../outside.md"),
-    }]);
-
-    let msg = rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("expected link deleted msg");
-
-    match msg {
-        Msg::LinkDeleted {
-            job_id: received,
-            link_index: received_index,
-        } => {
-            assert_eq!(received, job_id);
-            assert_eq!(received_index, link_index);
         }
         other => panic!("unexpected message: {:?}", other),
     }
@@ -830,40 +755,4 @@ fn archive_requested_writes_archive_markdown_for_selected_urls() {
     assert!(archive.contains("B body"));
     assert!(!archive.contains("https://example.com/a"));
     assert!(!archive.contains("A body"));
-}
-
-#[test]
-fn entity_index_worker_writes_a_queued_burst_once() {
-    use super::worker::{run_entity_index_worker, EntityIndexWorkerMsg};
-    use crate::entity_index_store::EntityIndexPatch;
-
-    let dir = tempdir().unwrap();
-    let path = dir.path().join(".entity_index.ron");
-    // A run start that reuses cached triage and summaries emits one upsert per result, and a
-    // desktop start routinely exceeds the old 256-slot queue in a single reducer step.
-    let burst = 300;
-    let (tx, rx) = mpsc::channel();
-    for index in 0..burst {
-        tx.send(EntityIndexWorkerMsg::Upsert {
-            url: format!("https://example.test/{index}"),
-            patch: EntityIndexPatch {
-                fetched_utc: None,
-                content_hash: Some(format!("hash-{index}")),
-                summary_entities: None,
-                themes: Some(vec!["topic".into()]),
-            },
-        })
-        .unwrap();
-    }
-    drop(tx);
-
-    let writes = run_entity_index_worker(rx, path.clone());
-
-    assert_eq!(writes, 1, "a queued burst must cost one load and one write");
-    let index = crate::load_entity_index(&path);
-    assert_eq!(index.entries.len(), burst);
-    assert_eq!(
-        index.entries["https://example.test/299"].themes,
-        vec!["topic".to_string()]
-    );
 }

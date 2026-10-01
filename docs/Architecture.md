@@ -280,15 +280,17 @@ unfinished count. A host prints the reducer-recorded notice after initial admiss
 - All I/O flows through effect handling with policy checks.
 
 ## Planned evolution (aligned with current plans)
-- **Preview flow:** deliver extracted content through the message pipeline for in-session inspection, with a fallback to on-demand loading after restart.
+- **Reading pane:** render the selected article summary and open its extracted links through reducer-resolved browser effects. Download progress carries stage, bytes and tokens, without article previews.
 - **Automation path:** future input sources (such as feeds) and scheduled runs remain subject to the same unidirectional flow and security boundaries.
 
 ## Crates and purposes
 - **harvester_batch:** command-line and scheduled batch host orchestration.
 - **harvester_core:** domain state, update logic, and the single desktop view
-  projection. `AppState::view()` builds the bounded desktop job list directly;
-  retired frozen-renderer geometry, headers, visible-ID arrays, and manual
-  pre-triage filter statuses are absent from core and IPC.
+  projection. `AppState::view()` emits the 23 top-level fields consumed by the page,
+  including AI availability, run controls and meters. It builds the scoped, capped
+  desktop job list and one selected-job record with extracted links directly.
+  Summary bodies use the single `SummaryMarkdown` body key. Workspace navigation,
+  trends, the entity index, article previews and link download controls are removed.
 - **harvester_engine:** content processing pipeline and LLM-related workflows.
 - **harvester_io:** shared runtime paths, effect execution, and persistence. Its
   `EffectRunner` owns an injected runtime-persistence sink, so the same effect
@@ -302,6 +304,13 @@ unfinished count. A host prints the reducer-recorded notice after initial admiss
   removed source types are skipped with a warning that identifies their
   registry path, position and readable id, while valid entries load with existing validation.
   File and CuratedList remain supported source types.
+  Runtime persistence retains the existing state layout and ignored legacy
+  window dimensions. Old per-link downloaded paths load but are ignored by runtime
+  state and are not carried forward in reducer snapshots. Saves read only old
+  pending intake and geometry settings, skipping the completed-job collection.
+  Only the desktop logical inner
+  dimensions restore geometry; extracted links open in a browser and are never
+  downloaded or deleted by the host. There is no indirect-link intake pool.
   Runtime persistence includes reducer-owned pending intake. A poll completing
   after Stop and downloads cancelled before starting are saved for the next
   Full run, which ingests them before polling. A pending URL with a successful
@@ -310,7 +319,8 @@ unfinished count. A host prints the reducer-recorded notice after initial admiss
   window work without fetching pending-intake URLs.
 - **harvester_ui_bridge:** Tauri-free IPC projection, intent decoding, asset
   confinement, and the core-thread boundary for the desktop host. Its snapshot
-  projection carries only rows the page can render; the driver does not capture
+  IPC 13 projection carries only fields and rows the page consumes; removed
+  intents and body keys fail decoding. The driver does not capture
   state for I/O. `ShowArchiveDialog` is intercepted for the host and never
   reaches the effect runner.
 - **harvester_ui:** non-default Tauri desktop host. It serves only the built frontend bundle through the confined `harvester://` scheme, sends restricted `UiIntent` values to the core-thread driver, and services effects only through `harvester_io::EffectRunner`. The bridge's snapshot projection and host-serviced `ShowArchiveDialog` boundary keep Tauri out of core/reducer logic.

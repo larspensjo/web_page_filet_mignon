@@ -1,6 +1,5 @@
 use harvester_core::{
-    update, AppState, CompletedJobSnapshot, Effect, JobResultKind, LinkDownloadState,
-    LinkSnapshotRecord, Msg, Stage,
+    update, AppState, CompletedJobSnapshot, Effect, JobResultKind, LinkSnapshotRecord, Msg, Stage,
 };
 
 fn submit_urls(state: AppState, input: &str) -> (AppState, Vec<Effect>) {
@@ -31,7 +30,6 @@ fn completed_jobs_can_be_restored_for_resume() {
             stage: Stage::Tokenizing,
             tokens: Some(42),
             bytes: Some(1234),
-            content_preview: None,
         },
     );
     let (state, _) = update(
@@ -39,7 +37,6 @@ fn completed_jobs_can_be_restored_for_resume() {
         Msg::JobDone {
             job_id,
             result: JobResultKind::Success,
-            content_preview: None,
             extracted_links: Vec::new(),
             fetched_utc: None,
         },
@@ -54,7 +51,7 @@ fn completed_jobs_can_be_restored_for_resume() {
     let (restored, _) = update(AppState::new(), Msg::RestoreCompletedJobs(snapshot));
     let view = restored.view();
     assert_eq!(view.job_count, 1);
-    assert_eq!(view.total_tokens, 42);
+    assert_eq!(restored.completed_jobs_snapshot()[0].tokens, Some(42));
     assert_eq!(
         view.desktop_job_list.rows[0].outcome,
         Some(JobResultKind::Success)
@@ -82,7 +79,7 @@ fn restored_jobs_are_deduped_on_paste() {
 }
 
 #[test]
-fn restore_completed_job_records_downloaded_link_paths() {
+fn restore_completed_job_ignores_downloaded_paths_and_keeps_links() {
     init_logging();
     let snapshot = vec![CompletedJobSnapshot {
         url: "https://example.com".to_string(),
@@ -98,8 +95,50 @@ fn restore_completed_job_records_downloaded_link_paths() {
     let (state, _) = update(AppState::new(), Msg::RestoreCompletedJobs(snapshot));
     let links = state.job_links(1).expect("job links available");
     assert_eq!(links.len(), 1);
-    assert!(matches!(
-        links[0].download_state,
-        LinkDownloadState::Downloaded { ref path } if path.ends_with("linked/123.md")
-    ));
+    assert_eq!(links[0].url, "https://downloaded.example/");
+    assert!(state.completed_jobs_snapshot()[0].links[0]
+        .downloaded_path
+        .is_none());
+    let (state, _) = update(state, Msg::JobSelected { job_id: 1 });
+    assert_eq!(
+        state.view().desktop_job_list.selected_job.unwrap().links[0].url,
+        "https://downloaded.example/"
+    );
+}
+
+#[test]
+fn selected_job_keeps_extracted_links_after_completion() {
+    let (state, _) = submit_urls(AppState::new(), "https://example.com/article");
+    let (state, _) = update(
+        state,
+        Msg::JobDone {
+            job_id: 1,
+            result: JobResultKind::Success,
+            extracted_links: vec![harvester_engine::ExtractedLink {
+                url: "https://example.com/link".into(),
+                text: Some("Read more".into()),
+                kind: harvester_engine::LinkKind::Hyperlink,
+            }],
+            fetched_utc: None,
+        },
+    );
+    let (state, _) = update(state, Msg::JobSelected { job_id: 1 });
+    let selected = state.view().desktop_job_list.selected_job.unwrap();
+    assert_eq!(selected.links.len(), 1);
+    assert_eq!(selected.links[0].index, 0);
+    assert_eq!(selected.links[0].url, "https://example.com/link");
+    assert_eq!(selected.links[0].label, "Read more");
+    let (_, effects) = update(
+        state,
+        Msg::ExtractedLinkOpenRequested {
+            job_id: 1,
+            link_index: 0,
+        },
+    );
+    assert_eq!(
+        effects,
+        vec![Effect::OpenUrlInBrowser {
+            url: "https://example.com/link".into()
+        }]
+    );
 }

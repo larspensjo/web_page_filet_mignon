@@ -451,7 +451,7 @@ fn quota_halts_all_stages_and_future_admissions_with_provider_reason() {
         assert!(
             matches!(&state.briefing().articles()[0].summary_state, crate::briefing::ArticleSummaryState::Failed { reason } if reason == "quota reason")
         );
-        state.clear_provider_alert();
+        state.reset_provider_rate_limit_failures();
         admit_score(&mut state, "later");
         let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
         assert!(requests(&effects).is_empty());

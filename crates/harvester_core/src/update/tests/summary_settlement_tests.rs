@@ -129,11 +129,5 @@ fn every_summary_settle_path_saves_successes_and_emits_only_article_requests() {
             }),
             "path={path}"
         );
-        let view = state.view();
-        assert!(
-            !view.briefing_generate_enabled && !view.next_item_enabled,
-            "path={path}"
-        );
-        assert!(view.briefing_blocked_reason.is_none(), "path={path}");
     }
 }

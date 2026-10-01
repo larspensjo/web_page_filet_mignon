@@ -10,16 +10,13 @@ use harvester_core::{Effect, JobResultKind, Msg, PersistenceSnapshot};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::{LlmHandle, PromptRegistry};
 use harvester_engine::{
-    is_confined_to, EngineConfig, EngineEvent, EngineHandle, FailureKind, FetchSettings, UrlPolicy,
+    EngineConfig, EngineEvent, EngineHandle, FailureKind, FetchSettings, UrlPolicy,
 };
 
 mod configuration;
 mod dispatch;
 mod poll;
 mod worker;
-#[cfg(test)]
-use worker::run_entity_index_worker;
-use worker::{run_entity_index_worker_with_observer, EntityIndexWorkerMsg};
 
 use crate::effect_helpers::{map_llm_event, map_stage};
 use crate::RuntimePaths;
@@ -67,8 +64,6 @@ impl PlatformEffectHandler for NoOpPlatformHandler {
 pub trait RuntimePersistenceSink: Send + Sync {
     fn enqueue(&self, snapshot: PersistenceSnapshot);
 }
-
-/// Optional measurement callback for actual entity-index file rewrites.
 pub type FileWriteObserver = Arc<dyn Fn(&Path, u64, Duration) + Send + Sync>;
 
 impl RuntimePersistenceSink for crate::PersistenceWorker {
@@ -86,10 +81,6 @@ impl RuntimePersistenceSink for NoOpRuntimePersistenceSink {
 
 /// Effect runner that orchestrates IO effects.
 ///
-/// # Entity index worker lifecycle
-/// The runner spawns a dedicated single-threaded worker for entity index upserts.
-/// Upserts are forwarded via `entity_index_worker_tx`. When `EffectRunner` is dropped,
-/// the sender is dropped, which closes the channel and signals the worker to exit cleanly.
 pub struct EffectRunner {
     engine: EngineHandle,
     corpus_scan_index: Arc<Mutex<harvester_engine::CorpusScanIndex>>,
@@ -103,8 +94,6 @@ pub struct EffectRunner {
     prompt_registry: Arc<RwLock<PromptRegistry>>,
     llm_metadata_models: HashMap<PromptId, String>,
     platform_handler: Box<dyn PlatformEffectHandler>,
-    /// Sender to the serialized entity-index worker. Dropping this closes the channel.
-    entity_index_worker_tx: mpsc::Sender<EntityIndexWorkerMsg>,
     /// Host-selected sink for reducer-emitted runtime persistence snapshots.
     persistence_sink: Box<dyn RuntimePersistenceSink>,
     file_write_observer: Option<FileWriteObserver>,
@@ -200,21 +189,6 @@ impl EffectRunner {
 
         let engine = EngineHandle::new(config);
 
-        // Spawn the serialized entity-index worker.
-        // All UpsertEntityIndexEntry effects are forwarded to this single-threaded worker,
-        // which applies each queued burst with one load, merge and atomic write. The queue is
-        // unbounded so the host thread that executes effects never waits on disk writes.
-        let entity_index_path = paths.entity_index_path.clone();
-        let (worker_tx, worker_rx) = mpsc::channel::<EntityIndexWorkerMsg>();
-        let worker_file_write_observer = file_write_observer.clone();
-        thread::spawn(move || {
-            run_entity_index_worker_with_observer(
-                worker_rx,
-                entity_index_path,
-                worker_file_write_observer,
-            );
-        });
-
         let result_sink = Box::new(crate::result_sink::CoalescingResultSink::new(
             paths.clone(),
             msg_tx.clone(),
@@ -233,7 +207,6 @@ impl EffectRunner {
             prompt_registry,
             llm_metadata_models,
             platform_handler,
-            entity_index_worker_tx: worker_tx,
             result_sink,
             persistence_sink,
             file_write_observer,
@@ -257,12 +230,6 @@ impl EffectRunner {
         let fetch_settings = engine_config.fetch_settings.clone();
         let engine = EngineHandle::new(engine_config);
 
-        let entity_index_path = paths.entity_index_path.clone();
-        let (worker_tx, worker_rx) = mpsc::channel::<EntityIndexWorkerMsg>();
-        thread::spawn(move || {
-            run_entity_index_worker(worker_rx, entity_index_path);
-        });
-
         let result_sink = Box::new(crate::result_sink::CoalescingResultSink::new(
             paths.clone(),
             msg_tx.clone(),
@@ -281,24 +248,12 @@ impl EffectRunner {
             prompt_registry: Arc::new(RwLock::new(PromptRegistry::with_defaults())),
             llm_metadata_models: HashMap::new(),
             platform_handler,
-            entity_index_worker_tx: worker_tx,
             result_sink,
             persistence_sink,
             file_write_observer: None,
         };
         runner.spawn_event_loop(msg_tx);
         runner
-    }
-
-    /// Block until all pending entity-index upserts have been written to disk.
-    /// Only available in test builds for deterministic verification.
-    #[cfg(test)]
-    pub fn flush_entity_index_queue(&self) {
-        let (done_tx, done_rx) = mpsc::sync_channel(0);
-        let _ = self
-            .entity_index_worker_tx
-            .send(EntityIndexWorkerMsg::Flush { done: done_tx });
-        let _ = done_rx.recv();
     }
 
     pub fn with_result_sink(mut self, sink: Box<dyn crate::result_sink::ResultSink>) -> Self {
@@ -332,7 +287,6 @@ impl EffectRunner {
                             stage: map_stage(progress.stage),
                             tokens: progress.tokens,
                             bytes: progress.bytes,
-                            content_preview: progress.content_preview.clone(),
                         });
                     }
                     EngineEvent::JobCompleted { job_id, result } => {
@@ -353,7 +307,6 @@ impl EffectRunner {
                             Ok(outcome) => Msg::JobDone {
                                 job_id,
                                 result: JobResultKind::Success,
-                                content_preview: outcome.content_preview,
                                 extracted_links: outcome.extracted_links,
                                 fetched_utc: outcome.fetched_utc,
                             },
@@ -367,7 +320,6 @@ impl EffectRunner {
                                 Msg::JobDone {
                                     job_id,
                                     result: JobResultKind::Failed { reason },
-                                    content_preview: None,
                                     extracted_links: Vec::new(),
                                     fetched_utc: None,
                                 }
@@ -413,24 +365,6 @@ impl EffectRunner {
                     .map_err(|violation| format!("url policy violation: {}", violation))?;
                 Ok(())
             }
-            Effect::DownloadLinkedPage { url, .. } => {
-                let parsed = url::Url::parse(url)
-                    .map_err(|err| format!("invalid linked page url {}: {}", url, err))?;
-                self.url_policy.check(&parsed).map_err(|violation| {
-                    format!("linked page url policy violation: {}", violation)
-                })?;
-                Ok(())
-            }
-            Effect::DeleteLinkedPage { path, .. } => {
-                let linked_dir = self.paths.output_dir.join("linked");
-                if !is_confined_to(path, &linked_dir) {
-                    return Err(format!(
-                        "delete linked page path violation: {:?} not in {:?}",
-                        path, linked_dir
-                    ));
-                }
-                Ok(())
-            }
             Effect::RequestLlmCompletion { input_content, .. } => {
                 if let Some(max) = self.llm_max_input_bytes {
                     if input_content.len() > max {
@@ -455,25 +389,9 @@ impl EffectRunner {
                 let _ = self.msg_tx.send(Msg::JobDone {
                     job_id,
                     result: JobResultKind::Failed { reason },
-                    content_preview: None,
                     extracted_links: Vec::new(),
                     fetched_utc: None,
                 });
-            }
-            Effect::DownloadLinkedPage {
-                job_id, link_index, ..
-            } => {
-                let _ = self.msg_tx.send(Msg::LinkDownloadFailed {
-                    job_id,
-                    link_index,
-                    error: reason,
-                });
-            }
-            Effect::DeleteLinkedPage {
-                job_id, link_index, ..
-            } => {
-                // DeleteLinkedPage always sends LinkDeleted even on rejection (path confinement check happens here)
-                let _ = self.msg_tx.send(Msg::LinkDeleted { job_id, link_index });
             }
             _ => {
                 // For other effects, log the rejection without sending a message
@@ -502,8 +420,6 @@ impl Drop for EffectRunner {
         }
         engine_info!("[effect] EffectRunner dropped, stopping engine");
         self.engine.stop(true);
-        // `entity_index_worker_tx` is dropped here, closing the channel.
-        // The worker thread sees RecvError and exits cleanly.
     }
 }
 

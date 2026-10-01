@@ -142,28 +142,20 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             stage,
             tokens,
             bytes,
-            content_preview,
         } => {
-            state.apply_progress(job_id, stage, tokens, bytes, content_preview);
+            state.apply_progress(job_id, stage, tokens, bytes);
             Vec::new()
         }
         Msg::JobDone {
             job_id,
             result,
-            content_preview,
             extracted_links,
             fetched_utc,
         } => {
             let successful = matches!(result, crate::JobResultKind::Success);
             let stopped_drain = state.pipeline_run_phase() == crate::PipelineRunPhase::Stopping
                 || state.session() == SessionState::Finishing;
-            state.apply_done(
-                job_id,
-                result,
-                content_preview,
-                extracted_links,
-                fetched_utc,
-            );
+            state.apply_done(job_id, result, extracted_links, fetched_utc);
             if successful {
                 if let Some(url) = state.job_url(job_id).map(str::to_owned) {
                     state.remove_pending_intake_url(&url);
@@ -175,45 +167,13 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             Vec::new()
         }
 
-        Msg::LinkDownloadCompleted {
-            job_id,
-            link_index,
-            path,
-        } => {
-            state.mark_link_download_completed(job_id, link_index, path);
-            Vec::new()
-        }
-        Msg::LinkDownloadFailed {
-            job_id,
-            link_index,
-            error,
-        } => {
-            state.mark_link_download_failed(job_id, link_index, error);
-            Vec::new()
-        }
-        Msg::LinkDeleted { job_id, link_index } => {
-            state.mark_link_deleted(job_id, link_index);
-            Vec::new()
-        }
         Msg::JobSelected { job_id } => {
             state.select_job(job_id);
-            Vec::new()
-        }
-        Msg::WorkspaceViewSet { view } => {
-            state.set_workspace_view(view);
             Vec::new()
         }
         Msg::JobListModeSet { mode } => {
             state.set_job_list_mode(mode);
             Vec::new()
-        }
-        Msg::JobsSearchRevealRequested => {
-            state.set_workspace_view(crate::WorkspaceView::Review);
-            Vec::new()
-        }
-        Msg::TrendsViewOpened => {
-            state.set_workspace_view(crate::WorkspaceView::Trends);
-            vec![Effect::LoadEntityIndex]
         }
         Msg::PipelineRunRequested { scope } => {
             pipeline_run::handle_pipeline_requested(&mut state, scope)
@@ -245,15 +205,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             ordered_urls,
             triggered_by_job_done,
         ),
-        Msg::WindowResizeCompleted {
-            outer_width,
-            outer_height,
-        } => {
-            vec![Effect::PersistWindowSize {
-                width: outer_width,
-                height: outer_height,
-            }]
-        }
         Msg::DesktopWindowResizeCompleted {
             inner_width,
             inner_height,
@@ -491,7 +442,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             None => Vec::new(),
         },
 
-        Msg::PollIndirectLinks => polling::handle_poll_indirect_links(&mut state),
         Msg::PollStarted { total } => polling::handle_poll_started(&mut state, total),
         Msg::SourcePollCompleted {
             source_id,
@@ -511,30 +461,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             polling::handle_source_poll_failed(&mut state, source_id, error)
         }
         Msg::AllSourcesPollEnded => polling::handle_all_sources_poll_ended(&mut state),
-        Msg::TrendCategorySelected { category } => {
-            state.set_active_trend_category(category);
-            Vec::new()
-        }
-        Msg::EntityIndexLoaded { index } => {
-            engine_info!("[entity-index] loaded {} entries", index.entries.len());
-            state.set_entity_index(index, 13, 10);
-            Vec::new()
-        }
-        Msg::EntityIndexLoadFailed { reason } => {
-            engine_warn!("[entity-index] load failed: {reason}; triggering rebuild");
-            vec![Effect::RebuildEntityIndex]
-        }
-        Msg::EntityIndexRebuilt { index } => {
-            engine_info!("[entity-index] rebuilt {} entries", index.entries.len());
-            state.set_entity_index(index, 13, 10);
-            Vec::new()
-        }
-        Msg::EntityIndexRebuildFailed { reason } => {
-            engine_warn!("[entity-index] rebuild failed: {reason}");
-            Vec::new()
-        }
-
-        // --- Import saved webpages ---
         Msg::ImportSavedWebpagesRequested { dir } => {
             import::handle_import_requested(&mut state, dir)
         }
@@ -620,14 +546,7 @@ mod desktop_contract_tests {
     use chrono::{DateTime, Utc};
 
     use super::update;
-    use crate::{AppState, Effect, Msg, WorkspaceView};
-
-    #[test]
-    fn trends_view_opened_loads_the_entity_index() {
-        let (state, effects) = update(AppState::default(), Msg::TrendsViewOpened);
-        assert_eq!(state.workspace_view(), WorkspaceView::Trends);
-        assert_eq!(effects, vec![Effect::LoadEntityIndex]);
-    }
+    use crate::{AppState, Effect, Msg};
 
     #[test]
     fn successful_job_completion_emits_a_runtime_persistence_snapshot() {
@@ -649,7 +568,6 @@ mod desktop_contract_tests {
             Msg::JobDone {
                 job_id,
                 result: crate::JobResultKind::Success,
-                content_preview: None,
                 extracted_links: Vec::new(),
                 fetched_utc: None,
             },
@@ -663,11 +581,25 @@ mod desktop_contract_tests {
     }
 
     #[test]
-    fn jobs_search_reveal_changes_only_the_desktop_workspace() {
-        let initial = AppState::default();
-        let (state, effects) = update(initial, Msg::JobsSearchRevealRequested);
-        assert_eq!(state.workspace_view(), WorkspaceView::Review);
-        assert_eq!(state.job_list_mode(), crate::JobListMode::SinceCheckpoint);
+    fn urls_submitted_clears_the_pasted_input_buffer() {
+        let input = "https://a.example.com \n\n  https://b.example.com\n   \n";
+        let (state, _) = update(AppState::new(), Msg::InputChanged(input.into()));
+        assert_eq!(state.input_buffer(), input);
+
+        let (state, effects) = update(state, Msg::UrlsSubmitted);
+        assert!(state.input_buffer().is_empty());
+        assert_eq!(state.view().job_count, 2);
+        assert_eq!(
+            effects
+                .iter()
+                .filter(|e| matches!(e, Effect::EnqueueUrl { .. }))
+                .count(),
+            2
+        );
+
+        let (state, effects) = update(state, Msg::UrlsSubmitted);
+        assert!(state.input_buffer().is_empty());
+        assert_eq!(state.view().job_count, 2);
         assert!(effects.is_empty());
     }
 
@@ -693,7 +625,6 @@ mod desktop_contract_tests {
             Msg::JobDone {
                 job_id: 1,
                 result: crate::JobResultKind::Success,
-                content_preview: None,
                 extracted_links: vec![harvester_engine::ExtractedLink {
                     url: "https://linked.example".into(),
                     text: None,

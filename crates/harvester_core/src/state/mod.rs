@@ -2,24 +2,21 @@ use crate::briefing::BriefingSession;
 use crate::pre_triage_filter::{PreTriagePhase, PreTriageSession};
 use crate::source_state::SourceStateIndex;
 use crate::summary_cache::SummaryCache;
-use crate::tabs::{JobListMode, TrendCategory, WorkspaceView};
+use crate::tabs::JobListMode;
 use crate::triage::{ArticleTriageResult, TriagePhase, TriageSession};
 use crate::triage_cache::TriageCache;
-use crate::url_age::AgeEstimate;
 use crate::view_model::LastPasteStats;
 use crate::Effect;
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::LinkKind;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::path::PathBuf;
 
 mod ai_availability;
 mod batch;
 mod briefing_access;
 
 mod cache_state;
-mod indirect_links;
 mod ingest;
 mod job_access;
 mod job_state;
@@ -44,23 +41,12 @@ use cache_state::{
     MetadataLoadState, SummaryCacheMetadataSnapshot, SummaryCacheMetrics,
     TriageCacheMetadataSnapshot, TriageCacheRunMetrics,
 };
-use indirect_links::IndirectLinkPool;
 use job_state::JobState;
-use link_helpers::{
-    build_link_rows, domain_from_url, map_job_filter_status, normalize_extracted_link,
-};
-use ui_state::{MetricsState, PreviewState, UiState};
+use link_helpers::{build_link_rows, map_job_filter_status, normalize_extracted_link};
+use ui_state::{MetricsState, UiState};
 
-#[cfg(test)]
-use crate::preview::{self, PreviewContentKind};
 #[cfg(test)]
 use crate::view_model::JobFilterStatus;
-#[cfg(test)]
-use indirect_links::IndirectLink;
-#[cfg(test)]
-use job_state::PreviewQuality;
-
-pub use provider_alert::ProviderAlert;
 
 pub use unfinished_work::{
     evaluate_reprocess_notice, UnfinishedStageVerdict, UnfinishedStageVerdicts, UnfinishedWork,
@@ -124,16 +110,6 @@ pub(crate) enum TriageCacheLookupResult<'a> {
     KeyUnavailable,
 }
 
-/// Represents the download status for a specific link.
-#[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum LinkDownloadState {
-    NotDownloaded,
-    Downloading,
-    Downloaded { path: PathBuf },
-    Failed { error: String },
-}
-
 /// Canonical representation of a link extracted from a completed job.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkRecord {
@@ -141,17 +117,12 @@ pub struct LinkRecord {
     pub url: String,
     pub anchor_text: Option<String>,
     pub kind: LinkKind,
-    pub download_state: LinkDownloadState,
-    pub age_estimate: Option<AgeEstimate>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum JobOrigin {
     #[default]
     Direct,
-    Indirect {
-        source_job_id: JobId,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -311,8 +282,6 @@ pub struct AppState {
     triage: TriageSession,
     pre_triage: PreTriageSession,
     pre_triage_load_context: Option<PreTriageLoadContext>,
-    indirect_link_pool: IndirectLinkPool,
-    indirect_poll_in_progress: bool,
     source_states: SourceStateIndex,
     prompt_contexts: HashMap<PromptId, Vec<(String, String)>>,
     prompt_contexts_ready: bool,
@@ -322,7 +291,6 @@ pub struct AppState {
     effective_models: HashMap<PromptId, String>,
     ai_availability: AiAvailability,
     result_store_failure: Option<String>,
-    provider_alert: Option<provider_alert::ProviderAlert>,
     consecutive_rate_limit_failures: u32,
     summary_cache: SummaryCache,
     signal_candidate: crate::signal_candidate::SignalCandidateSession,
@@ -345,9 +313,6 @@ pub struct AppState {
     llm_usage_by_model: BTreeMap<String, (u64, u64)>,
     /// Authoritative session-scoped quota usage and configured limits.
     llm_quota: crate::LlmQuotaState,
-    /// Currently active trend category in the Trends tab.
-    active_trend_category: TrendCategory,
-    workspace_view: WorkspaceView,
     job_list_mode: JobListMode,
     /// Host-observed time used by deterministic view projection. Hosts must
     /// reduce a `Msg::Tick` before constructing the first view.
@@ -358,10 +323,6 @@ pub struct AppState {
     pub(crate) pipeline_admission: Option<crate::pipeline_waves::PipelineAdmission>,
     pub(crate) pipeline_waves: crate::PipelineWaves,
     run_completion_notice: Option<crate::RunCompletionNotice>,
-    /// Persisted entity index loaded from disk (or rebuilt from caches).
-    entity_index: Option<crate::entity_index::EntityIndex>,
-    /// Pre-computed trend data derived from `entity_index`.
-    entity_trend_data: Option<crate::trends::EntityTrendData>,
     /// Test-only bypass counter for injecting pre-triage request IDs without driving
     /// the coordinator (used by `start_triage_for_test` and related helpers).
     /// In production, request IDs are allocated exclusively by the coordinator.
@@ -427,8 +388,6 @@ impl Default for AppState {
             triage: TriageSession::default(),
             pre_triage: PreTriageSession::default(),
             pre_triage_load_context: None,
-            indirect_link_pool: IndirectLinkPool::new(),
-            indirect_poll_in_progress: false,
             source_states: SourceStateIndex::default(),
             prompt_contexts: HashMap::new(),
             prompt_contexts_ready: false,
@@ -438,7 +397,6 @@ impl Default for AppState {
             effective_models: HashMap::new(),
             ai_availability: AiAvailability::Available,
             result_store_failure: None,
-            provider_alert: None,
             consecutive_rate_limit_failures: 0,
             summary_cache: SummaryCache::new(),
             signal_candidate: crate::signal_candidate::SignalCandidateSession::default(),
@@ -458,8 +416,6 @@ impl Default for AppState {
             model_dispatch_halt_reason: None,
             llm_usage_by_model: BTreeMap::new(),
             llm_quota: crate::LlmQuotaState::default(),
-            active_trend_category: TrendCategory::default(),
-            workspace_view: WorkspaceView::default(),
             job_list_mode: JobListMode::default(),
             last_observed_utc: None,
             run_progress: None,
@@ -468,8 +424,6 @@ impl Default for AppState {
             pipeline_admission: None,
             pipeline_waves: Default::default(),
             run_completion_notice: None,
-            entity_index: None,
-            entity_trend_data: None,
             #[cfg(test)]
             next_triage_request_id: 1,
             triage_in_flight_request_id: None,

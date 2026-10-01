@@ -1,19 +1,12 @@
 {
   "generation": 1,
-  "schema_version": 12,
+  "schema_version": 13,
   "view": {
     "ai_unavailable_message": null,
-    "ai_warning_banner": null,
     "archive_enabled": true,
     "archive_filtered_count": 2,
     "archive_partial_coverage": null,
     "archive_token_estimate": 84,
-    "blacklist": {
-      "blacklisted_count": 0,
-      "rows": []
-    },
-    "briefing_blocked_reason": null,
-    "briefing_generate_enabled": false,
     "checkpoint_status_message": null,
     "desktop_job_list": {
       "hidden_without_fetch_time": 0,
@@ -22,7 +15,6 @@
       "rows": [
         {
           "bytes": 1024,
-          "downloaded_link_count": 0,
           "fetched_utc": "1970-01-01T00:00:01Z",
           "filter_status": null,
           "has_analysis": true,
@@ -48,7 +40,6 @@
         },
         {
           "bytes": 1024,
-          "downloaded_link_count": 0,
           "fetched_utc": "1970-01-01T00:00:00Z",
           "filter_status": null,
           "has_analysis": true,
@@ -78,15 +69,8 @@
       "truncated": false,
       "visible_count": 2
     },
-    "dirty": true,
-    "indirect_link_summary": null,
-    "is_pre_triage_reviewing": false,
     "job_count": 2,
-    "job_list_mode": "SinceCheckpoint",
     "last_paste_stats": null,
-    "left_pane": {
-      "jobs_search_query": ""
-    },
     "llm_quota": {
       "label": "LLM calls 0 / unlimited",
       "limit": null,
@@ -94,27 +78,12 @@
       "severity": "Normal",
       "used": 0
     },
-    "llm_usage_by_model": [],
-    "next_item_enabled": false,
-    "poll_indirect_links_enabled": false,
-    "preview_context": null,
-    "preview_header": null,
-    "preview_source": null,
-    "preview_text": null,
-    "queued_urls": [],
     "raw_unprocessed_count": 2,
     "reprocess_notice": null,
     "resume_disabled_reason": null,
     "resume_enabled": true,
     "right_pane": {
-      "poll_stats_markdown": null,
-      "summary_markdown": null,
-      "trends": {
-        "active_category": "Companies",
-        "category_data": null,
-        "is_loading": true
-      },
-      "triage_markdown": null
+      "summary_markdown": null
     },
     "run_completion_notice": null,
     "run_enabled": true,
@@ -200,16 +169,9 @@
       ]
     },
     "run_state": "Idle",
-    "selected_job_id": null,
-    "selected_url": null,
-    "session": "Idle",
-    "signal_candidate_preview": null,
     "signal_candidate_rows": [],
     "stop_finish_button": "Disabled",
     "token_limit": 100000,
-    "total_tokens": 84,
-    "triage_blocked_reason": null,
-    "triage_results_reorder_suppressed": false,
     "unfinished_work": {
       "Known": {
         "articles_with_work": 2,
@@ -221,8 +183,7 @@
         "needs_triage": 0,
         "not_eligible": 0
       }
-    },
-    "workspace_view": "Review"
+    }
   },
   "fatal_message": null
 }

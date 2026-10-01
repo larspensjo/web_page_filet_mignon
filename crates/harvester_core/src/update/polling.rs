@@ -11,26 +11,9 @@ pub(super) fn handle_poll_sources_clicked(state: &mut AppState) -> Vec<Effect> {
     } else if state.start_poll() {
         engine_info!("[source-poll] polling requested");
         state.pre_triage_coordinator.note_poll_started();
-        state.begin_indirect_link_generation();
         vec![Effect::PollAllSources]
     } else {
         Vec::new()
-    }
-}
-
-pub(super) fn handle_poll_indirect_links(state: &mut AppState) -> Vec<Effect> {
-    if state.pipeline_run_phase() == crate::PipelineRunPhase::Stopping
-        || state.session() == SessionState::Finishing
-        || !state.has_indirect_links()
-        || state.indirect_poll_in_progress()
-    {
-        Vec::new()
-    } else {
-        state.set_indirect_poll_in_progress(true);
-        let links = state.drain_indirect_links();
-        let result = state.ingest_indirect_links(links, chrono::Utc::now());
-        state.set_indirect_poll_in_progress(false);
-        result.effects
     }
 }
 

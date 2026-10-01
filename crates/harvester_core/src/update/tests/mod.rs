@@ -269,14 +269,13 @@ fn summary_completion_advances_and_saves_without_aggregate() {
         },
     );
 
-    // effects[0] = SaveResults; effects[1] = UpsertEntityIndexEntry for Article A
-    // effects[2] = RequestLlmCompletion for Article B
-    assert_eq!(effects.len(), 3);
+    assert_eq!(effects.len(), 2);
+    assert!(matches!(&effects[0], Effect::SaveResults { records } if records.len() == 1));
     let req_b = request_id_for_prompt(&effects, PromptId::ArticleSummary)
         .expect("Article B summary request");
     assert_ne!(req_b, req_a, "each summary request must have a distinct id");
     assert!(matches!(
-        &effects[2],
+        &effects[1],
         Effect::RequestLlmCompletion {
             prompt_id: PromptId::ArticleSummary,
             prompt_version: None,
@@ -429,11 +428,11 @@ fn summary_success_records_usage_for_status_bar() {
     assert!(effects
         .iter()
         .all(|e| !matches!(e, Effect::RequestLlmCompletion { .. })));
-    let view = state.view();
-    assert_eq!(view.llm_usage_by_model.len(), 1);
-    assert_eq!(view.llm_usage_by_model[0].model, "test-model");
-    assert_eq!(view.llm_usage_by_model[0].input_tokens, 123);
-    assert_eq!(view.llm_usage_by_model[0].output_tokens, 45);
+
+    assert_eq!(state.llm_usage_rows().len(), 1);
+    assert_eq!(state.llm_usage_rows()[0].model, "test-model");
+    assert_eq!(state.llm_usage_rows()[0].input_tokens, 123);
+    assert_eq!(state.llm_usage_rows()[0].output_tokens, 45);
 }
 
 #[test]
@@ -516,7 +515,6 @@ fn open_in_browser_with_no_selection_emits_nothing() {
 mod archive_tests;
 mod blacklist_tests;
 
-mod entity_index_tests;
 mod import_tests;
 mod pre_triage_refresh_tests;
 mod provider_alert_tests;

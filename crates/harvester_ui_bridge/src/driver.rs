@@ -434,8 +434,8 @@ mod tests {
             signal_candidate_scoring_total: 0,
             signal_candidate_token_estimates: Default::default(),
         };
-        let (runner, commands) = partition_effects(vec![effect, Effect::LoadEntityIndex]);
-        assert_eq!(runner, vec![Effect::LoadEntityIndex]);
+        let (runner, commands) = partition_effects(vec![effect, Effect::LoadBriefingCheckpoint]);
+        assert_eq!(runner, vec![Effect::LoadBriefingCheckpoint]);
         assert!(
             matches!(commands.as_slice(), [UiCommand::ShowArchiveDialog(request)] if request.token_estimates == ArchiveTokenEstimates::default())
         );
@@ -523,8 +523,8 @@ mod tests {
         ));
 
         sender
-            .send(Msg::WorkspaceViewSet {
-                view: harvester_core::WorkspaceView::Blacklist,
+            .send(Msg::JobListModeSet {
+                mode: harvester_core::JobListMode::Last24Hours,
             })
             .unwrap();
         let trailing = signal_receiver
@@ -533,7 +533,7 @@ mod tests {
         assert!(matches!(
             trailing,
             SnapshotSignal::Snapshot(SnapshotEnvelope { generation: 2, ref view, .. })
-                if view["workspace_view"] == "Blacklist"
+                if view["desktop_job_list"]["mode"] == "Last24Hours"
         ));
 
         drop(sender);
@@ -581,7 +581,6 @@ mod tests {
             .send(Msg::JobDone {
                 job_id: 1,
                 result: harvester_core::JobResultKind::Success,
-                content_preview: None,
                 extracted_links: Vec::new(),
                 fetched_utc: None,
             })

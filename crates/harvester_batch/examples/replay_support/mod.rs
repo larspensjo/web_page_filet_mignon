@@ -679,8 +679,7 @@ fn wait_for_cache_writes(
             last_write_count = write_count;
             quiet_since = Instant::now();
         }
-        // The result sink flushes synchronously on runner drop. Entity-index
-        // writes still finish on their own worker, so await its quiet period.
+        // Allow the host persistence sink to finish its pending writes.
         if quiet_since.elapsed() >= Duration::from_millis(250) {
             return Ok(());
         }
@@ -749,7 +748,6 @@ fn route_effects(
                         let _ = msg_tx.send(Msg::JobDone {
                             job_id,
                             result: JobResultKind::Failed { reason },
-                            content_preview: None,
                             extracted_links: Vec::new(),
                             fetched_utc: None,
                         });
@@ -791,7 +789,7 @@ fn deliver_held_article(
             result: JobResultKind::Failed {
                 reason: format!("synthetic article write failed: {error}"),
             },
-            content_preview: None,
+
             extracted_links: Vec::new(),
             fetched_utc: None,
         });
@@ -799,7 +797,6 @@ fn deliver_held_article(
     }
     let bytes = article.markdown.len() as u64;
     let tokens = article.markdown.split_whitespace().count() as u32;
-    let preview = article.markdown.chars().take(240).collect::<String>();
     let links = article
         .links
         .iter()
@@ -814,12 +811,10 @@ fn deliver_held_article(
         stage: harvester_core::Stage::Downloading,
         tokens: Some(tokens),
         bytes: Some(bytes),
-        content_preview: Some(preview.clone()),
     });
     let _ = msg_tx.send(Msg::JobDone {
         job_id,
         result: JobResultKind::Success,
-        content_preview: Some(preview),
         extracted_links: links,
         fetched_utc: article.fetched_utc.clone(),
     });
@@ -985,19 +980,13 @@ fn effect_kind(effect: &Effect) -> &'static str {
         Effect::ArchiveRequested { .. } => "ArchiveRequested",
         Effect::OpenArchiveDialog { .. } => "OpenArchiveDialog",
         Effect::ShowArchiveDialog { .. } => "ShowArchiveDialog",
-        Effect::DownloadLinkedPage { .. } => "DownloadLinkedPage",
-        Effect::DeleteLinkedPage { .. } => "DeleteLinkedPage",
         Effect::SaveResults { .. } => "SaveResults",
         Effect::FlushResults => "FlushResults",
         Effect::PersistSignalCandidateOverrides { .. } => "PersistSignalCandidateOverrides",
         Effect::LoadBriefingCheckpoint => "LoadBriefingCheckpoint",
         Effect::SaveBriefingCheckpoint { .. } => "SaveBriefingCheckpoint",
         Effect::OpenUrlInBrowser { .. } => "OpenUrlInBrowser",
-        Effect::LoadEntityIndex => "LoadEntityIndex",
-        Effect::RebuildEntityIndex => "RebuildEntityIndex",
-        Effect::UpsertEntityIndexEntry { .. } => "UpsertEntityIndexEntry",
         Effect::ImportSavedWebpages { .. } => "ImportSavedWebpages",
-        Effect::PersistWindowSize { .. } => "PersistWindowSize",
         Effect::PersistDesktopWindowSize { .. } => "PersistDesktopWindowSize",
         Effect::PersistRuntimeState { .. } => "PersistRuntimeState",
     }

@@ -9,7 +9,6 @@ use harvester_engine::ExtractedLink;
 use serde::{Deserialize, Serialize};
 
 use crate::state::{AiAvailability, ArchiveTokenEstimates};
-use crate::tabs::TrendCategory;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[rustfmt::skip]
@@ -82,14 +81,8 @@ pub enum Msg {
     ToggleSignalCandidateExclusion { signal_key: String },
     /// UI/render tick to coalesce rendering and observe host time.
     Tick { now: DateTime<Utc> },
-    /// Desktop workspace selection; the legacy tabs remain separately owned.
-    WorkspaceViewSet { view: crate::WorkspaceView },
     /// Desktop job-list mode.
     JobListModeSet { mode: crate::JobListMode },
-    /// Reveal desktop search by returning to Review. Focus itself is frontend-local.
-    JobsSearchRevealRequested,
-    /// Open desktop Trends and request its index.
-    TrendsViewOpened,
     /// Host request to run the merged triage + summary pipeline.
     PipelineRunRequested { scope: crate::PipelineRunScope },
     /// Reducer-owned orchestration pulse, sent by either host while a run is active.
@@ -107,13 +100,11 @@ pub enum Msg {
         stage: crate::Stage,
         tokens: Option<u32>,
         bytes: Option<u64>,
-        content_preview: Option<String>,
     },
     /// Engine completion for a job.
     JobDone {
         job_id: crate::JobId,
         result: crate::JobResultKind,
-        content_preview: Option<String>,
         extracted_links: Vec<ExtractedLink>,
         fetched_utc: Option<String>,
     },
@@ -131,24 +122,8 @@ pub enum Msg {
     BlacklistHydrated {
         state: crate::blacklist::BlacklistState,
     },
-    LinkDownloadCompleted {
-        job_id: crate::JobId,
-        link_index: u32,
-        path: PathBuf,
-    },
-    LinkDownloadFailed {
-        job_id: crate::JobId,
-        link_index: u32,
-        error: String,
-    },
-    LinkDeleted {
-        job_id: crate::JobId,
-        link_index: u32,
-    },
     /// User selected a job from the tree view.
     JobSelected { job_id: crate::JobId },
-    /// Window resize drag completed. Carries outer (frame) dimensions for persistence.
-    WindowResizeCompleted { outer_width: i32, outer_height: i32 },
     /// Tauri desktop window resize debounce completed. Carries logical inner dimensions.
     DesktopWindowResizeCompleted { inner_width: i32, inner_height: i32 },
     /// A completion result came back from the worker.
@@ -163,8 +138,6 @@ pub enum Msg {
     LlmQuotaConfigured { limits: crate::LlmQuotaLimits },
     /// Authoritative session LLM quota usage snapshot from the worker.
     LlmQuotaUsageUpdated { usage: crate::LlmQuotaUsage },
-    /// User requested polling the indirect-link pool.
-    PollIndirectLinks,
     /// Effect runner reports the total number of enabled sources to poll.
     PollStarted { total: usize },
     /// Polling completed for a source.
@@ -247,20 +220,6 @@ pub enum Msg {
     TriageCacheHydrated { cache: crate::TriageCache },
     /// User requested to open the currently selected article URL in the default browser.
     OpenInBrowserClicked,
-    /// User selected a trend category in the Trends tab.
-    TrendCategorySelected { category: TrendCategory },
-    /// Entity index successfully loaded from disk.
-    EntityIndexLoaded {
-        index: crate::entity_index::EntityIndex,
-    },
-    /// Entity index failed to load from disk (parse error or IO error).
-    EntityIndexLoadFailed { reason: String },
-    /// Entity index successfully rebuilt from the archive.
-    EntityIndexRebuilt {
-        index: crate::entity_index::EntityIndex,
-    },
-    /// Entity index rebuild failed.
-    EntityIndexRebuildFailed { reason: String },
 
     // --- Import saved webpages ---
     /// Request to import browser-saved .htm/.html files from `dir`.
@@ -296,10 +255,7 @@ impl Msg {
             Self::ArchiveExportFailed { .. } => "ArchiveExportFailed",
             Self::ToggleSignalCandidateExclusion { .. } => "ToggleSignalCandidateExclusion",
             Self::Tick { .. } => "Tick",
-            Self::WorkspaceViewSet { .. } => "WorkspaceViewSet",
             Self::JobListModeSet { .. } => "JobListModeSet",
-            Self::JobsSearchRevealRequested => "JobsSearchRevealRequested",
-            Self::TrendsViewOpened => "TrendsViewOpened",
             Self::PipelineRunRequested { .. } => "PipelineRunRequested",
             Self::PipelineRunAdvance => "PipelineRunAdvance",
             Self::RunFinishedNoticeDismissed => "RunFinishedNoticeDismissed",
@@ -308,16 +264,11 @@ impl Msg {
             Self::JobDone { .. } => "JobDone",
             Self::FetchOutcomeClassified { .. } => "FetchOutcomeClassified",
             Self::BlacklistHydrated { .. } => "BlacklistHydrated",
-            Self::LinkDownloadCompleted { .. } => "LinkDownloadCompleted",
-            Self::LinkDownloadFailed { .. } => "LinkDownloadFailed",
-            Self::LinkDeleted { .. } => "LinkDeleted",
             Self::JobSelected { .. } => "JobSelected",
-            Self::WindowResizeCompleted { .. } => "WindowResizeCompleted",
             Self::DesktopWindowResizeCompleted { .. } => "DesktopWindowResizeCompleted",
             Self::LlmCompleted { .. } => "LlmCompleted",
             Self::LlmQuotaConfigured { .. } => "LlmQuotaConfigured",
             Self::LlmQuotaUsageUpdated { .. } => "LlmQuotaUsageUpdated",
-            Self::PollIndirectLinks => "PollIndirectLinks",
             Self::PollStarted { .. } => "PollStarted",
             Self::SourcePollCompleted { .. } => "SourcePollCompleted",
             Self::SourcePollFailed { .. } => "SourcePollFailed",
@@ -341,11 +292,6 @@ impl Msg {
             Self::SignalCandidateOverridesLoaded { .. } => "SignalCandidateOverridesLoaded",
             Self::TriageCacheHydrated { .. } => "TriageCacheHydrated",
             Self::OpenInBrowserClicked => "OpenInBrowserClicked",
-            Self::TrendCategorySelected { .. } => "TrendCategorySelected",
-            Self::EntityIndexLoaded { .. } => "EntityIndexLoaded",
-            Self::EntityIndexLoadFailed { .. } => "EntityIndexLoadFailed",
-            Self::EntityIndexRebuilt { .. } => "EntityIndexRebuilt",
-            Self::EntityIndexRebuildFailed { .. } => "EntityIndexRebuildFailed",
             Self::ImportSavedWebpagesRequested { .. } => "ImportSavedWebpagesRequested",
             Self::ImportSavedWebpagesCompleted { .. } => "ImportSavedWebpagesCompleted",
             Self::ImportSavedWebpagesFailed { .. } => "ImportSavedWebpagesFailed",

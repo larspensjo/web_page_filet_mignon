@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use harvester_engine::llm::dto::SummaryEntities;
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::ArchiveDocAnnotations;
 use serde::{Deserialize, Serialize};
@@ -103,16 +102,6 @@ pub enum Effect {
         signal_candidate_scoring_total: u32,
         signal_candidate_token_estimates: crate::ArchiveTokenEstimates,
     },
-    DownloadLinkedPage {
-        job_id: crate::JobId,
-        link_index: u32,
-        url: String,
-    },
-    DeleteLinkedPage {
-        job_id: crate::JobId,
-        link_index: u32,
-        path: PathBuf,
-    },
     PersistSignalCandidateOverrides {
         overrides: std::collections::HashSet<crate::signal_candidate::OverrideKey>,
     },
@@ -127,18 +116,6 @@ pub enum Effect {
     OpenUrlInBrowser {
         url: String,
     },
-    /// Load the entity index from disk (full loading in Slice 3).
-    LoadEntityIndex,
-    /// Rebuild the entity index from scratch from the article archive (full implementation Slice 4).
-    RebuildEntityIndex,
-    /// Upsert one article's entity data into the entity index (full implementation Slice 3).
-    UpsertEntityIndexEntry {
-        url: String,
-        fetched_utc: Option<String>,
-        content_hash: Option<String>,
-        summary_entities: Option<SummaryEntities>,
-        themes: Option<Vec<String>>,
-    },
 
     // --- Import saved webpages ---
     /// Scan and import browser-saved .htm/.html files from `dir`.
@@ -146,11 +123,6 @@ pub enum Effect {
     ImportSavedWebpages {
         dir: PathBuf,
         request_id: u64,
-    },
-    /// Persist the window's outer dimensions to disk.
-    PersistWindowSize {
-        width: i32,
-        height: i32,
     },
     /// Persist the Tauri desktop window's logical inner dimensions to disk.
     PersistDesktopWindowSize {

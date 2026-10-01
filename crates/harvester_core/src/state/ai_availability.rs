@@ -1,7 +1,4 @@
-use super::{AiAvailability, AiUnavailableReason, AppState, PreTriageLoadContext};
-use crate::pre_triage_coordinator::PreTriageRefreshReason;
-use crate::pre_triage_filter::PreTriagePhase;
-use crate::InlineWarningView;
+use super::{AiAvailability, AiUnavailableReason, AppState};
 use harvester_engine::llm::prompt::PromptId;
 
 impl AppState {
@@ -95,47 +92,5 @@ impl AppState {
         }
         self.ai_unavailable_reason_text()
             .map(|reason| format!("AI features unavailable: {reason}"))
-    }
-
-    pub(super) fn ai_warning_banner(&self) -> Option<InlineWarningView> {
-        matches!(
-            self.ai_unavailable_reason(),
-            Some(AiUnavailableReason::MissingApiKey)
-        )
-        .then(|| InlineWarningView {
-            title: "AI features are disabled".to_string(),
-            body: "Set OPENAI_API_KEY in the launch environment and restart to enable triage and briefing.".to_string(),
-        })
-    }
-
-    pub(super) fn triage_blocked_reason(&self) -> Option<String> {
-        if self.result_store_failure.is_some() {
-            return self.ai_unavailable_message();
-        }
-        if let Some(reason) = self.ai_unavailable_reason() {
-            return Some(match reason {
-                AiUnavailableReason::MissingApiKey => {
-                    "AI setup is incomplete because OPENAI_API_KEY is not set".to_string()
-                }
-                AiUnavailableReason::ResultStoreUnavailable => {
-                    self.ai_unavailable_message().unwrap_or_default()
-                }
-                AiUnavailableReason::NoTriageModel => "no triage model is available".to_string(),
-            });
-        }
-
-        if matches!(self.pre_triage.phase(), PreTriagePhase::LoadingArticles)
-            || (self.pre_triage_coordinator.refresh_pending()
-                && self.pre_triage.entries().is_empty())
-        {
-            return Some(match self.pre_triage_load_context {
-                Some(PreTriageLoadContext {
-                    reason: PreTriageRefreshReason::RestoreCompletedJobs,
-                }) => "Triage is unavailable while startup prepares the article set".to_string(),
-                _ => "Triage is unavailable while the article set is being prepared".to_string(),
-            });
-        }
-
-        None
     }
 }

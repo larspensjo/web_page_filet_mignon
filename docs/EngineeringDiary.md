@@ -2661,3 +2661,17 @@ Change: Retargeted the marker regression to archive writes and refreshes, shared
 Lessons Learned: Removing a feature's test can accidentally remove coverage of a surviving public output contract. Retired identifiers are an expected compatibility case, not malformed records.
 Prevention: Test the surviving output-producing path and assert warning classification with file/count context. Track the linked-page chain and retired snapshot workaround for the later desktop cleanup.
 Refs: crates/harvester_engine/tests/output.rs, crates/harvester_io/tests/retired_summary_entries.rs, docs/plans/Plan.Simplification.md
+
+## 2026-09-30 - Desktop render contract and unused feature removal
+Type: Implementation
+Context: The supported page did not consume workspace/trends state, article previews or linked-page download controls, while entity-index updates still generated disk work after model results.
+Change: Removed trends/entity-index state and I/O, linked-page completion and worker paths, indirect intake, preview payloads and legacy geometry effects. Audited all frontend consumers and bridge projection: the snapshot now exposes 23 top-level fields and one SummaryMarkdown body key under IPC 13. Regenerated all fixtures, including completion notices and AI unavailability, with full projection comparison. Selected links still resolve through core. Old downloaded paths still load, but runtime saves omit them; legacy geometry remains readable and desktop geometry stays distinct. Removed the unread provider-alert and token-total state, triage formatter and poll-quota warning. Search focus is frontend-local, with its IPC intent retired.
+Refs: crates/harvester_core/src/view_model.rs; crates/harvester_ui_bridge/src/snapshot.rs; crates/harvester_ui_bridge/src/ipc.rs; crates/harvester_io/src/persistence.rs; removed_desktop_intents_fail_closed; desktop_snapshot_pins_only_rendered_fields; selected_job_keeps_extracted_links_after_completion; old_link_paths_load_but_runtime_saves_drop_them_and_preserve_geometry
+
+## 2026-09-30 - Avoid whole-state compatibility work on every runtime save
+Type: Bug Fix
+Context: Carrying forward retired downloaded paths normalized every old and new link URL on every save, even when the old state contained no paths. Work grew with the whole runtime-state file.
+Change: Removed path carry-forward. Runtime saves deserialize only pending intake and geometry settings, skipping the old completed-job collection without allocating its jobs or links. Existing path-bearing files remain readable; the next reducer snapshot drops their paths.
+Lessons Learned: Compatibility reads should follow the surviving contract. Preserving ignored data can add seconds to routine saves when nested records trigger repeated parsing and allocations.
+Prevention: Regressions load old paths and verify they disappear on runtime save, and save successfully over an incompatible old completed payload while preserving pending intake and desktop geometry.
+Refs: crates/harvester_io/src/persistence.rs; old_link_paths_load_but_runtime_saves_drop_them_and_preserve_geometry; runtime_save_ignores_old_completed_payload_and_preserves_settings
