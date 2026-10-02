@@ -29,6 +29,10 @@ pub enum Msg {
     RestoreCompletedJobs(Vec<crate::CompletedJobSnapshot>),
     /// Restore URLs whose intake must be retried by the next Full run.
     RestorePendingIntake(Vec<String>),
+    /// Startup recovery has completed (including jobs with no recoverable date).
+    FetchTimeRecoveryCompleted,
+    /// I/O preserved an additional owner backup; render through the status notice.
+    RuntimeStateNotice { message: String },
     /// App-loop boundary action: evaluate pre-triage refresh demand with a
     /// single snapshot of currently completed URLs.
     EvaluatePreTriageRefresh {
@@ -124,6 +128,7 @@ pub enum Msg {
     },
     /// User selected a job from the tree view.
     JobSelected { job_id: crate::JobId },
+    ArticleLinksLoaded { job_id: crate::JobId, url: String, links: Result<Vec<ExtractedLink>, String> },
     /// Tauri desktop window resize debounce completed. Carries logical inner dimensions.
     DesktopWindowResizeCompleted { inner_width: i32, inner_height: i32 },
     /// A completion result came back from the worker.
@@ -265,6 +270,9 @@ impl Msg {
             Self::FetchOutcomeClassified { .. } => "FetchOutcomeClassified",
             Self::BlacklistHydrated { .. } => "BlacklistHydrated",
             Self::JobSelected { .. } => "JobSelected",
+            Self::ArticleLinksLoaded { .. } => "ArticleLinksLoaded",
+            Self::FetchTimeRecoveryCompleted => "FetchTimeRecoveryCompleted",
+            Self::RuntimeStateNotice { .. } => "RuntimeStateNotice",
             Self::DesktopWindowResizeCompleted { .. } => "DesktopWindowResizeCompleted",
             Self::LlmCompleted { .. } => "LlmCompleted",
             Self::LlmQuotaConfigured { .. } => "LlmQuotaConfigured",

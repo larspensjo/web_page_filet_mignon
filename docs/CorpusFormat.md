@@ -26,7 +26,7 @@ Current marker shape:
       "archive.md",
       "archive-*.md"
     ],
-    "internal_state": [".*.ron", ".*.jsonl", "llm_results/", "logs/"]
+    "internal_state": [".*.ron", ".*.jsonl", ".article_links/", "llm_results/", "logs/"]
   }
 }
 ```
@@ -59,7 +59,7 @@ signature `===== ARCHIVE INDEX =====`.
 
 ## Private Files
 
-Hidden `.ron` and `.jsonl` files, `llm_results/`, and `logs/` are outside the
+Hidden `.ron` and `.jsonl` files, `.article_links/`, `llm_results/`, and `logs/` are outside the
 public corpus contract. External readers must not depend on them. The
 `.sources.ron` file is the user-editable source registry; it lives in the output
 folder so corpus backups preserve ingestion configuration as well as state.
@@ -107,3 +107,22 @@ When bumping the corpus schema:
 2. Update this document and the README output summary.
 3. Add or update regression tests for the new marker/layout.
 4. Record the decision in `docs/DecisionLog.md`.
+
+Extracted links are private state under `.article_links/`, one atomic JSON array
+per article named by the SHA-256 of its canonical archive URL key. Records contain
+`url`, `text` (optional anchor text) and `kind`. Empty link lists have no file;
+loading a missing file returns an empty list. Temporary link files remain inside
+that directory. Runtime state contains slim completed-job records and retains
+pending intake, desktop geometry and legacy window dimensions. The original
+`.harvester_state.pre-slim.ron` is left for the owner. Pinned migration temporaries
+`.harvester_state.pre-slim-partial-<timestamp>.ron` and
+`.harvester_state.slim-partial-<timestamp>.ron` match the existing `.*.ron`
+internal-state pattern. Adding `.article_links/` cannot change article classification
+and does not bump `CORPUS_SCHEMA_VERSION` (still 1).
+
+Restored or unparseable active runtime state is preserved in an additional verified
+`.harvester_state.pre-slim-<UTC timestamp>-<collision counter>.ron` backup when needed.
+These owner backups match `.*.ron` and are never overwritten or treated as partials.
+The optional `fetch_time_recovery_done` runtime-state field defaults to false for old
+files and records completion even if some jobs remain without recoverable dates;
+older builds ignore it. Article classification and schema version remain unchanged.

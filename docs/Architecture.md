@@ -114,8 +114,8 @@ Key rules:
   eviction. The reducer emits only newly inserted or updated records in `SaveResults`;
   hydration emits no save. `EffectRunner` owns an injected, ordered result sink next to
   the runtime-persistence sink. It coalesces for at most about two seconds from the first
-  unsaved record and flushes at reducer requests on run end and Stop, runner drop, and
-  desktop close.
+  unsaved record. Reducer requests on run end and Stop enqueue an ordered flush fence
+  without waiting on the host loop; runner drop and desktop close wait for durability.
 - The I/O layer migrates RON through a flushed, re-read temporary file before renaming
   it to JSONL. RON backups stay byte-identical and are never dual-written. Invalid or
   unknown-version RON sources and unreadable stores refuse AI with a filename and reason;
@@ -236,6 +236,9 @@ session changes and refreshes the affected identity after an article completion,
 along with identities affected by cache eviction. A quota halt rebuilds it after
 pending entries are failed. View and snapshot construction only read state and
 never recompute this aggregate.
+Scheduler probes do not mutate session cache keys when they are already equal,
+or fail already-empty pending queues. Waiting for occupied model slots and draining
+a quota halt therefore do not invalidate the aggregate on every host message.
 
 The triage cache also keeps a skipped-from-persistence alias index keyed by content
 hash for current-metadata lookups. Each alias carries the cached priority used by
@@ -304,13 +307,52 @@ unfinished count. A host prints the reducer-recorded notice after initial admiss
   removed source types are skipped with a warning that identifies their
   registry path, position and readable id, while valid entries load with existing validation.
   File and CuratedList remain supported source types.
-  Runtime persistence retains the existing state layout and ignored legacy
-  window dimensions. Old per-link downloaded paths load but are ignored by runtime
-  state and are not carried forward in reducer snapshots. Saves read only old
-  pending intake and geometry settings, skipping the completed-job collection.
-  Only the desktop logical inner
-  dimensions restore geometry; extracted links open in a browser and are never
-  downloaded or deleted by the host. There is no indirect-link intake pool.
+  Runtime persistence contains URL, tokens, bytes and fetch time per completed job,
+  pending intake and both geometry pairs. Only desktop logical inner dimensions
+  restore geometry; legacy window dimensions remain readable and carried forward.
+  PersistenceSnapshot captures slim records without cloning any job's links. Normal
+  saves retain only pending intake, geometry and the optional links_in_store and
+  fetch_time_recovery_done markers from the old file. They consume completed jobs
+  through typed deserialization and discard each immediately: RON's generic
+  unknown-field skipping is prohibitively slow at corpus scale. Already-slim saves
+  neither verify backups nor enumerate article-link files.
+  Extracted links live in .article_links/<SHA-256 of canonical archive URL key>.json.
+  Each record keeps URL, anchor text (text) and link kind. Selection emits
+  LoadArticleLinks only for successful jobs with no resident links;
+  ArticleLinksLoaded fills only the still-selected matching successful job.
+  Error replies are logged with job and URL context and ignored; empty replies
+  never replace non-empty resident links.
+  The selected-job IPC 13 shape and reducer-resolved browser opening are unchanged.
+  Successful downloads with links emit StoreArticleLinks before PersistRuntimeState.
+  The persistence worker publishes queued link effects in order before the associated
+  slim runtime snapshot, off the reducer loop. Empty lists create no link files.
+  Startup I/O copies the original state to a pinned temporary, flushes and verifies
+  length and SHA-256, then publishes .harvester_state.pre-slim.ron without overwriting
+  an existing backup. It atomically writes each article's links before verifying and
+  atomically replacing the slim active state. links_in_store defaults to false in old
+  files; older readers ignore it and default absent links to empty. Backup and slim
+  temporaries use .harvester_state.pre-slim-partial-*.ron and
+  .harvester_state.slim-partial-*.ron. On restart these temporaries are discarded;
+  an identical backup plus old active state resumes link publication, while a slim
+  active state completes migration. A mismatched or unreadable existing backup stays
+  untouched; migration publishes an additional verified byte-identical backup named
+  .harvester_state.pre-slim-<UTC timestamp>-<collision counter>.ron and continues.
+  An unparseable original is likewise backed up under a unique dated name before
+  migration continues from default runtime state. Publication never overwrites a backup.
+  Each fallback returns a one-line backup notice through RuntimeStateNotice and the
+  existing rendered status field (checkpoint_status_message), with no new IPC field.
+  Re-migration skips empty link lists and merges valid stored records with restored
+  links; unreadable existing link files are retained and logged.
+  Individual malformed link records/files are logged and skipped. No owner backup
+  is deleted. Startup recovers missing fetch times by reading only leading frontmatter
+  blocks in root and legacy linked articles, without reading or preparing their bodies.
+  FetchTimeRecoveryCompleted immediately emits PersistRuntimeState with recovered
+  dates and fetch_time_recovery_done (serde default false). Normal saves preserve
+  that marker, so later startups skip recovery even when unrecoverable jobs remain.
+  Import services recovery through the same reducer/effect path before processing arrivals.
+  Geometry saves on slim state skip migration. Jobs still without a date remain hidden in time-scoped desktop lists,
+  counted in the existing note, retained on disk and protected from duplicate intake.
+  There is no indirect-link intake pool or linked-page download/delete workflow.
   Runtime persistence includes reducer-owned pending intake. A poll completing
   after Stop and downloads cancelled before starting are saved for the next
   Full run, which ingests them before polling. A pending URL with a successful

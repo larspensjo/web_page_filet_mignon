@@ -47,6 +47,29 @@ fn state_with_work(triage: &[&str], summaries: &[&str], scores: &[&str]) -> AppS
     state
 }
 
+#[test]
+fn full_model_slots_do_not_invalidate_unfinished_work_on_ticks() {
+    for (triage, summaries) in [
+        (&["one", "two"][..], &[][..]),
+        (&[][..], &["one", "two"][..]),
+    ] {
+        let mut state = state_with_work(triage, summaries, &[]);
+        state.set_llm_max_in_flight(1);
+        let (mut state, _) = crate::update(state, Msg::tick_at(chrono::Utc::now()));
+        // A pending article already has its admission key. Probing it while
+        // all slots are occupied must not trigger a corpus classification.
+        let before = state.unfinished_revisions();
+        for _ in 0..20 {
+            let (next, effects) = crate::update(state, Msg::tick_at(chrono::Utc::now()));
+            assert!(!effects
+                .iter()
+                .any(|e| matches!(e, Effect::RequestLlmCompletion { .. })));
+            assert_eq!(next.unfinished_revisions(), before);
+            state = next;
+        }
+    }
+}
+
 fn admit_score(state: &mut AppState, name: &str) {
     let url = article(name).url;
     let snapshot = SignalCandidateInputSnapshot {
@@ -484,4 +507,23 @@ fn existing_three_rate_limit_threshold_halts_all_stages() {
     assert_eq!(state.triage().pending_count(), 0);
     assert_eq!(state.briefing().pending_count(), 0);
     assert_eq!(state.signal_candidate().in_flight_count(), 0);
+}
+
+#[test]
+fn halted_dispatch_does_not_invalidate_unfinished_work_on_idle_messages() {
+    let state = state_with_work(&["triage"], &["summary"], &["score"]);
+    let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
+    let (mut state, _) = completion(
+        state,
+        requests(&effects)[0].0,
+        LlmResultKind::QuotaExhausted {
+            reason: "session quota".into(),
+            origin: QuotaOrigin::SessionBudget,
+        },
+    );
+    let revision = state.unfinished_revisions();
+    for _ in 0..20 {
+        (state, _) = crate::update(state, Msg::tick_at(chrono::Utc::now()));
+        assert_eq!(state.unfinished_revisions(), revision);
+    }
 }

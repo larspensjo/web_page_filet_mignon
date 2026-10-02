@@ -14,6 +14,11 @@ pub const RESULT_SAVE_WINDOW: Duration = Duration::from_secs(2);
 pub trait ResultSink: Send + Sync {
     fn enqueue(&self, records: Vec<SavedResult>);
     fn flush(&self) -> io::Result<()>;
+    /// Request an ordered flush from the effect loop. Production sinks enqueue
+    /// this fence without waiting; hosts use `flush` only at shutdown.
+    fn request_flush(&self) -> io::Result<()> {
+        self.flush()
+    }
 }
 
 pub struct NoOpResultSink;
@@ -26,7 +31,7 @@ impl ResultSink for NoOpResultSink {
 
 enum Command {
     Records(Vec<SavedResult>),
-    Flush(mpsc::Sender<io::Result<()>>),
+    Flush(Option<mpsc::Sender<io::Result<()>>>),
     Shutdown,
     #[cfg(test)]
     Crash,
@@ -70,9 +75,14 @@ impl ResultSink for CoalescingResultSink {
     fn flush(&self) -> io::Result<()> {
         let (tx, rx) = mpsc::channel();
         self.tx
-            .send(Command::Flush(tx))
+            .send(Command::Flush(Some(tx)))
             .map_err(|e| io::Error::other(e.to_string()))?;
         rx.recv().map_err(|e| io::Error::other(e.to_string()))?
+    }
+    fn request_flush(&self) -> io::Result<()> {
+        self.tx
+            .send(Command::Flush(None))
+            .map_err(|e| io::Error::other(e.to_string()))
     }
 }
 
@@ -171,9 +181,10 @@ fn save(
                             observer(&paths.$path, bytes as u64, started.elapsed());
                         }
                         engine_info!(
-                            "[results] appended {} records to {}",
+                            "[results] appended {} records to {} elapsed_ms={}",
                             records.len(),
-                            paths.$path.display()
+                            paths.$path.display(),
+                            started.elapsed().as_millis()
                         );
                         pending.$slot.clear();
                     }
@@ -272,7 +283,9 @@ fn run(
                 } else {
                     Some(Instant::now() + window)
                 };
-                let _ = reply.send(result);
+                if let Some(reply) = reply {
+                    let _ = reply.send(result);
+                }
             }
             Ok(Command::Shutdown) | Err(mpsc::RecvTimeoutError::Disconnected) => {
                 let _ = flush(&mut writers, &mut pending);
@@ -427,10 +440,14 @@ mod tests {
         .unwrap()
         .remove(0);
         let (messages, received) = mpsc::channel();
+        let (published, publications) = mpsc::channel();
+        let observer: FileWriteObserver = std::sync::Arc::new(move |path, _, _| {
+            published.send(path.to_owned()).unwrap();
+        });
         let sink = CoalescingResultSink::with_window(
             paths.clone(),
             messages,
-            None,
+            Some(observer),
             Duration::from_millis(40),
         );
         sink.enqueue(vec![
@@ -438,7 +455,14 @@ mod tests {
             record(),
             SavedResult::SignalCandidate(signal_key, signal_entry),
         ]);
-        thread::sleep(Duration::from_millis(120));
+        // Wait for actual publication rather than assuming the writer gets CPU
+        // within 120 ms while the corpus-scale tests run alongside it.
+        let mut published_paths = std::collections::HashSet::new();
+        for _ in 0..2 {
+            published_paths.insert(publications.recv_timeout(Duration::from_secs(5)).unwrap());
+        }
+        assert!(published_paths.contains(&paths.triage_cache_path));
+        assert!(published_paths.contains(&paths.signal_candidate_cache_path));
         let lines = || {
             std::fs::read_to_string(&paths.triage_cache_path)
                 .unwrap()
@@ -533,5 +557,65 @@ mod tests {
         ]);
         drop(runner);
         assert_eq!(*events.lock().unwrap(), vec!["record", "flush", "flush"]);
+    }
+
+    #[test]
+    fn effect_flush_does_not_wait_for_a_blocked_result_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = RuntimePaths::with_defaults(dir.path().to_owned());
+        let (messages, received) = mpsc::channel();
+        let (entered, waiting) = mpsc::channel();
+        let gate = std::sync::Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        let worker_gate = gate.clone();
+        let observer: FileWriteObserver = std::sync::Arc::new(move |_, _, _| {
+            entered.send(()).unwrap();
+            let (lock, wake) = &*worker_gate;
+            let mut released = lock.lock().unwrap();
+            while !*released {
+                released = wake.wait(released).unwrap();
+            }
+        });
+        let sink = CoalescingResultSink::with_window(
+            paths.clone(),
+            messages.clone(),
+            Some(observer),
+            Duration::from_millis(1),
+        );
+        sink.enqueue(vec![record()]);
+        waiting.recv_timeout(Duration::from_secs(5)).unwrap();
+        let runner = crate::EffectRunner::new(
+            paths,
+            messages,
+            Box::new(crate::NoOpPlatformHandler),
+            Box::new(crate::NoOpRuntimePersistenceSink),
+        )
+        .with_result_sink(Box::new(sink));
+        let (done, finished) = mpsc::channel();
+        let driver = thread::spawn(move || {
+            runner.enqueue(vec![
+                harvester_core::Effect::FlushResults,
+                harvester_core::Effect::RequestLlmCompletion {
+                    request_id: 77,
+                    prompt_id: harvester_engine::llm::PromptId::ArticleTriage,
+                    prompt_version: None,
+                    input_content: "fixture".into(),
+                    context: Vec::new(),
+                    extra_template_vars: Vec::new(),
+                },
+            ]);
+            done.send(()).unwrap();
+            drop(runner);
+        });
+        let responsive = finished.recv_timeout(Duration::from_secs(1)).is_ok();
+        let completion = received.recv_timeout(Duration::from_secs(1));
+        let (lock, wake) = &*gate;
+        *lock.lock().unwrap() = true;
+        wake.notify_all();
+        driver.join().unwrap();
+        assert!(responsive, "effect flush must only enqueue its fence");
+        assert!(matches!(
+            completion,
+            Ok(Msg::LlmCompleted { request_id: 77, .. })
+        ));
     }
 }

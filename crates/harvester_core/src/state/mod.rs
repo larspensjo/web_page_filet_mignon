@@ -140,6 +140,15 @@ pub struct CompletedJobSnapshot {
     pub fetched_utc: Option<String>,
 }
 
+/// Completed-job persistence projection, deliberately without a link collection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlimJobRecord {
+    pub url: String,
+    pub tokens: Option<u32>,
+    pub bytes: Option<u64>,
+    pub fetched_utc: Option<String>,
+}
+
 /// Snapshot of batch processing state for headless runners.
 /// Provides observable metrics without UI dependencies.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -348,6 +357,8 @@ pub struct AppState {
     pub(crate) import_session: crate::import_session::ImportSessionState,
     pub(crate) blacklist: crate::blacklist::BlacklistState,
     pending_intake: Vec<String>,
+    pub(crate) fetch_time_recovery_done: bool,
+    runtime_state_notice: Option<String>,
     unfinished_work: UnfinishedWork,
     unfinished_classes: HashMap<(String, String), UnfinishedWorkClass>,
     unfinished_inputs_revision: u64,
@@ -438,6 +449,8 @@ impl Default for AppState {
             import_session: crate::import_session::ImportSessionState::default(),
             blacklist: crate::blacklist::BlacklistState::default(),
             pending_intake: Vec::new(),
+            fetch_time_recovery_done: false,
+            runtime_state_notice: None,
             unfinished_work: UnfinishedWork::Unknown,
             unfinished_classes: HashMap::new(),
             unfinished_inputs_revision: 0,

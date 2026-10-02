@@ -41,6 +41,20 @@ struct Cli {
 
 fn main() {
     let cli = Cli::parse();
+    // Keep replay diagnostics separate from the owner's production engine.log.
+    let log_dir = cli
+        .work_dir
+        .as_deref()
+        .and_then(std::path::Path::parent)
+        .unwrap_or_else(|| std::path::Path::new(".local/bench"));
+    std::fs::create_dir_all(log_dir).expect("benchmark log directory");
+    let log_name = cli
+        .work_dir
+        .as_deref()
+        .and_then(std::path::Path::file_name)
+        .map(|name| format!("{}.engine.log", name.to_string_lossy()))
+        .unwrap_or_else(|| "replay-engine.log".into());
+    engine_logging::initialize_at(log_dir.join(log_name));
     let options = HarnessOptions {
         source_dir: cli.source_dir,
         work_dir: cli.work_dir.unwrap_or_else(default_work_dir),

@@ -33,6 +33,7 @@ pub fn build_corpus_manifest(written_at_utc: &str) -> Value {
             "internal_state": [
                 ".*.ron",
                 ".*.jsonl",
+                ".article_links/",
                 "llm_results/",
                 "logs/"
             ]
@@ -62,6 +63,10 @@ mod tests {
             json!(["archive.md", "archive-*.md"])
         );
         assert_eq!(CORPUS_SCHEMA_VERSION, 1);
+        assert!(manifest["layout"]["internal_state"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(".article_links/")));
         assert!(manifest["layout"]["internal_state"]
             .as_array()
             .unwrap()
@@ -101,6 +106,13 @@ mod tests {
 
     #[test]
     fn migration_temp_names_match_declared_internal_state_pattern() {
+        for name in [
+            ".harvester_state.pre-slim-20261001T120000.000000001-0.ron",
+            ".harvester_state.pre-slim-partial-20261001T120000.000000001.ron",
+            ".harvester_state.slim-partial-20261001T120000.000000001.ron",
+        ] {
+            assert!(internal_state_matches(name));
+        }
         for kind in ["triage", "summary", "signal_candidate"] {
             assert!(internal_state_matches(&format!(
                 ".{kind}_cache.migrating-20260928T120000.000000001.jsonl"

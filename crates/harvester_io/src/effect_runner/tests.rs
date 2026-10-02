@@ -49,6 +49,128 @@ fn runner_with_receiver(base: &Path) -> (EffectRunner, mpsc::Receiver<Msg>) {
     )
 }
 
+#[test]
+fn rejected_model_effect_returns_a_terminal_completion() {
+    let dir = tempdir().unwrap();
+    let (mut runner, rx) = runner_with_receiver(dir.path());
+    runner.llm_max_input_bytes = Some(10);
+    for prompt_id in [
+        PromptId::ArticleTriage,
+        PromptId::ArticleSummary,
+        PromptId::ArticleSignalCandidate,
+    ] {
+        runner.enqueue(vec![Effect::RequestLlmCompletion {
+            request_id: 42,
+            prompt_id,
+            prompt_version: None,
+            input_content: "too much input for this request".into(),
+            context: vec![],
+            extra_template_vars: vec![],
+        }]);
+        assert!(matches!(rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            Msg::LlmCompleted { request_id: 42, result: harvester_core::LlmResultKind::Failed { reason }, .. }
+                if reason.contains("input too large")));
+    }
+}
+
+#[test]
+fn completed_download_stores_links_and_restored_selection_loads_and_opens_them() {
+    let temp = tempdir().unwrap();
+    let (runner, rx) = runner_with_receiver(temp.path());
+    let url = "https://example.com/article";
+    let (state, _) = harvester_core::update(AppState::new(), Msg::InputChanged(url.into()));
+    let (state, _) = harvester_core::update(state, Msg::UrlsSubmitted);
+    let links = vec![harvester_engine::ExtractedLink {
+        url: "https://example.com/resource".into(),
+        text: Some("Resource".into()),
+        kind: harvester_engine::LinkKind::Hyperlink,
+    }];
+    let (_, effects) = harvester_core::update(
+        state,
+        Msg::JobDone {
+            job_id: 1,
+            result: JobResultKind::Success,
+            extracted_links: links.clone(),
+            fetched_utc: None,
+        },
+    );
+    assert!(
+        matches!(&effects[0], Effect::StoreArticleLinks { links: stored, .. } if stored == &links)
+    );
+    runner.enqueue(effects);
+    drop(runner);
+    let snapshots = load_completed_jobs(&temp.path().join("state.json"));
+    assert_eq!(snapshots.len(), 1);
+    assert!(snapshots[0].links.is_empty());
+    assert_eq!(crate::load_article_links(temp.path(), url), links);
+    let (restored, _) =
+        harvester_core::update(AppState::new(), Msg::RestoreCompletedJobs(snapshots));
+    let (restored, effects) = harvester_core::update(restored, Msg::JobSelected { job_id: 1 });
+    assert_eq!(
+        effects,
+        [Effect::LoadArticleLinks {
+            job_id: 1,
+            url: url.into()
+        }]
+    );
+    let (runner, rx2) = runner_with_receiver(temp.path());
+    runner.enqueue(effects);
+    let reply = rx2.recv_timeout(Duration::from_secs(5)).unwrap();
+    let (restored, effects) = harvester_core::update(restored, reply);
+    assert!(effects.is_empty());
+    assert_eq!(
+        restored.view().desktop_job_list.selected_job.unwrap().links[0].label,
+        "Resource"
+    );
+    let (_, effects) = harvester_core::update(
+        restored,
+        Msg::ExtractedLinkOpenRequested {
+            job_id: 1,
+            link_index: 0,
+        },
+    );
+    assert_eq!(
+        effects,
+        [Effect::OpenUrlInBrowser {
+            url: links[0].url.clone()
+        }]
+    );
+    drop(rx);
+}
+
+#[test]
+fn persistence_recovery_notice_returns_through_reducer_message() {
+    let dir = tempdir().unwrap();
+    let (runner, rx) = runner_with_receiver(dir.path());
+    fs::write(dir.path().join("state.json"), "truncated state").unwrap();
+    let (state, effects) = harvester_core::update(AppState::new(), Msg::FetchTimeRecoveryCompleted);
+    runner.enqueue(effects);
+    drop(runner);
+    let notice = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(
+        matches!(&notice, Msg::RuntimeStateNotice { message } if message.contains(".harvester_state.pre-slim-"))
+    );
+    let (state, effects) = harvester_core::update(state, notice);
+    assert!(effects.is_empty());
+    assert!(state
+        .view()
+        .checkpoint_status_message
+        .unwrap()
+        .contains("runtime saving continues"));
+}
+
+#[test]
+fn empty_link_effect_creates_no_files() {
+    let dir = tempdir().unwrap();
+    let (runner, _) = runner_with_receiver(dir.path());
+    runner.enqueue(vec![Effect::StoreArticleLinks {
+        url: "https://example.com/empty".into(),
+        links: vec![],
+    }]);
+    drop(runner);
+    assert!(!dir.path().join(".article_links").exists());
+}
+
 fn receive_delta(rx: &mpsc::Receiver<Msg>) -> harvester_engine::TriageArticleDelta {
     loop {
         match rx.recv_timeout(Duration::from_secs(5)).unwrap() {

@@ -21,11 +21,20 @@ struct PendingSnapshot {
     overwritten_count: u64,
 }
 
-#[derive(Debug, Default)]
+struct PendingLinks {
+    output: PathBuf,
+    url: String,
+    links: Vec<harvester_engine::ExtractedLink>,
+    observer: Option<FileWriteObserver>,
+}
+
+#[derive(Default)]
 struct WorkerState {
     pending: Option<PendingSnapshot>,
+    links: std::collections::VecDeque<PendingLinks>,
     next_seq: u64,
     shutting_down: bool,
+    message_sender: Option<std::sync::mpsc::Sender<harvester_core::Msg>>,
 }
 
 pub struct PersistenceWorker {
@@ -34,6 +43,35 @@ pub struct PersistenceWorker {
 }
 
 impl PersistenceWorker {
+    pub(crate) fn enqueue_links(
+        &self,
+        output: PathBuf,
+        url: String,
+        links: Vec<harvester_engine::ExtractedLink>,
+        observer: Option<FileWriteObserver>,
+    ) {
+        if links.is_empty() {
+            return;
+        }
+        let (lock, condvar) = &*self.shared;
+        lock.lock()
+            .expect("persistence worker lock")
+            .links
+            .push_back(PendingLinks {
+                output,
+                url,
+                links,
+                observer,
+            });
+        condvar.notify_one();
+    }
+    pub fn set_message_sender(&self, sender: std::sync::mpsc::Sender<harvester_core::Msg>) {
+        self.shared
+            .0
+            .lock()
+            .expect("persistence worker lock")
+            .message_sender = Some(sender);
+    }
     pub fn new(state_path: PathBuf, blacklist_path: PathBuf) -> Self {
         Self::with_file_write_observer(state_path, blacklist_path, None)
     }
@@ -122,10 +160,13 @@ fn run_worker(
 ) {
     let mut last_flush_at = Instant::now();
     loop {
-        let pending = {
+        let (pending, links) = {
             let (lock, condvar) = &*shared;
             let mut state = lock.lock().expect("persistence worker lock");
             loop {
+                if !state.links.is_empty() {
+                    break;
+                }
                 match (&state.pending, state.shutting_down) {
                     (None, false) => {
                         state = condvar.wait(state).expect("wait");
@@ -152,17 +193,56 @@ fn run_worker(
                     }
                 }
             }
-            state.pending.take()
+            // Link arrivals should not defeat snapshot coalescing. Drain them
+            // promptly, then return to the normal debounce unless shutting down.
+            let pending = if !state.links.is_empty() && !state.shutting_down {
+                None
+            } else {
+                state.pending.take()
+            };
+            (pending, std::mem::take(&mut state.links))
         };
+
+        // Link effects are FIFO and never coalesced. Publish them before the
+        // runtime snapshot captured after those completions, including at shutdown.
+        for pending in links {
+            crate::article_links::store_observed(
+                &pending.output,
+                &pending.url,
+                &pending.links,
+                &pending.observer,
+            );
+        }
 
         let Some(pending) = pending else {
             continue;
         };
         let state_write_started = Instant::now();
-        if let Err(error) = crate::try_persist_runtime_state_with_pending(
+        engine_info!(
+            "[persist] flushing seq={} path={} jobs={} queue_delay_ms={}",
+            pending.seq,
+            state_path.display(),
+            pending.snapshot.completed.len(),
+            state_write_started
+                .saturating_duration_since(pending.first_enqueued_at)
+                .as_millis()
+        );
+        let sender = shared
+            .0
+            .lock()
+            .expect("persistence worker lock")
+            .message_sender
+            .clone();
+        if let Err(error) = crate::persistence::persist_snapshot_with_notices(
             &state_path,
             &pending.snapshot.completed,
             &pending.snapshot.pending_intake,
+            pending.snapshot.fetch_time_recovery_done,
+            |message| {
+                if let Some(sender) = &sender {
+                    let _ = sender.send(harvester_core::Msg::RuntimeStateNotice { message });
+                }
+            },
         ) {
             engine_warn!(
                 "[persist] failed to save runtime state {}: {}",
@@ -215,6 +295,72 @@ fn observe_write(observer: &Option<FileWriteObserver>, path: &Path, elapsed: Dur
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn enqueue_and_model_completion_do_not_wait_for_an_in_flight_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".harvester_state.ron");
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let gate = std::sync::Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+        let writer_gate = gate.clone();
+        let observer: crate::FileWriteObserver = std::sync::Arc::new(move |_, _, _| {
+            let _ = entered_tx.send(());
+            let (lock, changed) = &*writer_gate;
+            let mut released = lock.lock().unwrap();
+            while !*released {
+                released = changed.wait(released).unwrap();
+            }
+        });
+        let worker = super::PersistenceWorker::new_with_file_write_observer(
+            path.clone(),
+            dir.path().join(".domain_blacklist.ron"),
+            observer,
+        );
+        worker.enqueue(harvester_core::PersistenceSnapshot::capture(
+            &harvester_core::AppState::new(),
+        ));
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        let (messages, replies) = std::sync::mpsc::channel();
+        let runner = crate::EffectRunner::new(
+            crate::RuntimePaths::with_defaults(dir.path().to_path_buf()),
+            messages,
+            Box::new(crate::NoOpPlatformHandler),
+            Box::new(worker),
+        );
+        let (done, finished) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            runner.enqueue(vec![
+                harvester_core::Effect::PersistRuntimeState {
+                    snapshot: harvester_core::PersistenceSnapshot::capture(
+                        &harvester_core::AppState::new(),
+                    ),
+                },
+                harvester_core::Effect::RequestLlmCompletion {
+                    request_id: 1,
+                    prompt_id: harvester_engine::llm::prompt::PromptId::ArticleTriage,
+                    prompt_version: None,
+                    input_content: "fixture".into(),
+                    context: vec![],
+                    extra_template_vars: vec![],
+                },
+            ]);
+            done.send(()).unwrap();
+            runner
+        });
+        let responsive = finished
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .is_ok();
+        let reply = replies.recv_timeout(std::time::Duration::from_secs(1));
+        *gate.0.lock().unwrap() = true;
+        gate.1.notify_all();
+        drop(handle.join().unwrap());
+        assert!(responsive, "effect loop waited for the persistence worker");
+        assert!(matches!(
+            reply,
+            Ok(harvester_core::Msg::LlmCompleted { request_id: 1, .. })
+        ));
+    }
     use std::path::Path;
     use std::thread;
     use std::time::Duration;
@@ -339,6 +485,7 @@ mod tests {
             );
         }
         let snapshot = PersistenceSnapshot {
+            fetch_time_recovery_done: false,
             completed: vec![],
             pending_intake: vec![],
             blacklist,
@@ -351,5 +498,54 @@ mod tests {
             loaded.is_blocked("example.com", t0),
             "3-strike entry must survive shutdown and reload"
         );
+    }
+
+    #[test]
+    fn queued_links_publish_in_order_before_runtime_snapshot_and_shutdown_drains_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let writes = Arc::new(Mutex::new(Vec::<PathBuf>::new()));
+        let observed = writes.clone();
+        let observer: FileWriteObserver =
+            Arc::new(move |path, _, _| observed.lock().unwrap().push(path.to_path_buf()));
+        let mut worker = PersistenceWorker::new_with_file_write_observer(
+            state_path(dir.path()),
+            dir.path().join(".domain_blacklist.ron"),
+            observer.clone(),
+        );
+        let url = "https://example.com/article";
+        for target in ["https://example.com/first", "https://example.com/latest"] {
+            worker.enqueue_links(
+                dir.path().to_path_buf(),
+                url.into(),
+                vec![harvester_engine::ExtractedLink {
+                    url: target.into(),
+                    text: None,
+                    kind: harvester_engine::LinkKind::Hyperlink,
+                }],
+                Some(observer.clone()),
+            );
+        }
+        let (state, _) = update(
+            harvester_core::AppState::new(),
+            Msg::RestoreCompletedJobs(vec![harvester_core::CompletedJobSnapshot {
+                url: url.into(),
+                tokens: None,
+                bytes: None,
+                links: vec![],
+                fetched_utc: None,
+            }]),
+        );
+        worker.enqueue(PersistenceSnapshot::capture(&state));
+        worker.shutdown();
+        assert_eq!(
+            crate::load_article_links(dir.path(), url)[0].url,
+            "https://example.com/latest"
+        );
+        assert_eq!(load_completed_jobs(&state_path(dir.path())).len(), 1);
+        let writes = writes.lock().unwrap();
+        assert_eq!(writes.len(), 4);
+        assert_eq!(writes[0], writes[1]);
+        assert_eq!(writes[0].extension().unwrap(), "json");
+        assert_eq!(writes[2], state_path(dir.path()));
     }
 }

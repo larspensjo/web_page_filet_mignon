@@ -10,6 +10,17 @@ use harvester_engine::ExtractedLink;
 use harvester_engine::LinkKind;
 
 impl AppState {
+    pub(crate) fn set_runtime_state_notice(&mut self, message: String) {
+        self.runtime_state_notice = Some(message);
+        self.dirty = true;
+    }
+
+    pub(crate) fn article_links_load_url(&self, job_id: JobId) -> Option<&str> {
+        self.jobs
+            .get(&job_id)
+            .filter(|job| job.outcome == Some(JobResultKind::Success) && job.links.is_empty())
+            .map(|job| job.url.as_str())
+    }
     pub fn ordered_completed_job_urls_snapshot(&self) -> Vec<String> {
         self.jobs
             .values()
@@ -21,6 +32,38 @@ impl AppState {
                 }
             })
             .collect()
+    }
+
+    pub fn slim_completed_jobs_snapshot(&self) -> Vec<super::SlimJobRecord> {
+        self.jobs
+            .values()
+            .filter(|job| job.outcome == Some(JobResultKind::Success))
+            .map(|job| super::SlimJobRecord {
+                url: job.url.clone(),
+                tokens: job.tokens,
+                bytes: job.bytes,
+                fetched_utc: job.fetched_utc.map(|dt| dt.to_rfc3339()),
+            })
+            .collect()
+    }
+
+    pub(crate) fn article_links_loaded(
+        &mut self,
+        job_id: JobId,
+        url: &str,
+        links: Vec<ExtractedLink>,
+    ) {
+        if self.selected_job_id() != Some(job_id) {
+            return;
+        }
+        if let Some(job) = self.jobs.get_mut(&job_id).filter(|job| {
+            job.url == url
+                && job.outcome == Some(JobResultKind::Success)
+                && (job.links.is_empty() || !links.is_empty())
+        }) {
+            job.attach_extracted_links(links);
+            self.dirty = true;
+        }
     }
 
     pub fn completed_jobs_snapshot(&self) -> Vec<CompletedJobSnapshot> {

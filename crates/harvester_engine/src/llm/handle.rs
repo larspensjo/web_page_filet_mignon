@@ -402,6 +402,9 @@ async fn handle_completion_concurrent(
     {
         let mut tracker = quota_tracker.lock().unwrap();
         if let Err(failure) = tracker.reserve_call() {
+            // Completion reporting also reads usage. Release this guard before
+            // reporting rejection so concurrent requests can drain normally.
+            drop(tracker);
             engine_warn!(
                 "[llm-quota] request_id={} rejected=pre-call reason={}",
                 request_id,
@@ -963,6 +966,55 @@ mod tests {
                 max_concurrent_requests: 1,
             }
         }
+    }
+
+    #[test]
+    fn pre_call_quota_rejections_report_usage_and_drain_all_requests() {
+        let mut config = test_llm_config();
+        config.quotas.max_calls_per_session = Some(0);
+        config.max_concurrent_requests = 10;
+        let handle = LlmHandle::new(config);
+        let events = handle.event_receiver();
+        for request_id in 0..10 {
+            handle
+                .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
+                    request_id,
+                    prompt_id: PromptId::ArticleTriage,
+                    prompt_version: None,
+                    input_content: "fixture".into(),
+                    context: Vec::new(),
+                    extra_template_vars: Vec::new(),
+                })))
+                .unwrap();
+        }
+        let mut completions = std::collections::HashSet::new();
+        let mut usage_updates = 0;
+        for _ in 0..20 {
+            match events
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(5))
+                .expect("every rejected request must report completion and usage")
+            {
+                LlmEvent::Completed { request_id, result } => {
+                    assert!(matches!(
+                        result,
+                        Err(LlmCompletionError::QuotaExhausted {
+                            origin: QuotaOrigin::SessionBudget,
+                            ..
+                        })
+                    ));
+                    assert!(completions.insert(request_id));
+                }
+                LlmEvent::UsageUpdated { usage } => {
+                    assert_eq!(usage.calls, 0);
+                    usage_updates += 1;
+                }
+            }
+        }
+        assert_eq!(completions.len(), 10);
+        assert_eq!(usage_updates, 10);
+        handle.drain_and_stop();
     }
 
     #[test]

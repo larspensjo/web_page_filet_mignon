@@ -1,5 +1,6 @@
 //! Harvester IO: shared runtime paths, effect execution, and persistence.
 
+mod article_links;
 mod blacklist_store;
 mod effect_helpers;
 mod effect_runner;
@@ -16,6 +17,7 @@ mod source_loader;
 mod summary_cache_store;
 mod triage_cache_store;
 
+pub use article_links::{load_article_links, write_article_links};
 pub use blacklist_store::{default_blacklist_path, load_blacklist, save_blacklist};
 pub use effect_runner::{
     EffectRunner, FileWriteObserver, NoOpPlatformHandler, NoOpRuntimePersistenceSink,
@@ -23,8 +25,9 @@ pub use effect_runner::{
 };
 pub use persistence::{
     load_briefing_checkpoint, load_completed_jobs, load_desktop_window_size, load_pending_intake,
-    persist_completed_jobs, persist_desktop_window_size, persist_runtime_state,
-    save_briefing_checkpoint, try_persist_runtime_state, try_persist_runtime_state_with_pending,
+    load_runtime_hydration, migrate_runtime_state, persist_completed_jobs,
+    persist_desktop_window_size, persist_runtime_state, save_briefing_checkpoint,
+    try_persist_runtime_state, try_persist_runtime_state_with_pending, RuntimeHydration,
 };
 pub use persistence_worker::PersistenceWorker;
 pub use prompt_template_store::load_prompt_templates;

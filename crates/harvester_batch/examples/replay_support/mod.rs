@@ -166,6 +166,13 @@ impl Measurements {
             == Some("llm_results")
         {
             "llm_results/*.json".to_owned()
+        } else if path
+            .parent()
+            .and_then(Path::file_name)
+            .and_then(|name| name.to_str())
+            == Some(".article_links")
+        {
+            ".article_links/*.json".to_owned()
         } else {
             path.file_name()
                 .and_then(|name| name.to_str())
@@ -967,6 +974,8 @@ fn record_write_from_path(measurements: &Arc<Mutex<Measurements>>, path: &Path, 
 fn effect_kind(effect: &Effect) -> &'static str {
     match effect {
         Effect::EnqueueUrl { .. } => "EnqueueUrl",
+        Effect::LoadArticleLinks { .. } => "LoadArticleLinks",
+        Effect::StoreArticleLinks { .. } => "StoreArticleLinks",
         Effect::LoadProcessingConfiguration { .. } => "LoadProcessingConfiguration",
         Effect::ResetCorpusScanIndex => "ResetCorpusScanIndex",
         Effect::LoadArticlesForTriage { .. } => "LoadArticlesForTriage",
@@ -1004,10 +1013,24 @@ fn hold_back_newest(paths: &RuntimePaths, count: usize) -> Result<Vec<HeldArticl
     });
     article_files.truncate(count);
     if !article_files.is_empty() {
-        // Held articles retain their fetch times; the copy must let them
-        // through the archive window even when the source has a newer checkpoint.
-        harvester_io::save_briefing_checkpoint(&paths.briefing_checkpoint_path, None)
-            .map_err(|error| format!("clear benchmark-copy briefing checkpoint: {error}"))?;
+        // Admit held articles without accidentally reopening the whole historical
+        // corpus. The source checkpoint and all source files remain untouched.
+        if let (Some(checkpoint), Some(earliest)) = (
+            harvester_io::load_briefing_checkpoint(&paths.briefing_checkpoint_path),
+            article_files
+                .iter()
+                .filter_map(|a| a.fetched_utc.as_deref())
+                .filter_map(|s| DateTime::parse_from_rfc3339(s).ok())
+                .min(),
+        ) {
+            if DateTime::parse_from_rfc3339(&checkpoint).is_ok_and(|date| date > earliest) {
+                harvester_io::save_briefing_checkpoint(
+                    &paths.briefing_checkpoint_path,
+                    Some(&earliest.to_rfc3339()),
+                )
+                .map_err(|error| format!("adjust benchmark-copy briefing checkpoint: {error}"))?;
+            }
+        }
     }
     let selected_urls: HashSet<_> = article_files
         .iter()
@@ -1048,7 +1071,18 @@ fn hold_back_newest(paths: &RuntimePaths, count: usize) -> Result<Vec<HeldArticl
         .filter(|job| !selected_urls.contains(&normalize_url_for_dedupe(&job.url)))
         .collect();
     if remaining_jobs.len() != load_completed_jobs(&paths.state_path).len() {
-        persist_completed_jobs(&paths.state_path, &remaining_jobs);
+        persist_completed_jobs(
+            &paths.state_path,
+            &remaining_jobs
+                .iter()
+                .map(|job| harvester_core::SlimJobRecord {
+                    url: job.url.clone(),
+                    tokens: job.tokens,
+                    bytes: job.bytes,
+                    fetched_utc: job.fetched_utc.clone(),
+                })
+                .collect::<Vec<_>>(),
+        );
     }
     remaining_jobs.clear();
 

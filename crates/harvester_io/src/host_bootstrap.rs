@@ -12,7 +12,7 @@ use harvester_engine::llm::{
 };
 
 use crate::{
-    load_blacklist, load_completed_jobs, load_pending_intake, load_signal_candidate_cache,
+    load_blacklist, load_pending_intake, load_runtime_hydration, load_signal_candidate_cache,
     load_signal_candidate_overrides, load_summary_cache, load_triage_cache, EffectRunner,
     PlatformEffectHandler, RuntimePaths, RuntimePersistenceSink,
 };
@@ -280,8 +280,7 @@ pub fn llm_config_with_provider(
 }
 
 /// Hydrates startup state shared by executable hosts. Manual pre-triage
-/// overrides are deliberately excluded; their persistence format remains until
-/// phase 7 but no host should honour invisible saved decisions.
+/// overrides are deliberately excluded; no host honours invisible saved decisions.
 pub fn hydrate_state_from_disk(
     mut state: AppState,
     paths: &RuntimePaths,
@@ -292,7 +291,8 @@ pub fn hydrate_state_from_disk(
     state = next_state;
     startup_effects.extend(effects);
 
-    let completed_jobs = load_completed_jobs(&paths.state_path);
+    let hydration = load_runtime_hydration(&paths.state_path, &paths.output_dir);
+    let completed_jobs = hydration.jobs;
     let completed_job_count = completed_jobs.len();
     if !completed_jobs.is_empty() {
         (state, _) = update(state, Msg::RestoreCompletedJobs(completed_jobs));
@@ -324,6 +324,15 @@ pub fn hydrate_state_from_disk(
     let blacklist = load_blacklist(&paths.blacklist_path);
     if !blacklist.is_empty() {
         (state, _) = update(state, Msg::BlacklistHydrated { state: blacklist });
+    }
+
+    for message in hydration.notices {
+        (state, _) = update(state, Msg::RuntimeStateNotice { message });
+    }
+    if hydration.recovery_needs_persist {
+        let (next, effects) = update(state, Msg::FetchTimeRecoveryCompleted);
+        state = next;
+        startup_effects.extend(effects);
     }
 
     engine_info!(
@@ -381,6 +390,212 @@ pub fn pump_pre_triage_refresh(mut state: AppState) -> (AppState, Vec<Effect>, b
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn missing_dates_fixture(output: &std::path::Path) -> RuntimePaths {
+        let paths = RuntimePaths::with_defaults(output.to_path_buf());
+        std::fs::write(&paths.state_path, r#"(completed: [
+            (url: "https://example.com/recover#fragment", tokens: Some(12), bytes: Some(240), links: []),
+            (url: "https://example.com/no-file", tokens: Some(10), bytes: Some(120), links: [])
+        ], pending_intake: ["https://example.com/pending"])"#).unwrap();
+        let (_, document) = harvester_engine::build_markdown_document(
+            "https://example.com/recover",
+            Some("Recovered date"),
+            "utf-8",
+            "2026-09-20T09:15:00Z",
+            "An article with frontmatter and a missing runtime timestamp.",
+            &harvester_engine::WhitespaceTokenCounter,
+        );
+        std::fs::write(output.join("recover.md"), document).unwrap();
+        paths
+    }
+
+    fn window(state: AppState) -> AppState {
+        update(
+            state,
+            Msg::BriefingCheckpointLoaded {
+                since_utc: Some("2026-09-01T00:00:00Z".into()),
+            },
+        )
+        .0
+    }
+
+    #[test]
+    fn startup_recovers_frontmatter_fetch_time_and_lowers_hidden_count() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = missing_dates_fixture(dir.path());
+        let before = update(
+            AppState::new(),
+            Msg::RestoreCompletedJobs(crate::load_completed_jobs(&paths.state_path)),
+        )
+        .0;
+        assert_eq!(
+            window(before)
+                .view()
+                .desktop_job_list
+                .hidden_without_fetch_time,
+            2
+        );
+        let (state, _) = hydrate_state_from_disk(AppState::new(), &paths);
+        let state = window(state);
+        assert_eq!(state.view().desktop_job_list.hidden_without_fetch_time, 1);
+        assert_eq!(state.view().desktop_job_list.rows.len(), 1);
+        assert_eq!(
+            state.completed_jobs_snapshot()[0].fetched_utc.as_deref(),
+            Some("2026-09-20T09:15:00+00:00")
+        );
+        assert_eq!(
+            harvester_core::PersistenceSnapshot::capture(&state).pending_intake,
+            ["https://example.com/pending"]
+        );
+    }
+
+    #[test]
+    fn job_without_article_stays_hidden_survives_restart_and_blocks_redownload() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = missing_dates_fixture(dir.path());
+        let (state, _) = hydrate_state_from_disk(AppState::new(), &paths);
+        let (tx, _) = mpsc::channel();
+        let runner = EffectRunner::new(
+            paths.clone(),
+            tx,
+            Box::new(crate::NoOpPlatformHandler),
+            Box::new(crate::PersistenceWorker::new(
+                paths.state_path.clone(),
+                paths.blacklist_path.clone(),
+            )),
+        );
+        // Persistence still travels through the reducer-emitted effect and runner.
+        let (state, effects) = update(
+            state,
+            Msg::FetchOutcomeClassified {
+                job_id: 2,
+                class: harvester_engine::FetchOutcomeClass::Success,
+                failure_label: None,
+                recorded_at: Utc::now(),
+            },
+        );
+        assert!(effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::PersistRuntimeState { .. })));
+        runner.enqueue(effects);
+        drop(runner);
+        let (restored, _) = hydrate_state_from_disk(AppState::new(), &paths);
+        let restored = window(restored);
+        assert_eq!(
+            restored.view().desktop_job_list.hidden_without_fetch_time,
+            1
+        );
+        assert_eq!(restored.view().desktop_job_list.rows.len(), 1);
+        assert_eq!(restored.completed_jobs_snapshot().len(), 2);
+        let missing = restored
+            .completed_jobs_snapshot()
+            .into_iter()
+            .find(|job| job.url.ends_with("no-file"))
+            .unwrap();
+        assert!(missing.fetched_utc.is_none());
+        assert_eq!(state.completed_jobs_snapshot().len(), 2);
+        let (restored, _) = update(
+            restored,
+            Msg::InputChanged("https://example.com/no-file".into()),
+        );
+        let (restored, effects) = update(restored, Msg::UrlsSubmitted);
+        assert!(!effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::EnqueueUrl { .. })));
+        assert_eq!(restored.completed_jobs_snapshot().len(), 2);
+    }
+
+    #[test]
+    fn recovery_persists_once_and_second_start_does_not_rescan_hidden_jobs() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = missing_dates_fixture(dir.path());
+        let (state, effects) = hydrate_state_from_disk(AppState::new(), &paths);
+        let persistence = effects
+            .into_iter()
+            .filter(|effect| matches!(effect, Effect::PersistRuntimeState { .. }))
+            .collect::<Vec<_>>();
+        assert_eq!(persistence.len(), 1);
+        let (tx, _) = mpsc::channel();
+        let runner = EffectRunner::new(
+            paths.clone(),
+            tx,
+            Box::new(crate::NoOpPlatformHandler),
+            Box::new(crate::PersistenceWorker::new(
+                paths.state_path.clone(),
+                paths.blacklist_path.clone(),
+            )),
+        );
+        runner.enqueue(persistence);
+        drop(runner);
+        assert!(std::fs::read_to_string(&paths.state_path)
+            .unwrap()
+            .contains("fetch_time_recovery_done: true"));
+        assert_eq!(state.completed_jobs_snapshot().len(), 2);
+        // If another scan runs it would now find this previously unrecoverable date.
+        std::fs::write(
+            dir.path().join("late.md"),
+            "---\nurl: https://example.com/no-file\nfetched_utc: 2026-09-20T09:15:00Z\n---\nBody",
+        )
+        .unwrap();
+        let (restored, effects) = hydrate_state_from_disk(AppState::new(), &paths);
+        assert!(!effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::PersistRuntimeState { .. })));
+        assert_eq!(restored.completed_jobs_snapshot().len(), 2);
+        assert!(restored
+            .completed_jobs_snapshot()
+            .iter()
+            .find(|job| job.url.ends_with("no-file"))
+            .unwrap()
+            .fetched_utc
+            .is_none());
+        assert_eq!(
+            window(restored)
+                .view()
+                .desktop_job_list
+                .hidden_without_fetch_time,
+            1
+        );
+    }
+
+    #[test]
+    fn startup_backup_notices_reach_the_existing_owner_status() {
+        for corrupt in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let paths = RuntimePaths::with_defaults(dir.path().to_path_buf());
+            let original = if corrupt {
+                "truncated state"
+            } else {
+                "(completed: [])"
+            };
+            std::fs::write(&paths.state_path, original).unwrap();
+            std::fs::write(
+                dir.path().join(".harvester_state.pre-slim.ron"),
+                "owner backup",
+            )
+            .unwrap();
+            let (state, _) = hydrate_state_from_disk(AppState::new(), &paths);
+            let notice = state.view().checkpoint_status_message.unwrap();
+            assert_eq!(notice.lines().count(), 1);
+            let name = notice
+                .split("preserved in ")
+                .nth(1)
+                .unwrap()
+                .split(';')
+                .next()
+                .unwrap();
+            assert!(name.starts_with(".harvester_state.pre-slim-"));
+            assert!(!name.starts_with(".harvester_state.pre-slim-partial-"));
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join(name)).unwrap(),
+                original
+            );
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join(".harvester_state.pre-slim.ron")).unwrap(),
+                "owner backup"
+            );
+        }
+    }
 
     #[test]
     fn parse_llm_max_concurrency_uses_default_when_missing_or_invalid() {

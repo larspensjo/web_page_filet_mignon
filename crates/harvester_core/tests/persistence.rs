@@ -142,3 +142,113 @@ fn selected_job_keeps_extracted_links_after_completion() {
         }]
     );
 }
+
+#[test]
+fn selection_loads_links_only_on_change_and_ignores_stale_replies() {
+    let snapshots =
+        ["https://example.com/a", "https://example.com/b"].map(|url| CompletedJobSnapshot {
+            url: url.into(),
+            tokens: None,
+            bytes: None,
+            links: vec![],
+            fetched_utc: None,
+        });
+    let (state, _) = update(
+        AppState::new(),
+        Msg::RestoreCompletedJobs(snapshots.to_vec()),
+    );
+    let (state, effects) = update(state, Msg::JobSelected { job_id: 1 });
+    assert_eq!(
+        effects,
+        [Effect::LoadArticleLinks {
+            job_id: 1,
+            url: snapshots[0].url.clone()
+        }]
+    );
+    let (state, effects) = update(state, Msg::JobSelected { job_id: 1 });
+    assert!(effects.is_empty());
+    let (state, _) = update(state, Msg::JobSelected { job_id: 2 });
+    let links = vec![harvester_engine::ExtractedLink {
+        url: "https://example.com/link".into(),
+        text: None,
+        kind: harvester_engine::LinkKind::Hyperlink,
+    }];
+    let (state, _) = update(
+        state,
+        Msg::ArticleLinksLoaded {
+            job_id: 1,
+            url: snapshots[0].url.clone(),
+            links: Ok(links.clone()),
+        },
+    );
+    assert!(state.job_links(1).unwrap().is_empty());
+    let (state, _) = update(
+        state,
+        Msg::ArticleLinksLoaded {
+            job_id: 2,
+            url: snapshots[0].url.clone(),
+            links: Ok(links.clone()),
+        },
+    );
+    assert!(state.job_links(2).unwrap().is_empty());
+    let (state, _) = update(
+        state,
+        Msg::ArticleLinksLoaded {
+            job_id: 2,
+            url: snapshots[1].url.clone(),
+            links: Ok(links),
+        },
+    );
+    assert_eq!(state.job_links(2).unwrap().len(), 1);
+    let snapshot = harvester_core::PersistenceSnapshot::capture(&state);
+    assert_eq!(snapshot.completed.len(), 2);
+    assert_eq!(snapshot.completed[1].url, snapshots[1].url);
+}
+
+#[test]
+fn late_empty_or_failed_link_reply_preserves_completed_session_links() {
+    let url = "https://example.com/article";
+    let (state, _) = update(AppState::new(), Msg::InputChanged(url.into()));
+    let (state, _) = update(state, Msg::UrlsSubmitted);
+    let (state, effects) = update(state, Msg::JobSelected { job_id: 1 });
+    assert!(effects.is_empty(), "in-flight jobs do not load links");
+    let (state, _) = update(
+        state,
+        Msg::JobDone {
+            job_id: 1,
+            result: harvester_core::JobResultKind::Success,
+            extracted_links: vec![harvester_engine::ExtractedLink {
+                url: "https://example.com/link".into(),
+                text: Some("Kept".into()),
+                kind: harvester_engine::LinkKind::Hyperlink,
+            }],
+            fetched_utc: None,
+        },
+    );
+    for reply in [Ok(vec![]), Err("store unavailable".into())] {
+        let (next, effects) = update(
+            state.clone(),
+            Msg::ArticleLinksLoaded {
+                job_id: 1,
+                url: url.into(),
+                links: reply,
+            },
+        );
+        assert!(effects.is_empty());
+        assert_eq!(
+            next.job_links(1).unwrap()[0].url,
+            "https://example.com/link"
+        );
+        assert_eq!(
+            next.view().desktop_job_list.selected_job.unwrap().links[0].label,
+            "Kept"
+        );
+    }
+    // Re-selecting a completed job with resident links also avoids disk I/O.
+    let (state, _) = update(state, Msg::InputChanged("https://example.com/other".into()));
+    let (state, _) = update(state, Msg::UrlsSubmitted);
+    let (state, effects) = update(state, Msg::JobSelected { job_id: 2 });
+    assert!(effects.is_empty());
+    let (_, effects) = update(state, Msg::JobSelected { job_id: 1 });
+    assert!(effects.is_empty());
+}

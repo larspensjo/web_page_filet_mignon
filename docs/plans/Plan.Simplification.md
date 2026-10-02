@@ -1266,7 +1266,7 @@ after the phase named:
 - **Codex deleting whole test files** during removals: mitigated by the per-phase wholesale lists
   and the test-count protocol; Claude or the owner audits removed test names.
 - **Result-store migration** is the first touch of paid data: the RON files are never modified,
-  migration refuses on parse failure, the migrated file is published atomically only when
+  migration preserves unparseable bytes in a unique dated verified backup, and the migrated file is published atomically only when
   complete, torn tails are recovered before any append, crash sequences are tested, and the
   owner's first run after Phase 2 is a human check.
 - **Batch API results held only in the manifest**: removal waits until the reconciliation
@@ -2499,9 +2499,236 @@ Phase 6 additional review-pass removed tests (20):
 | `crates/harvester_core/src/state/tests/mod.rs` | `token_totals_accumulate_and_replace_previous_values` | Same name; moved from `tests/jobs.rs` | Write-only MetricsState.total_tokens retired; per-job token and archive-estimate contracts remain |
 
 
+
+Phase 7 notes (2026-10-01; implementation complete):
+
+- Runtime-state saves now contain only URL, tokens, bytes and fetch time per completed
+  job, pending intake and both geometry pairs. The optional links_in_store marker defaults
+  on old files; absent job links default to empty for older readers. The persistence
+  snapshot uses a separate slim record type and never copies job links. Normal saves keep
+  the Phase 6 settings-only read, skipping old completed-job payloads.
+- Extracted links live in .article_links/<SHA-256 of canonical archive URL key>.json,
+  with URL, anchor text and kind. Hash-only paths and canonical directory confinement
+  reject redirected stores; a Windows junction regression verifies that outside data is
+  never read or written. Selected-job IPC 13 is unchanged. Selection emits a link-load
+  effect and its reply fills the still-selected matching job. New downloads emit a link
+  write before runtime persistence; writes and temporary recovery share an I/O lock.
+- Startup I/O preserves the original bytes in .harvester_state.pre-slim.ron before
+  publishing any links or slim state. It flushes and verifies length and SHA-256 before
+  publishing the backup with a rename that cannot overwrite an existing file, including
+  one appearing during the copy. Slim publication is verified and atomic. Backup/slim
+  RON temporaries have pinned names under the existing .*.ron marker pattern; torn link
+  temporaries stay inside .article_links/. Recovery discards recognised temporaries,
+  resumes old active state from the verified backup, and leaves a slim active state alone.
+  Mismatched or redirected backups remain untouched; an additional dated verified backup
+  allows migration to continue. Unparseable originals receive the same dated backup before
+  default runtime state is published. Reducer messages name the backup in the existing owner
+  status. Malformed individual legacy link records and JSON link files/records are logged
+  and skipped. The owner backup is never deleted.
+- Fetch-time recovery reads only frontmatter at startup, once. A reducer-emitted runtime
+  save records recovered dates and fetch_time_recovery_done even when hidden jobs remain;
+  subsequent starts skip the recovery scan. Focused tests
+  lower 2 missing dates to 1 and prove that the remaining job is hidden and counted,
+  survives a persisted restart and blocks re-download. The checked-in carry-over fixture
+  has two already-dated jobs: **0 would remain hidden**. Real output was neither read nor
+  modified. The Phase 1 finding predicts **13 remaining out of 22** for that earlier
+  corpus (9 recoverable, 13 without article files); this is not a new live-corpus audit.
+- Carry-over assertions now verify a byte-identical pre-slim backup, slim loadable active
+  state, preserved URLs/fetch times and geometry, complete restored link-store records,
+  and no migration on a second replay. Paid-result RON bytes and seen entries remain
+  protected by the original assertions. Archive golden fixtures pass byte for byte;
+  checked-in fixture files are unchanged. No IPC or corpus schema bump; marker generation
+  and tests add .article_links/ to internal_state. Launch scripts are unchanged.
+- Documentation updated: Architecture, CorpusFormat, ThreatModel, the append-only
+  DecisionLog commitment for extracted links, and separate EngineeringDiary implementation
+  and missing-fetch-time bug-fix entries. No hidden-jobs decision-log entry was added.
+- Verification passed: cargo build --offline; touched-crate tests for harvester_io,
+  harvester_core, harvester_engine and harvester_batch, then full root cargo test --offline;
+  cargo clippy --offline --all-targets -- -D warnings; cargo fmt and cargo fmt --check.
+  IPC bridge decoding/projection and archive fixtures pass through the root suite.
+  Frontend and harvester_ui source files are unchanged, so their separate checks were not
+  required. Pester, the GUI IPC probe, scripts/project-stats.ps1 and git writes were not
+  attempted. First desktop migration and opening an old/new article link remain owner
+  walkthroughs. All changes remain uncommitted. Logs: .local/bench/runtime-slim-checks/.
+
+Matched fixture-sized replay smoke measurements (one held-back article, zero synthetic
+latency, synchronous calls; each run made one triage call). These tiny copies do not
+establish corpus-sized speed gains or verify the earlier 10-second save against a full
+corpus. Desktop wall time is sensitive to whether the work crosses another 75 ms tick.
+
+| Host | Before wall | After wall | Before reducer total | After reducer total | Runtime write p95 before / after | Runtime + download-link bytes before / after |
+| --- | --- | --- | --- | --- | --- | --- |
+| batch | 42.2 ms | 43.6 ms | 3.30 ms | 3.37 ms | 5.11 / 3.54 ms | 3,003 / 2,001 |
+| desktop | 158.4 ms | 82.9 ms | 3.53 ms | 2.81 ms | 3.35 / 2.62 ms | 1,001 / 725 |
+
+The slowest message is TriageArticlesLoaded: p95 before / after is 1.048 / 1.139 ms
+for batch and 1.042 / 1.468 ms for desktop.
+
+The last runtime snapshot on these copies shrinks from 1,001 to 638 bytes; the preserved
+original fixture backup is 1,032 bytes. The after totals above include one 87-byte link
+publication and the observed runtime snapshots; they exclude one-time migration writes,
+result/seen-set writes and the benchmark's held-back preparation. Reports are
+.local/bench/runtime-slim-before-{batch,desktop}/report.json and
+.local/bench/runtime-slim-verified-{batch,desktop}/report.json. Production/test line totals
+and full-corpus performance remain owner follow-up, since project-stats and real output
+are outside the authorised check paths here.
+
+Phase 7 test-count reconciliation (fresh baseline and final offline root suite):
+
+| Crate | Before passed | After passed | Delta | Ignored before / after |
+| --- | --- | --- | --- | --- |
+| engine_logging | 0 | 0 | 0 | 0 / 0 |
+| harvester_batch | 104 | 104 | 0 | 0 / 0 |
+| harvester_core | 519 | 520 | +1 | 0 / 0 |
+| harvester_engine | 411 | 411 | 0 | 1 / 1 |
+| harvester_io | 118 | 134 | +16 | 0 / 0 |
+| harvester_ui_bridge | 36 | 36 | 0 | 0 / 0 |
+| openai_provider_kit | 30 | 30 | 0 | 1 / 1 |
+| Root total | 1,218 | 1,235 | +17 | 2 / 2 |
+
+Rust test attributes using Count-RustTests' regex: **1,228 -> 1,245 (+17)**. This
+includes the unchanged 8 harvester_ui tests outside root default members, plus the two
+ignored tests. The latest frontend baseline remains Phase 6's 97 Vitest tests; no new
+frontend run was needed. Persistence.rs actually starts at **16 attributes**, rather
+than the plan's stale 19, and ends at **26 (+10)**. No test file was deleted. No test was
+removed. One existing test was renamed, without a count effect:
+`save_and_load_roundtrips_links` ->
+`link_store_roundtrips_links_and_runtime_state_stays_slim`; link roundtrip coverage now
+uses the link store and asserts that the runtime file omits links. Other existing
+persistence/compatibility tests were edited for slim snapshots, while settings-only read,
+legacy geometry and ignored downloaded-path coverage remain.
+
+Added regression tests (17):
+
+| File | Added test |
+| --- | --- |
+| harvester_io/src/persistence.rs | old_state_migrates_with_identical_backup_and_older_reader_can_load_slim_state |
+| harvester_io/src/persistence.rs | second_start_does_not_migrate_or_rewrite_backup_or_link_files |
+| harvester_io/src/persistence.rs | restart_after_interrupted_backup_copy |
+| harvester_io/src/persistence.rs | restart_after_backup_before_links |
+| harvester_io/src/persistence.rs | restart_after_partial_link_publication |
+| harvester_io/src/persistence.rs | restart_after_interrupted_slim_write |
+| harvester_io/src/persistence.rs | restart_after_slim_verification_before_replace |
+| harvester_io/src/persistence.rs | existing_verified_backup_is_never_overwritten |
+| harvester_io/src/persistence.rs | mismatched_backup_preserves_both_files_and_allows_runtime_save_with_notice |
+| harvester_io/src/persistence.rs | pinned_leftovers_match_marker_and_are_removed_on_old_and_slim_restarts |
+| harvester_io/src/article_links.rs | link_paths_use_only_canonical_hash_and_cannot_escape_output |
+| harvester_io/src/article_links.rs | malformed_file_or_individual_record_is_skipped_without_losing_valid_links |
+| harvester_io/src/article_links.rs | redirected_link_directory_cannot_read_or_write_outside_output |
+| harvester_io/src/host_bootstrap.rs | startup_recovers_frontmatter_fetch_time_and_lowers_hidden_count |
+| harvester_io/src/host_bootstrap.rs | job_without_article_stays_hidden_survives_restart_and_blocks_redownload |
+| harvester_io/src/effect_runner/tests.rs | completed_download_stores_links_and_restored_selection_loads_and_opens_them |
+| harvester_core/tests/persistence.rs | selection_loads_links_only_on_change_and_ignores_stale_replies |
+
 ## Open questions
 
 None open. The two questions from the first draft (going back to an older build after the
 result-store switch, and jobs with no article file) and the exported-summary-text question
 raised by the plan review were answered by the owner on 2026-09-28; the answers are recorded
 under "Settled inputs this plan follows" and applied in Phases 2, 7 and 8.
+
+Phase 7 review-fix notes (2026-10-01):
+
+- Backup mismatches, downgrade round-trips and restored originals now preserve an additional unique dated verified byte-identical backup and continue migration. Unparseable originals receive a dated verified backup before default state replaces them. Existing backups remain untouched. RuntimeStateNotice carries a one-line filename notice into the existing rendered status field; IPC 13 stays unchanged.
+- Recovery reads only root/legacy-linked frontmatter, without content hashing/preparation. FetchTimeRecoveryCompleted emits PersistRuntimeState immediately after hydration, carrying recovered dates and the optional fetch_time_recovery_done marker. A second startup skips recovery even if unrecoverable jobs remain. Import sends the same reducer-emitted recovery snapshot without admitting old articles to the import run. Hidden jobs remain counted, retained and protected from re-download.
+- Migration skips empty lists and merges valid existing link records; unreadable existing link files are kept. Successful empty-link completions emit no store effect, and the store API/worker also skip empties. The replay smoke now gives one synthetic held article a real link and keeps the other four empty; the existing link-publication assertion remains meaningful. Checked-in archive/carry-over fixtures are unchanged.
+- Selection loads only successful jobs with empty resident links. Failed replies are logged with job/URL context and ignored; late empty replies cannot clear resident links. Geometry saves gate migration on links_in_store.
+- Normal StoreArticleLinks effects now use the persistence worker, retaining FIFO link publications ahead of the associated runtime snapshot and draining at shutdown. No-op runtime sinks retain the existing independent link-effect behaviour.
+- AtomicFileWriter consolidation was deliberately left out: its existing helper unlinks the target before publishing and cannot choose the pinned runtime/link temporary namespaces. Reusing it would weaken atomic replacement/restart recognition; changing its cross-crate writer contract would expand this review fix. The local writers retain fsync and atomic replacement.
+- Rust test attributes: 1,245 before review fixes, 1,256 afterwards (+11); the mismatch regression is strengthened for the tolerant behaviour. Added regressions cover corrupt-original backup and subsequent saves, empty-list re-migration/merge, geometry gating, empty store handling, stale/failed link replies, second-start recovery suppression, frontmatter-only root/linked reads, startup/worker notices, and ordered worker shutdown. No test was deleted.
+- No full-corpus benchmark or new real hidden-job count was run. Earlier fixture-sized measurements above predate these review fixes and are not evidence of their performance. Claude will run the full-corpus measurements and hidden-job count afterwards. The real output folder, launchers, API keys, git writes and archive fixtures remain outside this work.
+
+- Review-fix verification passed from the repository root: cargo build --offline; touched-crate cargo test --offline (harvester_core, harvester_io, harvester_engine, harvester_batch), then the whole root suite (1246 passed, 2 ignored); cargo clippy --offline --all-targets -- -D warnings; cargo fmt and cargo fmt --check. git diff --check is clean. The initial SHA-256 inventory verifies 14 non-hidden fixture files byte for byte, and the full fixture-directory diff (21 files including hidden state/result fixtures) is empty. Frontend and harvester_ui sources are unchanged. Logs: .local/review-fixes/. All changes remain uncommitted; no real-corpus measurements were attempted.
+
+### Phase 7 performance regression verification (2026-10-02)
+
+The owner's staged phase 7 and review fixes remain the baseline; this fix is an
+unstaged overlay. Offline measurements use private copies under `.local/bench/`.
+The real `output/`, launchers, API keys and live LLM providers were not written or
+used. Public corpus layout, state/link formats, IPC and the tolerant dated-backup
+and notice policy are unchanged.
+
+Root causes and evidence:
+
+1. `runtime_settings` omitted `completed` from its deserialization type. Serde
+   therefore selected RON's generic `IgnoredAny` traversal for all 11,262 records.
+   On the copied 3,193,755-byte state, ordinary repeated saves took **92,953,
+   86,422 and 93,722 ms**, despite a **196 ms** typed completed-job load. Replacing
+   just that discarded-field traversal with typed, immediately discarded jobs
+   reduced saves to **392, 398 and 399 ms**; the final instrumented run under load
+   is **545, 482 and 490 ms** (read settings 230 ms, serialize 245 ms, publish
+   7 ms on the last save). The 82,271,942-byte backup and link directory are not
+   part of already-slim saves. The synthetic 12,000-job/12,000-link-file regression
+   holds the backup exclusively open on Windows and preserves migration cleanup
+   sentinels across two bounded saves.
+2. The shared model scheduler assigned unchanged triage/summary cache keys on
+   every message, even with all model slots occupied. Its mutating accessors
+   invalidated the unfinished aggregate, triggering full-window classification.
+   Temporary phase measurements show a **742 ms Tick: 1 ms handling, 0 ms dispatch,
+   739 ms classification, 2 ms settlement**; repeated ticks/progress messages cost
+   roughly **700–900 ms each** on the historical window. A 75 ms desktop timer
+   accumulated a backlog in front of completions. The same unnecessary invalidation
+   occurred while failing already-empty queues after a halt. Equality/pending guards
+   remove those rebuilds. Normal article-link publications already use the staged
+   FIFO persistence worker and are not the desktop loop's culprit. Paid-result
+   `FlushResults` was still a synchronous writer barrier; it now enqueues its fence,
+   retaining synchronous durability at shutdown. Blocked-worker tests demonstrate
+   that completion delivery and snapshot hand-off stay responsive. Production
+   timings live in host/worker boundaries, not the pure reducer.
+3. The replay preparation cleared the copied briefing checkpoint unconditionally.
+   This reopened historical articles and produced **6,636 unfinished / 19,901
+   estimated calls** in our copy, comparable to the owner's 6,635. That count is
+   legitimate for the broadened window, but the broadened window was a benchmark
+   defect. Paid results are linked by their own cache keys, not runtime job fields.
+   A projection comparison finds all **11,154 unique backup URLs** in the slim
+   file, no token/byte changes, and nine fetch-time changes, all `None` to recovered
+   dates; there is no evidence of migration dropping processing linkage. The copy
+   now lowers its existing checkpoint only to the earliest held date. Separately,
+   the full-window run reproduced **TRIAGE 10049/10055 | 9 left**: at request 1001
+   the pre-call quota rejection held the quota mutex, sent one completion, then
+   deadlocked reacquiring that mutex to send usage. The other nine requests could
+   not drain. Dropping the guard before reporting rejection fixes that deadlock.
+   Effect validation also now returns a terminal failed completion for rejected
+   LLM requests, closing another orphan-request path.
+
+Measured full-corpus replays (11,378 article files; canned provider, zero artificial
+latency; wall time includes startup and shutdown, excludes corpus-copy/preparation):
+
+| Workload | Wall time | State write p50 / max | Completion reducer p95 / max |
+| --- | --- | --- | --- |
+| Desktop, newest 40 held | 8.213 s | 561 / 1,281 ms | 2.276 / 7.154 ms |
+| Batch, newest 40 held | 21.335 s | 914 / 1,263 ms | 13.656 / 55.941 ms |
+| Batch, deliberately reopened historical window | 78.788 s | 1,266 / 1,482 ms | 20.624 / 1,840 ms |
+
+Both normal replays finished. The historical stress replay also finished, after
+1,000 canned calls and quota rejection, leaving work for a later session rather
+than hanging. Its one broad halt classification accounts for the maximum
+completion cost; idle messages no longer repeat it. Normal worker flush latencies
+(including blacklist) were **568/1,291 ms desktop** and **923/852/783 ms batch**.
+These runs overlap other diagnostic runs/builds, so they are evidence of bounded
+cost rather than an isolated throughput comparison. Reports and logs:
+`.local/bench/fix-verified-{desktop,batch}/report.json`,
+`.local/bench/fix-trace-desktop/report.json` (historical batch stress),
+`.local/bench/fix-verified-fullscale.log`, `.local/bench/fix-save-final.log` and
+`.local/bench/fix-detail-desktop.log` (temporary phase diagnostics).
+
+Nine added regression tests cover corpus-scale saves, no-op revision stability,
+quota completion/usage draining, settled runs with unfinished articles, rejected
+effects, persistence/result-writer isolation and benchmark checkpoint scope for
+both hosts. No test is removed. The existing cross-window writer test now waits
+for publication acknowledgements instead of assuming its worker runs in 120 ms;
+its persistence, retry and single-notice assertions remain.
+
+Final verification passed: `cargo build --offline`;
+`cargo test --offline --workspace --target-dir target/codex-verify`
+(**1,263 passed, two ignored**); `cargo clippy --offline --all-targets -- -D warnings`;
+`cargo clippy --offline -p harvester_ui --all-targets -- -D warnings`;
+`cargo fmt`, `cargo fmt --check` and `git diff --check`. The default-target workspace
+attempt hit the pre-existing locked `replay_bench.exe`; it was left running and
+verification used the separate target directory. The first alternate-target suite
+exposed the writer test's fixed-sleep race; it passed alone, then the complete suite
+passed after adding the publication acknowledgements described above. Rust test
+attributes increased **1,256 -> 1,265 (+9)**; the unstaged diff removes none.
+Check logs are `.local/bench/fix-{build,clippy,ui-clippy}-final.log` and
+`.local/bench/fix-workspace-tests-final.log`. No frontend or native-window run was
+needed; desktop replay exercises the production driver with a canned provider.

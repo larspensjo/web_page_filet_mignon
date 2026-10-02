@@ -246,13 +246,19 @@ where
     IO: FnMut(DriverIterationTiming),
     STOP: FnMut(&AppState) -> bool,
 {
-    // The production caller supplies None, so phase clocks are never read there.
+    // Timings live at the host boundary, keeping the reducer deterministic.
     macro_rules! measure_phase {
         ($timing:ident, $field:ident, $work:expr) => {{
-            let started = iteration_observer.as_ref().map(|_| Instant::now());
+            let started = Instant::now();
             let result = $work;
-            if let Some(started) = started {
-                $timing.$field += started.elapsed();
+            let elapsed = started.elapsed();
+            $timing.$field += elapsed;
+            if elapsed > Duration::from_millis(250) && stringify!($field) != "idle_recv" {
+                engine_logging::engine_info!(
+                    "[driver] host=desktop operation={} elapsed_ms={}",
+                    stringify!($field),
+                    elapsed.as_millis()
+                );
             }
             result
         }};
@@ -298,7 +304,15 @@ where
                 last_message_kind = message.kind().to_owned();
                 let reducer_started = Instant::now();
                 let (next, effects) = measure_phase!(timing, reduce, reducer(state, message));
-                reducer_observer(&last_message_kind, reducer_started.elapsed());
+                let elapsed = reducer_started.elapsed();
+                if elapsed > Duration::from_millis(250) {
+                    engine_logging::engine_info!(
+                        "[driver] host=desktop message={} elapsed_ms={}",
+                        last_message_kind,
+                        elapsed.as_millis()
+                    );
+                }
+                reducer_observer(&last_message_kind, elapsed);
                 state = next;
                 measure_phase!(
                     timing,

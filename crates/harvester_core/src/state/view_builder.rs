@@ -175,7 +175,10 @@ impl AppState {
             resume_disabled_reason,
             unfinished_work,
             reprocess_notice,
-            checkpoint_status_message: self.briefing_checkpoint_status_message.clone(),
+            checkpoint_status_message: self
+                .briefing_checkpoint_status_message
+                .clone()
+                .or_else(|| self.runtime_state_notice.clone()),
             llm_quota: crate::build_llm_quota_view(self.llm_quota()),
             right_pane: self.build_right_pane_view(),
         }

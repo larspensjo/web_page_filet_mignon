@@ -416,6 +416,14 @@ fn reduce_timed_owned(
     let kind = message.kind();
     let started = Instant::now();
     let (next_state, effects) = update(state, message);
-    observer(kind, started.elapsed());
+    let elapsed = started.elapsed();
+    if elapsed > Duration::from_millis(250) {
+        engine_logging::engine_info!(
+            "[driver] host=batch message={} elapsed_ms={}",
+            kind,
+            elapsed.as_millis()
+        );
+    }
+    observer(kind, elapsed);
     (next_state, effects)
 }

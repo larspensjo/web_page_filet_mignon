@@ -57,14 +57,16 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
     };
     let persist_runtime_state = matches!(
         &msg,
-        Msg::JobDone {
-            result: crate::JobResultKind::Success,
-            ..
-        } | Msg::FetchOutcomeClassified {
-            class: harvester_engine::FetchOutcomeClass::PermanentBlock
-                | harvester_engine::FetchOutcomeClass::Success,
-            ..
-        }
+        Msg::FetchTimeRecoveryCompleted
+            | Msg::JobDone {
+                result: crate::JobResultKind::Success,
+                ..
+            }
+            | Msg::FetchOutcomeClassified {
+                class: harvester_engine::FetchOutcomeClass::PermanentBlock
+                    | harvester_engine::FetchOutcomeClass::Success,
+                ..
+            }
     ) || (matches!(&msg, Msg::SourcePollCompleted { .. })
         && !state.pipeline_intake_open());
     let mut effects = match msg {
@@ -155,6 +157,14 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             let successful = matches!(result, crate::JobResultKind::Success);
             let stopped_drain = state.pipeline_run_phase() == crate::PipelineRunPhase::Stopping
                 || state.session() == SessionState::Finishing;
+            let link_effect = (successful && !extracted_links.is_empty())
+                .then(|| {
+                    state.job_url(job_id).map(|url| Effect::StoreArticleLinks {
+                        url: url.to_owned(),
+                        links: extracted_links.clone(),
+                    })
+                })
+                .flatten();
             state.apply_done(job_id, result, extracted_links, fetched_utc);
             if successful {
                 if let Some(url) = state.job_url(job_id).map(str::to_owned) {
@@ -164,11 +174,43 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             if !stopped_drain || successful {
                 state.request_pre_triage_refresh_evaluation(true);
             }
-            Vec::new()
+            link_effect.into_iter().collect()
         }
 
         Msg::JobSelected { job_id } => {
+            let previous = state.selected_job_id();
             state.select_job(job_id);
+            if state.selected_job_id() == Some(job_id) && previous != Some(job_id) {
+                state
+                    .article_links_load_url(job_id)
+                    .map(|url| Effect::LoadArticleLinks {
+                        job_id,
+                        url: url.to_owned(),
+                    })
+                    .into_iter()
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        }
+        Msg::ArticleLinksLoaded { job_id, url, links } => {
+            match links {
+                Ok(links) => state.article_links_loaded(job_id, &url, links),
+                Err(error) => engine_warn!(
+                    "[article-links] load job_id={} url={} error={}",
+                    job_id,
+                    url,
+                    error
+                ),
+            }
+            Vec::new()
+        }
+        Msg::RuntimeStateNotice { message } => {
+            state.set_runtime_state_notice(message);
+            Vec::new()
+        }
+        Msg::FetchTimeRecoveryCompleted => {
+            state.fetch_time_recovery_done = true;
             Vec::new()
         }
         Msg::JobListModeSet { mode } => {
@@ -578,6 +620,9 @@ mod desktop_contract_tests {
             Some(Effect::PersistRuntimeState { snapshot })
                 if snapshot.completed.len() == 1 && snapshot.completed[0].url == "https://example.com/article"
         ));
+        assert!(!effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::StoreArticleLinks { .. })));
     }
 
     #[test]

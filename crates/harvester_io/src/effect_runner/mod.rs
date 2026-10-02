@@ -63,10 +63,33 @@ impl PlatformEffectHandler for NoOpPlatformHandler {
 /// Sink for reducer-emitted runtime persistence snapshots.
 pub trait RuntimePersistenceSink: Send + Sync {
     fn enqueue(&self, snapshot: PersistenceSnapshot);
+    fn set_message_sender(&self, _sender: mpsc::Sender<Msg>) {}
+    /// Sinks suppressing runtime snapshots still service independent link effects.
+    fn store_article_links(
+        &self,
+        output: &Path,
+        url: String,
+        links: Vec<harvester_engine::ExtractedLink>,
+        observer: Option<FileWriteObserver>,
+    ) {
+        crate::article_links::store_observed(output, &url, &links, &observer);
+    }
 }
 pub type FileWriteObserver = Arc<dyn Fn(&Path, u64, Duration) + Send + Sync>;
 
 impl RuntimePersistenceSink for crate::PersistenceWorker {
+    fn store_article_links(
+        &self,
+        output: &Path,
+        url: String,
+        links: Vec<harvester_engine::ExtractedLink>,
+        observer: Option<FileWriteObserver>,
+    ) {
+        crate::PersistenceWorker::enqueue_links(self, output.to_path_buf(), url, links, observer);
+    }
+    fn set_message_sender(&self, sender: mpsc::Sender<Msg>) {
+        crate::PersistenceWorker::set_message_sender(self, sender);
+    }
     fn enqueue(&self, snapshot: PersistenceSnapshot) {
         crate::PersistenceWorker::enqueue(self, snapshot);
     }
@@ -194,6 +217,7 @@ impl EffectRunner {
             msg_tx.clone(),
             file_write_observer.clone(),
         ));
+        persistence_sink.set_message_sender(msg_tx.clone());
         let runner = Self {
             corpus_scan_index: Arc::new(Mutex::new(harvester_engine::CorpusScanIndex::default())),
             corpus_scan_reset_requested: Arc::new(AtomicBool::new(false)),
@@ -235,6 +259,7 @@ impl EffectRunner {
             msg_tx.clone(),
             None,
         ));
+        persistence_sink.set_message_sender(msg_tx.clone());
         let runner = Self {
             corpus_scan_index: Arc::new(Mutex::new(harvester_engine::CorpusScanIndex::default())),
             corpus_scan_reset_requested: Arc::new(AtomicBool::new(false)),
@@ -382,10 +407,14 @@ impl EffectRunner {
     }
 
     fn reject_effect(&self, effect: Effect, reason: String) {
-        engine_error!("[effect] Rejected: {:?} â€” {}", effect, reason);
         // Send appropriate failure message based on effect type
         match effect {
             Effect::EnqueueUrl { job_id, .. } => {
+                engine_error!(
+                    "[effect] operation=enqueue job_id={} rejected={}",
+                    job_id,
+                    reason
+                );
                 let _ = self.msg_tx.send(Msg::JobDone {
                     job_id,
                     result: JobResultKind::Failed { reason },
@@ -393,8 +422,25 @@ impl EffectRunner {
                     fetched_utc: None,
                 });
             }
+            Effect::RequestLlmCompletion {
+                request_id,
+                prompt_id,
+                ..
+            } => {
+                engine_error!(
+                    "[effect] operation=llm request_id={} prompt_id={:?} rejected={}",
+                    request_id,
+                    prompt_id,
+                    reason
+                );
+                let _ = self.msg_tx.send(Msg::LlmCompleted {
+                    request_id,
+                    result: harvester_core::LlmResultKind::Failed { reason },
+                    metadata: None,
+                });
+            }
             _ => {
-                // For other effects, log the rejection without sending a message
+                engine_error!("[effect] rejected={}", reason);
             }
         }
     }

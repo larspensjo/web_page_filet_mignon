@@ -11,7 +11,7 @@ use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{update, AppState, BatchObservation, CompletedJobSnapshot, ImportPhase, Msg};
 use harvester_io::{
     host_bootstrap::{build_effect_runner, pump_pre_triage_refresh},
-    load_completed_jobs, load_signal_candidate_overrides, persist_completed_jobs, EffectRunner,
+    load_runtime_hydration, load_signal_candidate_overrides, persist_completed_jobs, EffectRunner,
     NoOpPlatformHandler, PersistenceWorker, RuntimePaths,
 };
 use std::io::IsTerminal;
@@ -54,7 +54,8 @@ pub(crate) fn run_import_mode(
     shutdown_flag: Arc<AtomicBool>,
 ) -> Result<i32, String> {
     engine_info!("[import] Starting import mode");
-    let existing_completed_jobs = load_completed_jobs(&paths.state_path);
+    let hydration = load_runtime_hydration(&paths.state_path, &paths.output_dir);
+    let existing_completed_jobs = hydration.jobs;
 
     let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
     let mut state = AppState::new();
@@ -77,6 +78,30 @@ pub(crate) fn run_import_mode(
         Some(BATCH_EMPTY_API_KEY_WARNING),
     )?;
     state = crate::runner::apply_llm_availability(state, availability);
+
+    for message in hydration.notices {
+        (state, _) = update(state, Msg::RuntimeStateNotice { message });
+    }
+    if hydration.recovery_needs_persist {
+        // Import intentionally processes only arrivals. Persist startup recovery via
+        // the same reducer/effect path without admitting the old corpus to this run.
+        let (recovered, _) = update(
+            AppState::new(),
+            Msg::RestoreCompletedJobs(existing_completed_jobs.clone()),
+        );
+        let (recovered, _) = update(
+            recovered,
+            Msg::RestorePendingIntake(harvester_io::load_pending_intake(&paths.state_path)),
+        );
+        let (recovered, _) = update(
+            recovered,
+            Msg::BlacklistHydrated {
+                state: harvester_io::load_blacklist(&paths.blacklist_path),
+            },
+        );
+        let (_, effects) = update(recovered, Msg::FetchTimeRecoveryCompleted);
+        effect_runner.enqueue(effects);
+    }
 
     // Hydrate prompt/template metadata needed for downstream work.
     effect_runner.enqueue(vec![harvester_core::Effect::LoadPromptTemplateFiles]);
@@ -164,7 +189,16 @@ pub(crate) fn run_import_mode(
         obs.imports_completed,
         merged_completed_jobs.len()
     );
-    persist_completed_jobs(&paths.state_path, &merged_completed_jobs);
+    let slim_jobs = merged_completed_jobs
+        .into_iter()
+        .map(|job| harvester_core::SlimJobRecord {
+            url: job.url,
+            tokens: job.tokens,
+            bytes: job.bytes,
+            fetched_utc: job.fetched_utc,
+        })
+        .collect::<Vec<_>>();
+    persist_completed_jobs(&paths.state_path, &slim_jobs);
 
     Ok(exit_code_with_shutdown(
         if let Some(reason) = state

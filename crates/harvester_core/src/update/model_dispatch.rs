@@ -27,10 +27,16 @@ pub(super) fn dispatch_model_work(state: &mut AppState, effects: &mut Vec<Effect
         .or_else(|| state.model_dispatch_halt_reason())
         .map(str::to_owned)
     {
-        state.triage_mut().fail_all_pending(&reason);
-        state.briefing_mut().fail_all_pending(&reason);
-        for url in state.signal_candidate_mut().fail_all_pending(&reason) {
-            state.clear_signal_candidate_input_snapshot(&url);
+        if state.triage().pending_count() > 0 {
+            state.triage_mut().fail_all_pending(&reason);
+        }
+        if state.briefing().pending_count() > 0 {
+            state.briefing_mut().fail_all_pending(&reason);
+        }
+        if state.signal_candidate().next_pending_url().is_some() {
+            for url in state.signal_candidate_mut().fail_all_pending(&reason) {
+                state.clear_signal_candidate_input_snapshot(&url);
+            }
         }
     } else {
         if state.pipeline_ready() {
@@ -120,9 +126,11 @@ fn dispatch_triage(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
     let content_hash = state.triage().articles()[next_idx].content_hash.clone();
     let content_hash_short = short_hash(&content_hash);
     let current_key = state.current_triage_cache_key(&content_hash);
-    state
-        .triage_mut()
-        .set_article_cache_key(next_idx, current_key);
+    if state.triage().articles()[next_idx].cache_key_snapshot != current_key {
+        state
+            .triage_mut()
+            .set_article_cache_key(next_idx, current_key);
+    }
 
     match state.try_reuse_triage(&content_hash) {
         TriageCacheLookupResult::Hit {
@@ -241,9 +249,11 @@ fn dispatch_summary(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
 
     match state.current_summary_cache_key(&content_hash) {
         Ok(key) => {
-            state
-                .briefing_mut()
-                .set_article_cache_key(next_idx, Some(key.clone()));
+            if state.briefing().article_cache_key(next_idx) != Some(&key) {
+                state
+                    .briefing_mut()
+                    .set_article_cache_key(next_idx, Some(key.clone()));
+            }
             if let Some(cached_result) = state.try_reuse_summary(&key) {
                 let result = cached_result.clone();
                 state.record_summary_cache_hit();

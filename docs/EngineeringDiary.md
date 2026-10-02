@@ -2675,3 +2675,33 @@ Change: Removed path carry-forward. Runtime saves deserialize only pending intak
 Lessons Learned: Compatibility reads should follow the surviving contract. Preserving ignored data can add seconds to routine saves when nested records trigger repeated parsing and allocations.
 Prevention: Regressions load old paths and verify they disappear on runtime save, and save successfully over an incompatible old completed payload while preserving pending intake and desktop geometry.
 Refs: crates/harvester_io/src/persistence.rs; old_link_paths_load_but_runtime_saves_drop_them_and_preserve_geometry; runtime_save_ignores_old_completed_payload_and_preserves_settings
+
+## 2026-10-01 - Slim runtime persistence and lazy extracted links
+Type: Implementation
+Context: Whole link collections dominated runtime-state persistence after each successful download.
+Change: Added a confined per-article JSON link store, a link-free persistence projection, reducer-emitted selection loading and download link writes. Startup migration preserves a byte-identical verified backup before publishing links and slim state. Interrupted writes retry idempotently; malformed link records are skipped with contextual logging. Both geometry pairs and pending intake survive. IPC 13 and archive bytes stay unchanged.
+Refs: crates/harvester_io/src/persistence.rs, crates/harvester_io/src/article_links.rs, crates/harvester_io/src/effect_runner/tests.rs, crates/harvester_batch/tests/replay_bench.rs
+
+## 2026-10-01 - Recover missing saved fetch times from corpus frontmatter
+Type: Bug Fix
+Context: The February saved-state data gap hid 22 jobs; the earlier corpus investigation found frontmatter fetch times for 9 and no article files for 13.
+Change: Startup I/O recovers valid missing timestamps through CorpusScanIndex using canonical article identity. Unrecoverable jobs keep the existing hidden-count note, remain persisted and block duplicate URL intake. The checked-in carry-over fixture has two dated jobs and leaves 0 hidden; focused tests exercise recovery from 2 missing dates to 1.
+Lessons Learned: Missing optional metadata in older state does not mean the downloaded work can be discarded. Recover from the durable article when available and retain the URL identity when it is not.
+Prevention: Startup regression tests cover frontmatter recovery, hidden counts, restart survival and duplicate-intake blocking for jobs without article files.
+Refs: crates/harvester_engine/src/briefing/corpus_index.rs, crates/harvester_io/src/host_bootstrap.rs, startup_recovers_frontmatter_fetch_time_and_lowers_hidden_count, job_without_article_stays_hidden_survives_restart_and_blocks_redownload
+
+## 2026-10-01 - Preserve restored state without trapping runtime saves
+Type: Bug Fix
+Context: Backup mismatch and parse failure blocked every later runtime save; unrecoverable dates repeated a full content scan at every startup. Late empty link replies could erase session links.
+Change: Preserve unique dated byte-identical backups and return one-line notices through reducer messages and the existing rendered status. Persist one-time frontmatter-only recovery through PersistRuntimeState. Skip empty link writes, merge restored links, ignore failed/stale-empty replies, and gate geometry migration. Queue normal link publications on the persistence worker before their runtime snapshots.
+Lessons Learned: A preserved backup is evidence of one source version, not a permanent veto on future versions. Recovery needs a persisted completion marker even when some records cannot be repaired. Empty asynchronous results cannot safely replace newer resident data.
+Prevention: Regressions cover restores, corruption, backup preservation and notices, empty writes, recovery on second startup, link reply races and geometry migration gating. Keep fixture byte comparisons and reducer/effect assertions alongside disk tests.
+Refs: crates/harvester_io/src/persistence.rs, crates/harvester_io/src/host_bootstrap.rs, crates/harvester_io/src/persistence_worker.rs, crates/harvester_core/tests/persistence.rs, crates/harvester_engine/src/briefing/corpus_index.rs
+
+## 2026-10-02 - Restore phase 7 save speed and drain quota-limited replays
+Type: Bug Fix
+Context: Desktop verification found 102–112 second slim-state saves, minute-long completion stalls and a replay stuck with nine requests left.
+Change: Consume discarded completed jobs through typed RON deserialization (measured saves fall from 86–94 seconds to 0.48–0.55 seconds on 11,262 records). Avoid no-op scheduler mutations that repeatedly invalidate the entire unfinished-work aggregate. Enqueue paid-result flush fences rather than waiting on the host loop; rejected model effects return terminal completion messages. Release the quota tracker before rejection reporting reacquires it for usage: the first rejected request formerly deadlocked the remaining nine. Preserve the benchmark copy's historical checkpoint, lowering it only enough to admit held articles. Add worker/host timing logs and nine regression tests; replace one existing writer test's fixed startup sleep with publication acknowledgements without removing its assertions. Offline build, the full workspace suite (1,263 passed, two ignored), both Clippy gates and formatting pass.
+Lessons Learned: A smaller file can deserialize much more slowly when an omitted field selects a generic parser path. Mutating accessors have invalidation costs even when the assigned value is unchanged. Completion reporting must never reacquire a held lock. A benchmark copy's processing window is part of its workload, not disposable setup state.
+Prevention: A 12,000-job/link-file save test locks the backup and preserves recovery sentinels; occupied-slot and halted-dispatch ticks retain aggregate revisions; blocked persistence/result writers cannot hold up completion delivery; ten quota rejections report both completion and usage; the pipeline settles with unfinished articles. Both replay hosts preserve historical scope and source bytes. Full real-corpus copies finish in 8.21 seconds (desktop) and 21.33 seconds (batch); deliberately reopening historical work terminates at the 1,000-call quota in 78.79 seconds.
+Refs: docs/plans/Plan.Simplification.md (phase 7 performance regression verification), crates/harvester_io/examples/runtime_save_bench.rs, crates/harvester_io/src/persistence.rs, crates/harvester_core/src/update/model_dispatch.rs, crates/harvester_engine/src/llm/handle.rs, crates/harvester_io/src/result_sink.rs, crates/harvester_batch/tests/replay_bench.rs

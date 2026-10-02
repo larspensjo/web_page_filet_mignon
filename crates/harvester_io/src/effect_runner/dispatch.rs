@@ -31,9 +31,25 @@ pub(crate) fn ordered_context_pairs(ctx_file: &PromptContextFile) -> Vec<(String
 impl EffectRunner {
     pub(super) fn execute_effect(&self, effect: Effect) {
         match effect {
+            Effect::LoadArticleLinks { job_id, url } => {
+                let output = self.paths.output_dir.clone();
+                let tx = self.msg_tx.clone();
+                thread::spawn(move || {
+                    let links = crate::article_links::try_load_article_links(&output, &url);
+                    let _ = tx.send(Msg::ArticleLinksLoaded { job_id, url, links });
+                });
+            }
+            Effect::StoreArticleLinks { url, links } => {
+                self.persistence_sink.store_article_links(
+                    &self.paths.output_dir,
+                    url,
+                    links,
+                    self.file_write_observer.clone(),
+                );
+            }
             Effect::SaveResults { records } => self.result_sink.enqueue(records),
             Effect::FlushResults => {
-                if let Err(error) = self.flush_results() {
+                if let Err(error) = self.result_sink.request_flush() {
                     engine_error!("[results] flush failed: {}", error);
                 }
             }
@@ -416,8 +432,16 @@ impl EffectRunner {
             }
             Effect::PersistDesktopWindowSize { width, height } => {
                 let path = self.paths.state_path.clone();
+                let tx = self.msg_tx.clone();
                 thread::spawn(move || {
-                    crate::persist_desktop_window_size(&path, width, height);
+                    crate::persistence::persist_desktop_window_size_with_notices(
+                        &path,
+                        width,
+                        height,
+                        |message| {
+                            let _ = tx.send(Msg::RuntimeStateNotice { message });
+                        },
+                    );
                     engine_info!(
                         "[desktop-window-size] Persisted logical inner size {}x{} to {:?}",
                         width,

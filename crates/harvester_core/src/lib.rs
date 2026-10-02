@@ -67,8 +67,8 @@ pub use state::{
     evaluate_reprocess_notice, normalize_url_for_dedupe, AiAvailability, AiUnavailableReason,
     AppState, ArchiveTokenEstimates, BatchObservation, BatchStatus, CompletedJobSnapshot, JobId,
     JobOrigin, JobResultKind, LinkSnapshotRecord, LlmRequestState, LlmResultIndex,
-    PreTriageActionability, SessionState, Stage, UnfinishedStageVerdict, UnfinishedStageVerdicts,
-    UnfinishedWork, UnfinishedWorkClass, UnfinishedWorkSummary,
+    PreTriageActionability, SessionState, SlimJobRecord, Stage, UnfinishedStageVerdict,
+    UnfinishedStageVerdicts, UnfinishedWork, UnfinishedWorkClass, UnfinishedWorkSummary,
     DEFAULT_REPROCESS_NOTICE_ARTICLE_THRESHOLD, DEFAULT_REPROCESS_NOTICE_QUOTA_PERCENT,
     MAX_EXTRACTED_LINKS,
 };

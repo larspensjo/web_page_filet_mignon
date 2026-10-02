@@ -40,3 +40,15 @@ Structured threat model for the batch host and the Tauri desktop host, covering:
    - Duplicate IO paths create policy drift; centralize enforcement
    - Generic failure collapsing removes traceability
    - Byte slicing of user/content strings is brittle; use char-boundary-safe helpers
+
+Extracted-link storage derives filenames solely from the SHA-256 of the canonical
+archive URL key. URL text and retired downloaded paths never enter filesystem paths.
+The store directory must canonicalize to the output root's own `.article_links`
+child; redirected directories and link-file symlinks are refused. Atomic link
+temporaries stay inside the validated store directory. Malformed files or individual
+records are logged and skipped. Link selection requests I/O through a reducer effect;
+only a successful reply for the still-selected matching successful job fills its links.
+Empty replies cannot clear resident links. Opening a link
+continues to resolve the core-owned index, never a page-supplied URL. Runtime-state
+migration never replaces the original before a flushed, length-and-SHA-256-verified
+backup exists, and never overwrites an existing backup.

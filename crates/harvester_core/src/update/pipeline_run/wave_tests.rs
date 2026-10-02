@@ -456,6 +456,46 @@ fn hydration_with_eligible_scoring_is_settled_and_unadmitted() {
 }
 
 #[test]
+fn quota_halt_drains_ten_requests_and_settles_with_unfinished_articles() {
+    let mut state = add_metadata(AppState::new());
+    state.set_llm_max_in_flight(10);
+    let (mut state, effects) = start_resume(state, (0..20).map(loaded_article).collect());
+    let ids = effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::RequestLlmCompletion { request_id, .. } => Some(*request_id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(ids.len(), 10);
+    for (index, request_id) in ids.into_iter().enumerate() {
+        let effects;
+        (state, effects) = crate::update(
+            state,
+            Msg::LlmCompleted {
+                request_id,
+                result: crate::LlmResultKind::QuotaExhausted {
+                    reason: "session call limit".into(),
+                    origin: harvester_engine::llm::QuotaOrigin::SessionBudget,
+                },
+                metadata: None,
+            },
+        );
+        assert!(effects
+            .iter()
+            .all(|effect| !matches!(effect, Effect::RequestLlmCompletion { .. })));
+        assert_eq!(state.article_model_requests_in_flight(), 9 - index);
+    }
+    assert!(state.pipeline_activity().is_settled());
+    assert_eq!(state.pipeline_run_phase(), crate::PipelineRunPhase::Idle);
+    assert!(state.run_progress().unwrap().terminal);
+    assert!(
+        matches!(state.unfinished_work(), crate::UnfinishedWork::Known(work) if work.needs_triage == 20)
+    );
+    assert_eq!(state.batch_status(), crate::BatchStatus::Settled);
+}
+
+#[test]
 fn run_requested_during_continuous_downloads_starts_triage_before_downloads_end() {
     let mut state = add_metadata(AppState::new());
     state.set_llm_max_in_flight(3);

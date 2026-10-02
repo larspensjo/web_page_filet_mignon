@@ -9,23 +9,33 @@ use serde::{Deserialize, Serialize};
 /// Capturing it while reducing keeps the host from reading state out of band.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PersistenceSnapshot {
-    pub completed: Vec<crate::CompletedJobSnapshot>,
+    pub completed: Vec<crate::SlimJobRecord>,
     pub pending_intake: Vec<String>,
     pub blacklist: crate::blacklist::BlacklistState,
+    pub fetch_time_recovery_done: bool,
 }
 
 impl PersistenceSnapshot {
     pub fn capture(state: &crate::AppState) -> Self {
         Self {
-            completed: state.completed_jobs_snapshot(),
+            completed: state.slim_completed_jobs_snapshot(),
             pending_intake: state.pending_intake_urls().to_vec(),
             blacklist: state.blacklist().clone(),
+            fetch_time_recovery_done: state.fetch_time_recovery_done,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
+    LoadArticleLinks {
+        job_id: crate::JobId,
+        url: String,
+    },
+    StoreArticleLinks {
+        url: String,
+        links: Vec<harvester_engine::ExtractedLink>,
+    },
     EnqueueUrl {
         job_id: crate::JobId,
         url: String,

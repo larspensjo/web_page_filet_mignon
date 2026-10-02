@@ -73,6 +73,46 @@ pub struct CorpusScanIndex {
 }
 
 impl CorpusScanIndex {
+    /// All valid frontmatter fetch times, without a display cutoff or text preparation.
+    pub fn fetch_times(&mut self, output: &Path) -> Result<HashMap<String, String>, String> {
+        use std::io::{BufRead, BufReader};
+        // Recovery needs only the leading metadata block. Do not load, hash or
+        // prepare article bodies, or build a second process-lifetime corpus index.
+        let mut paths = list_markdown_files(output)?;
+        let linked = output.join("linked");
+        if linked.is_dir() {
+            paths.extend(list_markdown_files(&linked)?);
+        }
+        let mut times = HashMap::new();
+        for path in paths {
+            let file = fs::File::open(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let mut header = String::new();
+            for (index, line) in BufReader::new(file).lines().enumerate() {
+                let line = line.map_err(|e| format!("{}: {e}", path.display()))?;
+                if index == 0 && line.trim() != "---" {
+                    break;
+                }
+                header.push_str(&line);
+                header.push('\n');
+                if index > 0 && line.trim() == "---" {
+                    break;
+                }
+                // A missing delimiter must not turn recovery into a body scan.
+                if header.len() > 64 * 1024 {
+                    break;
+                }
+            }
+            if let Some(fields) = parse_frontmatter(&header) {
+                if let (Some(url), Some(date)) = (fields.url, fields.fetched_utc) {
+                    if chrono::DateTime::parse_from_rfc3339(&date).is_ok() {
+                        times.entry(crate::archive_url_key(&url)).or_insert(date);
+                    }
+                }
+            }
+        }
+        Ok(times)
+    }
+
     pub fn clear(&mut self) {
         self.files.clear();
     }
@@ -281,4 +321,26 @@ fn scan_paths(
         drop(tx);
         rx.into_iter().collect::<Result<Vec<_>, _>>()
     })
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+
+    #[test]
+    fn fetch_time_recovery_reads_only_frontmatter_in_root_and_legacy_linked_articles() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("linked")).unwrap();
+        for relative in ["root.md", "linked/old.md"] {
+            let mut bytes = format!("---\nurl: https://example.com/{relative}\nfetched_utc: 2026-09-20T09:15:00Z\n---\n").into_bytes();
+            // Invalid UTF-8 body proves recovery never decodes/prepares article text.
+            bytes.extend_from_slice(&[0xff, 0xfe]);
+            fs::write(dir.path().join(relative), bytes).unwrap();
+        }
+        let mut index = CorpusScanIndex::default();
+        let times = index.fetch_times(dir.path()).unwrap();
+        assert_eq!(times.len(), 2);
+        assert_eq!(times["https://example.com/root.md"], "2026-09-20T09:15:00Z");
+        assert!(index.files.is_empty());
+    }
 }

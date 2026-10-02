@@ -65,6 +65,9 @@ fn replay_harness_completes_five_articles_and_saves_results() {
         fs::write(source.join(format!("article-{index}.md")), markdown)
             .expect("write synthetic article");
     }
+    // One held article has real links; the other four exercise empty-link
+    // completions. Keep the write-observer assertion tied to useful publications.
+    fs::write(source.join(".harvester_state.ron"), r#"(completed: [(url: "https://replay.test/article-0", tokens: None, bytes: None, links: [(url: "https://replay.test/resource", downloaded_path: None)], fetched_utc: Some("2026-09-21T00:00:00Z"))])"#).unwrap();
     let mut brave_seen = harvester_engine::BraveSeenSet::new();
     let mut rss_seen = harvester_engine::RssSeenSet::new();
     for index in 0..5 {
@@ -108,6 +111,9 @@ fn replay_harness_completes_five_articles_and_saves_results() {
     .expect("five-article replay should complete");
 
     assert!(report.completed);
+    assert!(report
+        .private_file_writes
+        .contains_key(".article_links/*.json"));
     assert_eq!(report.skipped_persisted_rss.sources, 4);
     assert_eq!(report.skipped_persisted_rss.entries, 4);
     let saved_report: serde_json::Value =
@@ -229,6 +235,7 @@ fn carry_over_replay_preserves_restored_state_seen_sets_and_paid_results() {
         .join("fixtures")
         .join("carry_over");
     let work = temp.path().join("carry-over-copy");
+    let original_state = fs::read(fixture.join(".harvester_state.ron")).unwrap();
     let original_cache_bytes = [
         ".triage_cache.ron",
         ".summary_cache.ron",
@@ -244,7 +251,7 @@ fn carry_over_replay_preserves_restored_state_seen_sets_and_paid_results() {
     .collect::<std::collections::HashMap<_, _>>();
 
     let report = run_benchmark(HarnessOptions {
-        source_dir: fixture,
+        source_dir: fixture.clone(),
         work_dir: work.clone(),
         hold_back: 0,
         reuse_copy: false,
@@ -310,6 +317,15 @@ fn carry_over_replay_preserves_restored_state_seen_sets_and_paid_results() {
     assert!(brave.is_seen("https://carry-over.synthetic/article-1"));
     assert!(brave.is_seen("https://carry-over.synthetic/brave-only"));
 
+    assert_eq!(
+        fs::read(work.join(".harvester_state.pre-slim.ron")).unwrap(),
+        original_state
+    );
+    let active = fs::read_to_string(work.join(".harvester_state.ron")).unwrap();
+    assert!(!active.contains("links:"));
+    assert!(!active.contains("downloaded_path"));
+    assert!(!harvester_io::migrate_runtime_state(&work.join(".harvester_state.ron")).unwrap());
+
     // 6. Every restored job still has its URL and recovered fetch time.
     assert!(report
         .private_file_writes
@@ -330,12 +346,13 @@ fn carry_over_replay_preserves_restored_state_seen_sets_and_paid_results() {
                 .unwrap()
                 .timestamp()
         );
-        assert_eq!(job.links.len(), 1);
-        assert_eq!(
-            job.links[0].url,
-            "https://carry-over.synthetic/linked-resource"
+        assert!(
+            job.links.is_empty(),
+            "restored links are loaded on selection"
         );
-        assert!(job.links[0].downloaded_path.is_none());
+        let links = harvester_io::load_article_links(&work, &url);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].url, "https://carry-over.synthetic/linked-resource");
     }
     assert_eq!(
         load_window_size(&work.join(".harvester_state.ron")),
@@ -345,6 +362,81 @@ fn carry_over_replay_preserves_restored_state_seen_sets_and_paid_results() {
         load_desktop_window_size(&work.join(".harvester_state.ron")),
         Some((1512, 982))
     );
+    let second = run_benchmark(HarnessOptions {
+        source_dir: fixture,
+        work_dir: work.clone(),
+        hold_back: 0,
+        reuse_copy: true,
+        host: BenchmarkHost::Batch,
+        llm_latency_ms: 0,
+    })
+    .unwrap();
+    assert!(second.completed);
+    assert!(second.llm_calls_by_prompt.is_empty());
+    assert_eq!(
+        second
+            .effects_by_kind
+            .get("EnqueueUrl")
+            .copied()
+            .unwrap_or(0),
+        0
+    );
+    assert_eq!(
+        fs::read(work.join(".harvester_state.pre-slim.ron")).unwrap(),
+        original_state
+    );
+    assert!(!harvester_io::migrate_runtime_state(&work.join(".harvester_state.ron")).unwrap());
+}
+
+#[test]
+fn holding_newest_article_does_not_reopen_unpaid_historical_work() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("source");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join(".sources.ron"), "(sources: [])").unwrap();
+    for day in 1..=3 {
+        let (_, markdown) = build_markdown_document(
+            &format!("https://replay.test/article-{day}"),
+            Some("Checkpoint fixture"),
+            "utf-8",
+            &format!("2026-09-0{day}T12:00:00Z"),
+            "OpenAI announced a dated enterprise development. "
+                .repeat(100)
+                .as_str(),
+            &WhitespaceTokenCounter,
+        );
+        fs::write(source.join(format!("article-{day}.md")), markdown).unwrap();
+    }
+    harvester_io::save_briefing_checkpoint(
+        &source.join(".briefing_checkpoint.ron"),
+        Some("2027-01-01T00:00:00Z"),
+    )
+    .unwrap();
+    let before = snapshot_tree(&source);
+    for host in [BenchmarkHost::Batch, BenchmarkHost::Desktop] {
+        let work = temp.path().join(format!("{host:?}"));
+        let report = run_benchmark(HarnessOptions {
+            source_dir: source.clone(),
+            work_dir: work.clone(),
+            hold_back: 1,
+            reuse_copy: false,
+            host,
+            llm_latency_ms: 0,
+        })
+        .unwrap();
+        assert!(report.completed);
+        assert_eq!(
+            report.llm_calls_by_prompt.get("ArticleTriage"),
+            Some(&1),
+            "only the held article belongs to the reopened window"
+        );
+        assert_eq!(
+            harvester_io::load_briefing_checkpoint(&work.join(".briefing_checkpoint.ron"))
+                .as_deref(),
+            Some("2026-09-03T12:00:00+00:00")
+        );
+        assert_eq!(snapshot_tree(&source), before);
+    }
 }
 
 // Inspect the compatibility pair; completed-job loading already validates this RON file.
