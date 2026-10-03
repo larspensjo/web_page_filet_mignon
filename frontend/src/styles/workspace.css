@@ -138,7 +138,7 @@
 
 .stage-list {
 	display: grid;
-	grid-template-columns: minmax(6rem, 1fr) 9rem minmax(
+	grid-template-columns: minmax(6rem, 1fr) 15rem minmax(
 			var(--space-major),
 			10rem
 		) 9rem;
@@ -584,9 +584,13 @@
 
 	.stage-list {
 		grid-template-columns:
-			minmax(6rem, 1fr) 7rem minmax(var(--space-major), 6rem)
+			minmax(6rem, 1fr) 10rem minmax(var(--space-major), 6rem)
 			minmax(5rem, 7rem);
 		column-gap: var(--space-compact);
+	}
+
+	.stage-count {
+		white-space: normal;
 	}
 
 	.activity-entry {
