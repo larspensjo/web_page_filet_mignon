@@ -4,6 +4,7 @@ import overlappingActiveStages from "@fixtures/snapshots/overlapping_active_stag
 import reprocessNotice from "@fixtures/snapshots/reprocess_notice.json";
 import runFinishedWithNotice from "@fixtures/snapshots/run_finished_with_notice.json";
 import runInProgressWithFailures from "@fixtures/snapshots/run_in_progress_with_failures.json";
+import runInProgressWithReusedResults from "@fixtures/snapshots/run_in_progress_with_reused_results.json";
 import stoppedWithUnfinishedWork from "@fixtures/snapshots/stopped_with_unfinished_work_export_enabled.json";
 import stoppingWithInFlightWork from "@fixtures/snapshots/stopping_with_in_flight_work.json";
 import unfinishedWorkAvailable from "@fixtures/snapshots/unfinished_work_available.json";
@@ -20,6 +21,7 @@ import { dispatchIntent } from "../ipc/intent";
 import type { SnapshotEnvelope, StageProgress } from "../ipc/types";
 import {
 	estimateActiveStageEtas,
+	newWork,
 	presentStageRows,
 	RunSurface,
 } from "./RunSurface";
@@ -27,6 +29,8 @@ import {
 vi.mock("../ipc/intent", () => ({ dispatchIntent: vi.fn() }));
 
 const inProgress = runInProgressWithFailures as unknown as SnapshotEnvelope;
+const reusedResults =
+	runInProgressWithReusedResults as unknown as SnapshotEnvelope;
 const finished = runFinishedWithNotice as unknown as SnapshotEnvelope;
 const overlapping = overlappingActiveStages as unknown as SnapshotEnvelope;
 const unfinished = unfinishedWorkAvailable as unknown as SnapshotEnvelope;
@@ -71,6 +75,52 @@ function stageRow(stage: StageName): HTMLElement {
 
 function meterPercent(meter: HTMLElement): number {
 	return Number.parseFloat(meter.style.getPropertyValue("--stage-progress"));
+}
+
+function ownerRunEndStages(): StageProgress[] {
+	return makeStages({
+		ScanningSources: {
+			status: "Done",
+			total: 28,
+			completed: 27,
+			failed: 1,
+			total_is_final: true,
+		},
+		DownloadingArticles: {
+			status: "Done",
+			total: 25,
+			completed: 23,
+			failed: 2,
+			total_is_final: true,
+		},
+		LoadingArticles: {
+			status: "Done",
+			total: 158,
+			completed: 158,
+			total_is_final: true,
+		},
+		Triaging: {
+			status: "Done",
+			total: 158,
+			reused: 127,
+			completed: 152,
+			total_is_final: true,
+		},
+		Summarizing: {
+			status: "Done",
+			total: 140,
+			reused: 118,
+			completed: 135,
+			total_is_final: true,
+		},
+		ScoringSignals: {
+			status: "Done",
+			total: 135,
+			reused: 110,
+			completed: 135,
+			total_is_final: true,
+		},
+	});
 }
 
 describe("RunSurface", () => {
@@ -257,6 +307,348 @@ describe("RunSurface", () => {
 		expect(meter).toHaveAttribute("aria-valuenow", "0");
 		expect(meter).toHaveAttribute("aria-valuemax", "0");
 		expect(meterPercent(meter)).toBe(0);
+	});
+
+	it("shows the owner's run end state using only new work", () => {
+		const stages = ownerRunEndStages();
+		render(<RunSurface view={viewWithStages(stages)} />);
+		const expectedRows = [
+			["ScanningSources", "0 of 28 to do · 1 failed", 0],
+			["DownloadingArticles", "0 of 25 to do · 2 failed", 0],
+			["LoadingArticles", "158 done", null],
+			["Triaging", "6 of 31 to do", 19.4],
+			["Summarizing", "5 of 22 to do", 16.1],
+			["ScoringSignals", "0 of 25 to do", 0],
+		] as const;
+		for (const [name, count, percent] of expectedRows) {
+			const row = stageRow(name);
+			expect(row.querySelector(".stage-count")).toHaveTextContent(
+				new RegExp(`^${count}$`),
+			);
+			const meter = within(row).queryByRole("meter");
+			if (percent === null) {
+				expect(meter).toBeNull();
+				continue;
+			}
+			expect(meter).not.toBeNull();
+			expect(meter).toHaveAttribute("aria-valuetext", count);
+			expect(Number(meterPercent(meter as HTMLElement).toFixed(1))).toBe(
+				percent,
+			);
+		}
+		for (const name of [
+			"DownloadingArticles",
+			"Triaging",
+			"Summarizing",
+			"ScoringSignals",
+		] as const)
+			expect(within(stageRow(name)).getByRole("meter")).toHaveAttribute(
+				"aria-valuemax",
+				"31",
+			);
+		expect(
+			screen.getByRole("list", { name: "Pipeline stages" }),
+		).not.toHaveTextContent(/reused/i);
+	});
+
+	it("shows an all-reused model stage as zero work without muting it", () => {
+		const stages = makeStages({
+			Summarizing: {
+				status: "Active",
+				total: 118,
+				reused: 118,
+				completed: 118,
+			},
+		});
+		render(<RunSurface view={viewWithStages(stages)} />);
+		const row = stageRow("Summarizing");
+		const meter = within(row).getByRole("meter");
+		expect(row.querySelector(".stage-count")).toHaveTextContent(/^0 to do$/);
+		expect(row).not.toHaveClass("stage-row--muted");
+		expect(meter).toHaveAttribute("aria-valuemax", "0");
+		expect(meter).toHaveAttribute("aria-valuenow", "0");
+		expect(meterPercent(meter)).toBe(0);
+	});
+
+	it("counts only new work while Stopping", () => {
+		const stages = ownerRunEndStages();
+		const view = viewWithStages(stages);
+		render(
+			<RunSurface
+				view={{ ...view, run_state: { Stopping: { in_flight: 1 } } }}
+			/>,
+		);
+		const expectedCounts = [
+			["ScanningSources", "27 done · 1 failed"],
+			["DownloadingArticles", "23 done · 2 failed"],
+			["LoadingArticles", "158 done"],
+			["Triaging", "25 done"],
+			["Summarizing", "17 done"],
+			["ScoringSignals", "25 done"],
+		] as const;
+		for (const [name, count] of expectedCounts)
+			expect(stageRow(name).querySelector(".stage-count")).toHaveTextContent(
+				new RegExp(`^${count}$`),
+			);
+		for (const meter of screen.getAllByRole("meter")) {
+			expect(meter).toHaveAttribute("aria-valuenow", "0");
+			expect(meterPercent(meter)).toBe(0);
+		}
+	});
+
+	it("estimates ETA from new work and shows Estimating when none has settled", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2023-11-14T22:14:00Z"));
+		const stages = makeStages({
+			Triaging: {
+				status: "Active",
+				total: 40,
+				reused: 30,
+				completed: 35,
+				total_is_final: true,
+				started_at_utc: "2023-11-14T22:13:10Z",
+			},
+		});
+		expect(estimateActiveStageEtas(stages, "2023-11-14T22:14:00Z")).toEqual([
+			{ stage: "Triaging", seconds: 50 },
+		]);
+		const { rerender } = render(<RunSurface view={viewWithStages(stages)} />);
+		expect(
+			stageRow("Triaging").querySelector(".stage-status"),
+		).toHaveTextContent("about 50 sec left");
+
+		const noNewWorkSettled = stages.map((stage) =>
+			stage.stage === "Triaging" ? { ...stage, completed: 30 } : stage,
+		);
+		expect(
+			estimateActiveStageEtas(noNewWorkSettled, "2023-11-14T22:14:00Z"),
+		).toEqual([]);
+		rerender(<RunSurface view={viewWithStages(noNewWorkSettled)} />);
+		expect(
+			stageRow("Triaging").querySelector(".stage-status"),
+		).toHaveTextContent("Estimating…");
+	});
+
+	it("clamps new-work totals and completions at zero", () => {
+		const stages = makeStages({
+			Triaging: { total: 10, reused: 6, completed: 2 },
+			Summarizing: { total: 2, reused: 5, completed: 3 },
+		});
+		const triaging = stages.find((stage) => stage.stage === "Triaging");
+		const summarizing = stages.find((stage) => stage.stage === "Summarizing");
+		expect(triaging).toBeDefined();
+		expect(summarizing).toBeDefined();
+		expect(newWork(triaging as StageProgress)).toEqual({ total: 4, done: 0 });
+		expect(newWork(summarizing as StageProgress)).toEqual({
+			total: 0,
+			done: 0,
+		});
+
+		const { rerender } = render(<RunSurface view={viewWithStages(stages)} />);
+		expect(
+			stageRow("Triaging").querySelector(".stage-count"),
+		).toHaveTextContent("4 of 4 to do");
+		expect(
+			stageRow("Summarizing").querySelector(".stage-count"),
+		).toHaveTextContent(/^0 to do$/);
+		const view = viewWithStages(stages);
+		rerender(
+			<RunSurface
+				view={{ ...view, run_state: { Stopping: { in_flight: 1 } } }}
+			/>,
+		);
+		expect(
+			stageRow("Triaging").querySelector(".stage-count"),
+		).toHaveTextContent(/^0 done$/);
+		expect(
+			stageRow("Summarizing").querySelector(".stage-count"),
+		).toHaveTextContent(/^0 done$/);
+	});
+
+	it("renders exact new-work counts from the reused-results fixture", () => {
+		render(<RunSurface view={reusedResults.view} />);
+		const expectedRows = [
+			["ScanningSources", "0 to do", 0],
+			["DownloadingArticles", "0 to do", 0],
+			["LoadingArticles", "5 done", null],
+			["Triaging", "4 of 4 to do", 100],
+			["Summarizing", "0 to do", 0],
+			["ScoringSignals", "0 to do", 0],
+		] as const;
+		for (const [name, count, percent] of expectedRows) {
+			const row = stageRow(name);
+			expect(row.querySelector(".stage-count")).toHaveTextContent(
+				new RegExp(`^${count}$`),
+			);
+			const meter = within(row).queryByRole("meter");
+			if (percent === null) {
+				expect(meter).toBeNull();
+				continue;
+			}
+			expect(meter).not.toBeNull();
+			expect(meter).toHaveAttribute("aria-valuetext", count);
+			expect(Number(meterPercent(meter as HTMLElement).toFixed(1))).toBe(
+				percent,
+			);
+		}
+	});
+
+	it("replays admission, reuse, new work and Stop with snapshot-pure bars", () => {
+		type ExpectedRow = readonly [
+			name: StageName,
+			count: string,
+			percent: number | null,
+		];
+		const pressed = makeStages();
+		const admittedWithReuse = makeStages({
+			ScanningSources: {
+				status: "Done",
+				total: 28,
+				completed: 27,
+				failed: 1,
+			},
+			DownloadingArticles: { status: "Active", total: 25, completed: 5 },
+			LoadingArticles: { status: "Active", total: 135, completed: 135 },
+			Triaging: {
+				status: "Active",
+				total: 135,
+				reused: 127,
+				completed: 127,
+			},
+			Summarizing: {
+				status: "Active",
+				total: 118,
+				reused: 118,
+				completed: 118,
+			},
+			ScoringSignals: {
+				status: "Active",
+				total: 110,
+				reused: 110,
+				completed: 110,
+			},
+		});
+		const ownerEnd = ownerRunEndStages();
+		const stoppingRows: ExpectedRow[] = [
+			["ScanningSources", "27 done · 1 failed", 0],
+			["DownloadingArticles", "23 done · 2 failed", 0],
+			["LoadingArticles", "158 done", null],
+			["Triaging", "25 done", 0],
+			["Summarizing", "17 done", 0],
+			["ScoringSignals", "25 done", 0],
+		];
+		const steps: {
+			stages: StageProgress[];
+			rows: ExpectedRow[];
+			stopping?: boolean;
+		}[] = [
+			{
+				stages: pressed,
+				rows: [
+					["ScanningSources", "0 to do", 0],
+					["DownloadingArticles", "0 to do", 0],
+					["LoadingArticles", "0 done", null],
+					["Triaging", "0 to do", 0],
+					["Summarizing", "0 to do", 0],
+					["ScoringSignals", "0 to do", 0],
+				],
+			},
+			{
+				stages: admittedWithReuse,
+				rows: [
+					["ScanningSources", "0 of 28 to do · 1 failed", 0],
+					["DownloadingArticles", "20 of 25 to do", 80],
+					["LoadingArticles", "135 done", null],
+					["Triaging", "8 of 8 to do", 32],
+					["Summarizing", "0 to do", 0],
+					["ScoringSignals", "0 to do", 0],
+				],
+			},
+			{
+				stages: ownerEnd,
+				rows: [
+					["ScanningSources", "0 of 28 to do · 1 failed", 0],
+					["DownloadingArticles", "0 of 25 to do · 2 failed", 0],
+					["LoadingArticles", "158 done", null],
+					["Triaging", "6 of 31 to do", 19.4],
+					["Summarizing", "5 of 22 to do", 16.1],
+					["ScoringSignals", "0 of 25 to do", 0],
+				],
+			},
+			{
+				stages: ownerEnd.map((stage) =>
+					stage.stage === "Triaging"
+						? {
+								...stage,
+								status: "Active",
+								total_is_final: true,
+								started_at_utc: "2023-11-14T22:13:20Z",
+							}
+						: stage,
+				),
+				rows: stoppingRows,
+				stopping: true,
+			},
+		];
+		const assertRows = (expected: ExpectedRow[]) => {
+			expect(screen.getAllByRole("meter")).toHaveLength(5);
+			for (const [name, count, percent] of expected) {
+				const row = stageRow(name);
+				expect(row.querySelector(".stage-count")).toHaveTextContent(count);
+				const meter = within(row).queryByRole("meter");
+				if (percent === null) {
+					expect(meter).toBeNull();
+					continue;
+				}
+				expect(meter).not.toBeNull();
+				expect(meter).toHaveAttribute("aria-valuetext", count);
+				expect(Number(meterPercent(meter as HTMLElement).toFixed(1))).toBe(
+					percent,
+				);
+			}
+		};
+		const captureRows = () =>
+			Array.from(document.querySelectorAll<HTMLElement>(".stage-row")).map(
+				(row) => ({
+					name: row.dataset.stage,
+					count: row.querySelector(".stage-count")?.textContent,
+					percent: row.querySelector<HTMLElement>(".stage-bar")
+						? meterPercent(
+								row.querySelector<HTMLElement>(".stage-bar") as HTMLElement,
+							)
+						: null,
+				}),
+			);
+		const { rerender, unmount } = render(
+			<RunSurface view={viewWithStages(pressed)} />,
+		);
+		let ownerEndOutput: ReturnType<typeof captureRows> = [];
+		for (const step of steps) {
+			const view = viewWithStages(step.stages);
+			rerender(
+				<RunSurface
+					view={
+						step.stopping
+							? { ...view, run_state: { Stopping: { in_flight: 1 } } }
+							: view
+					}
+				/>,
+			);
+			assertRows(step.rows);
+			if (step.stopping) {
+				expect(
+					stageRow("Triaging").querySelector(".stage-status"),
+				).toHaveTextContent(/^In progress$/);
+				for (const meter of screen.getAllByRole("meter"))
+					expect(meter).toHaveAttribute("aria-valuenow", "0");
+			} else if (step.stages === ownerEnd) {
+				ownerEndOutput = captureRows();
+			}
+		}
+		unmount();
+		render(<RunSurface view={viewWithStages(ownerEnd)} />);
+		assertRows(steps[2].rows);
+		expect(captureRows()).toEqual(ownerEndOutput);
 	});
 
 	it("floors remaining work at zero when completions and failures exceed the total", () => {

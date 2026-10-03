@@ -34,6 +34,14 @@ export type StageRowPresentation = {
 	} | null;
 };
 
+/** Return the admitted and completed work this run actually performs at a stage. */
+export function newWork(stage: StageProgress): { total: number; done: number } {
+	return {
+		total: Math.max(0, stage.total - stage.reused),
+		done: Math.max(0, stage.completed - stage.reused),
+	};
+}
+
 /** Estimate each active stage independently, without mixing heterogeneous work units. */
 export function estimateActiveStageEtas(
 	stages: StageProgress[],
@@ -50,11 +58,8 @@ export function estimateActiveStageEtas(
 		)
 			return [];
 		const startedAt = Date.parse(stage.started_at_utc);
-		const total = Math.max(stage.total, 0);
-		const settled = Math.min(
-			Math.max(stage.completed, 0) + Math.max(stage.failed, 0),
-			total,
-		);
+		const { total, done } = newWork(stage);
+		const settled = Math.min(done + Math.max(stage.failed, 0), total);
 		const elapsedMs = nowMs - startedAt;
 		if (
 			!Number.isFinite(startedAt) ||
@@ -83,17 +88,19 @@ export function presentStageRows(
 		0,
 		...stages
 			.filter((stage) => ARTICLE_SCALE_STAGES.includes(stage.stage))
-			.map((stage) => stage.total),
+			.map((stage) => newWork(stage).total),
 	);
 	return stages.map((stage) => {
 		const loading = stage.stage === "LoadingArticles";
-		const remaining = Math.max(0, stage.total - stage.completed - stage.failed);
-		const count =
-			stopping || loading
-				? `${stage.completed} done`
-				: stage.total === 0
+		const { total: newTotal, done: newDone } = newWork(stage);
+		const remaining = Math.max(0, newTotal - newDone - stage.failed);
+		const count = loading
+			? `${stage.completed} done`
+			: stopping
+				? `${newDone} done`
+				: newTotal === 0
 					? "0 to do"
-					: `${remaining} of ${stage.total} to do`;
+					: `${remaining} of ${newTotal} to do`;
 		const countText =
 			stage.failed > 0 ? `${count} · ${stage.failed} failed` : count;
 		const scale =
