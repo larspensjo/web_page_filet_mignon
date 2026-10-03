@@ -47,6 +47,10 @@ pub enum StageStatus {
 pub struct StageRecord {
     pub status: StageStatus,
     pub completed: u32,
+    /// Settled without a model request this run; always <= completed; zero for
+    /// stages without model work. An item judged new work at admission stays new
+    /// work even if it later settles from a result produced earlier in this run.
+    pub reused: u32,
     pub failed: u32,
     pub total: u32,
     pub total_is_final: bool,
@@ -59,6 +63,7 @@ impl Default for StageRecord {
         Self {
             status: StageStatus::Pending,
             completed: 0,
+            reused: 0,
             failed: 0,
             total: 0,
             total_is_final: false,
@@ -104,6 +109,14 @@ pub struct RunProgress {
     pub(crate) download_started_job_ids: BTreeSet<crate::JobId>,
     pub(crate) download_finished_job_ids: BTreeSet<crate::JobId>,
     pub(crate) terminal: bool,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct StageCounts {
+    pub completed: u32,
+    pub failed: u32,
+    pub total: u32,
+    pub reused: u32,
 }
 
 impl RunProgress {
@@ -153,16 +166,15 @@ impl RunProgress {
     pub(crate) fn counts(
         &mut self,
         stage: PipelineStage,
-        completed: u32,
-        failed: u32,
-        total: u32,
+        counts: StageCounts,
         now: Option<DateTime<Utc>>,
     ) {
-        self.activate(stage, total, now);
+        self.activate(stage, counts.total, now);
         let record = self.stage_mut(stage);
-        record.completed = record.completed.max(completed);
-        record.failed = record.failed.max(failed);
-        record.total = record.total.max(total);
+        record.completed = record.completed.max(counts.completed);
+        record.failed = record.failed.max(counts.failed);
+        record.total = record.total.max(counts.total);
+        record.reused = record.reused.max(counts.reused);
     }
     pub(crate) fn finish(&mut self, stage: PipelineStage, now: Option<DateTime<Utc>>) {
         let record = self.stage_mut(stage);
@@ -250,6 +262,10 @@ pub struct StageProgress {
     pub stage: PipelineStage,
     pub status: StageStatus,
     pub completed: u32,
+    /// Settled without a model request this run; always <= completed; zero for
+    /// stages without model work. An item judged new work at admission stays new
+    /// work even if it later settles from a result produced earlier in this run.
+    pub reused: u32,
     pub failed: u32,
     pub total: u32,
     pub total_is_final: bool,
@@ -268,6 +284,7 @@ impl RunProgress {
                         stage,
                         status: r.status,
                         completed: r.completed,
+                        reused: r.reused,
                         failed: r.failed,
                         total: r.total,
                         total_is_final: r.total_is_final,

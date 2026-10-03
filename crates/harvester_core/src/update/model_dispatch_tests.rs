@@ -2,7 +2,7 @@ use super::*;
 use crate::briefing::{ArticleSummaryResult, BriefingSession, LoadedArticle};
 use crate::signal_candidate::SignalCandidateState;
 use crate::triage::{ArticleTriageResult, TriageSession};
-use crate::update::signal_candidate::{input_key, SignalCandidateInputSnapshot};
+use crate::update::signal_candidate::{input_key, try_enqueue, SignalCandidateInputSnapshot};
 use crate::{LlmResultKind, Msg, SummaryCacheKey};
 use harvester_engine::llm::{QuotaOrigin, SignalCandidateResult};
 

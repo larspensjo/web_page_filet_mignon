@@ -1,4 +1,4 @@
-use crate::run_progress::ACTIVITY_REASON_MAX_CHARS;
+use crate::run_progress::{StageCounts, ACTIVITY_REASON_MAX_CHARS};
 use crate::state::PollPipelineJobSnapshot;
 use crate::{
     ActivityOutcome, AppState, Effect, JobResultKind, LlmRequestState, LlmResultKind, Msg,
@@ -224,11 +224,18 @@ fn settle_run(state: &mut AppState) {
     let now = state.last_observed_utc();
     let completed_at_utc = now.unwrap_or_default();
     let completed_count = state.signal_candidate().completed_count() as usize;
+    let reused_count = state
+        .pipeline_admission
+        .as_ref()
+        .map_or(0, |admission| admission.reused[2].len());
+    log_scoring_reuse(state);
     let Some(run) = state.run_progress_mut() else {
         return;
     };
     let run_id = run.run_id;
-    let new_result_count = completed_count.saturating_sub(run.signal_completed_at_reset);
+    let new_result_count = completed_count
+        .saturating_sub(run.signal_completed_at_reset)
+        .saturating_sub(reused_count);
     run.settle(now);
     if let Some(admission) = state.pipeline_admission.as_mut() {
         admission.armed = false;
@@ -245,6 +252,7 @@ fn settle_run(state: &mut AppState) {
 }
 
 fn settle_stopped_run(state: &mut AppState) {
+    log_scoring_reuse(state);
     let now = state.last_observed_utc();
     let run_id = state.run_progress().map(|run| run.run_id);
     if let Some(run) = state.run_progress_mut() {
@@ -264,6 +272,19 @@ fn settle_stopped_run(state: &mut AppState) {
         engine_logging::engine_info!("[run-terminal] run_id={run_id} outcome=stopped");
     }
     state.mark_dirty();
+}
+
+fn log_scoring_reuse(state: &AppState) {
+    let Some(admission) = state.pipeline_admission.as_ref() else {
+        return;
+    };
+    let reused = admission.reused[2].len();
+    super::waves::log_reused(
+        state,
+        PipelineStage::ScoringSignals,
+        admission.admitted[2].len(),
+        reused,
+    );
 }
 
 pub(super) fn handle_stop_for_pipeline(state: &mut AppState) {
@@ -422,7 +443,15 @@ pub(super) fn record_progress_after(state: &mut AppState, before: ProgressBefore
         ProgressEvent::Loading => {}
         ProgressEvent::LoadingFailed => {
             let run = state.run_progress_mut().expect("active run");
-            run.counts(PipelineStage::LoadingArticles, 0, 1, 1, now);
+            run.counts(
+                PipelineStage::LoadingArticles,
+                StageCounts {
+                    failed: 1,
+                    total: 1,
+                    ..StageCounts::default()
+                },
+                now,
+            );
             run.finish(PipelineStage::LoadingArticles, now);
         }
         ProgressEvent::LlmCompleted { stage, activity } => {

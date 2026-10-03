@@ -55,6 +55,10 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
         ("idle_last_24_hours", last_24_hours),
         ("idle_with_selection", with_selection),
         ("run_in_progress_with_failures", run_in_progress),
+        (
+            "run_in_progress_with_reused_results",
+            run_in_progress_with_reused_results(),
+        ),
         ("run_finished_with_notice", run_finished),
         ("ai_unavailable", ai_unavailable),
         ("overlapping_active_stages", overlapping_stages),
@@ -456,6 +460,116 @@ fn completed_run_state() -> AppState {
     state = reduce(state, Msg::JobSelected { job_id });
     assert!(state.view().run_completion_notice.is_some());
     assert!(!state.view().signal_candidate_rows.is_empty());
+    state
+}
+
+fn run_in_progress_with_reused_results() -> AppState {
+    let donor = completed_run_state();
+    let cached = harvester_core::LoadedArticle {
+        url: "https://fixture.invalid/article".into(),
+        source_title: Some("Fixture article".into()),
+        prepared_text: "fixture article text ".repeat(200),
+        content_hash: "fixture-content-hash".into(),
+        fetched_utc: Some("2023-11-14T22:13:20Z".into()),
+    };
+    let key = harvester_core::SummaryCacheKey::try_new(
+        &cached.content_hash,
+        PromptId::ArticleSummary,
+        Some(1),
+        Some("fixture-summary-model"),
+        &[],
+    )
+    .expect("fixture summary key");
+    let mut summaries = harvester_core::SummaryCache::new();
+    summaries.insert(
+        key,
+        harvester_core::SummaryCacheEntry {
+            result: harvester_core::ArticleSummaryResult {
+                title: "Fixture summary".into(),
+                summary:
+                    "A fixture **summary** with a [Fixture link](https://fixture.invalid/link)."
+                        .into(),
+                key_points: vec!["Fixture point".into()],
+                input_tokens: 10,
+                output_tokens: 5,
+                entities: Default::default(),
+            },
+            created_at_utc: time(0).to_rfc3339(),
+        },
+    );
+    let mut state = add_llm_metadata(AppState::new());
+    state.set_llm_max_in_flight(1);
+    let state = reduce(
+        state,
+        Msg::TriageCacheHydrated {
+            cache: donor.triage_cache().clone(),
+        },
+    );
+    let state = reduce(state, Msg::SummaryCacheHydrated { cache: summaries });
+    let state = reduce(
+        state,
+        Msg::SignalCandidateCacheLoaded {
+            cache: donor.signal_candidate_cache().clone(),
+        },
+    );
+    let mut articles: Vec<_> = (0..4)
+        .map(|index| {
+            let mut article = cached.clone();
+            article.url = format!("https://fixture.invalid/new-{index}");
+            article.content_hash = format!("fixture-new-hash-{index}");
+            article
+        })
+        .collect();
+    articles.push(cached);
+    let state = reduce(
+        state,
+        Msg::RestoreCompletedJobs(articles.iter().map(|a| completed_job(&a.url, 0)).collect()),
+    );
+    let (state, effects) = harvester_core::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Resume,
+        },
+    );
+    let (state, effects) =
+        harvester_core::fixture_support::complete_processing_configuration(state, effects, 100_000);
+    let request_id = effects
+        .iter()
+        .find_map(|e| match e {
+            Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+            _ => None,
+        })
+        .expect("fixture preparation request");
+    let (state, effects) = harvester_core::update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
+        },
+    );
+    assert_eq!(
+        effects
+            .iter()
+            .filter(|e| matches!(e, Effect::RequestLlmCompletion { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(state.pipeline_activity().triage_pending_or_in_flight, 4);
+    assert_eq!(state.batch_observation().triage_in_flight, 1);
+    assert_eq!(state.batch_observation().triage_pending, 3);
+    for stage in state.view().run_progress.stages {
+        if matches!(
+            stage.stage,
+            harvester_core::PipelineStage::Triaging
+                | harvester_core::PipelineStage::Summarizing
+                | harvester_core::PipelineStage::ScoringSignals
+        ) {
+            assert_eq!(stage.reused, 1);
+            assert!(stage.reused <= stage.completed);
+        } else {
+            assert_eq!(stage.reused, 0);
+        }
+    }
     state
 }
 

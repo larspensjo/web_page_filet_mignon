@@ -1,6 +1,7 @@
 //! Admission, downstream release and progress share the same reducer-owned ledger.
 use crate::briefing::ArticleSummaryState as S;
 use crate::pipeline_waves::Identity;
+use crate::run_progress::StageCounts;
 use crate::triage::ArticleTriageState as T;
 use crate::{AppState, LoadedArticle, PipelineStage as Stage, SignalCandidateState as C};
 use std::collections::HashSet;
@@ -58,7 +59,38 @@ pub(super) fn admit_triage(state: &mut AppState, articles: Vec<LoadedArticle>) {
                 })
         })
         .collect();
-    release(state, Stage::Triaging, members);
+    release(state, Stage::Triaging, members.clone());
+    let mut reused = 0;
+    for member in &members {
+        let index = state
+            .triage()
+            .index_for_identity(&member.0, &member.1)
+            .expect("admitted triage");
+        let current = matches!(
+            state.triage().articles()[index].triage_state,
+            T::Completed { .. }
+        ) && state
+            .current_triage_cache_key(&member.1)
+            .is_some_and(|key| {
+                state.triage().articles()[index].cache_key_snapshot.as_ref() == Some(&key)
+            });
+        let pending = matches!(state.triage().articles()[index].triage_state, T::Pending);
+        if current {
+            triage_changed(state, &member.0, &member.1);
+            super::signal_candidate::try_enqueue(state, &member.0);
+        }
+        if current
+            || (pending
+                && matches!(
+                    super::reuse::reuse_triage(state, index),
+                    super::reuse::TriageReuseOutcome::Hit
+                ))
+        {
+            record_reused(state, Stage::Triaging, member);
+            reused += 1;
+        }
+    }
+    log_reused(state, Stage::Triaging, members.len(), reused);
     admit_summaries(state, ready);
     state.mark_dirty();
 }
@@ -118,14 +150,31 @@ fn admit_summary_wave(state: &mut AppState, articles: Vec<LoadedArticle>) {
         state.briefing_mut().admit(article, key);
         members.push(member);
     }
-    let urls: Vec<_> = members.iter().map(|m| m.0.clone()).collect();
     if !members.is_empty() {
         state.mark_briefing_metadata_ready();
-        release(state, Stage::Summarizing, members);
+        release(state, Stage::Summarizing, members.clone());
     }
-    for url in urls {
-        super::signal_candidate::try_enqueue(state, &url);
+    let mut reused = 0;
+    for member in &members {
+        let index = state
+            .briefing()
+            .index_for_identity(&member.0, &member.1)
+            .expect("admitted summary");
+        let current = matches!(
+            state.briefing().articles()[index].summary_state,
+            S::Completed { .. }
+        ) && state
+            .current_summary_cache_key(&member.1)
+            .ok()
+            .is_some_and(|key| state.briefing().article_cache_key(index) == Some(&key));
+        let pending = matches!(state.briefing().articles()[index].summary_state, S::Pending);
+        if current || (pending && super::reuse::reuse_summary(state, index)) {
+            record_reused(state, Stage::Summarizing, member);
+            reused += 1;
+        }
+        super::signal_candidate::try_enqueue(state, &member.0);
     }
+    log_reused(state, Stage::Summarizing, members.len(), reused);
 }
 
 pub(super) fn release_ready(state: &mut AppState) {
@@ -262,50 +311,69 @@ pub(super) fn record_progress(state: &mut AppState) {
     let Some(run) = state.pipeline_admission.as_ref() else {
         return;
     };
-    let mut counts = [(0, 0, 0); 3];
-    for (index, members) in run.admitted.iter().enumerate() {
-        counts[index].2 = members.len() as u32;
-    }
-    if run.admitted[0].len() == state.triage().total() {
-        counts[0].0 = state.triage().completed_count() as u32;
-        counts[0].1 = state.triage().failed_count() as u32;
-    } else {
-        let triage_admitted: HashSet<_> = run.admitted[0]
+    let observed: [Vec<_>; 3] = std::array::from_fn(|stage| {
+        run.admitted[stage]
             .iter()
-            .map(|(url, hash)| (url.as_str(), hash.as_str()))
-            .collect();
-        for a in state.triage().articles() {
-            if triage_admitted.contains(&(a.url.as_str(), a.content_hash.as_str())) {
-                counts[0].0 += u32::from(matches!(a.triage_state, T::Completed { .. }));
-                counts[0].1 += u32::from(matches!(a.triage_state, T::Failed { .. }));
+            .filter_map(|member| {
+                if run.completed[stage].contains(member) || run.failed[stage].contains(member) {
+                    return None;
+                }
+                let settlement =
+                    match stage {
+                        0 => state
+                            .triage()
+                            .index_for_identity(&member.0, &member.1)
+                            .map(|i| match state.triage().articles()[i].triage_state {
+                                T::Completed { .. } => (true, false),
+                                T::Failed { .. } => (false, true),
+                                _ => (false, false),
+                            }),
+                        1 => state
+                            .briefing()
+                            .index_for_identity(&member.0, &member.1)
+                            .map(|i| match state.briefing().articles()[i].summary_state {
+                                S::Completed { .. } => (true, false),
+                                S::Failed { .. } => (false, true),
+                                _ => (false, false),
+                            }),
+                        _ => state
+                            .signal_candidate()
+                            .state_for(&member.0)
+                            .map(|s| match s {
+                                C::Completed { .. } => (true, false),
+                                C::Failed { .. } => (false, true),
+                                _ => (false, false),
+                            }),
+                    }?;
+                (settlement.0 || settlement.1).then(|| (member.clone(), settlement))
+            })
+            .collect()
+    });
+    let run = state.pipeline_admission.as_mut().expect("run admission");
+    let counts: [_; 3] = std::array::from_fn(|stage| {
+        for (member, (completed, failed)) in &observed[stage] {
+            if *completed {
+                run.completed[stage].insert(member.clone());
+            }
+            if *failed {
+                run.failed[stage].insert(member.clone());
             }
         }
-    }
-    if run.admitted[1].len() == state.briefing().articles().len() {
-        counts[1].0 = state.briefing().completed_summary_count() as u32;
-        counts[1].1 = state.briefing().failed_summary_count() as u32;
-    } else {
-        let summary_admitted: HashSet<_> = run.admitted[1]
-            .iter()
-            .map(|(url, hash)| (url.as_str(), hash.as_str()))
-            .collect();
-        for a in state.briefing().articles() {
-            if summary_admitted.contains(&(a.url.as_str(), a.content_hash.as_str())) {
-                counts[1].0 += u32::from(matches!(a.summary_state, S::Completed { .. }));
-                counts[1].1 += u32::from(matches!(a.summary_state, S::Failed { .. }));
-            }
+        // Reuse checks each insertion itself. Recheck the full relationships
+        // when observed settlements change them, rather than on idle passes.
+        if !observed[stage].is_empty() {
+            debug_assert!(run.reused[stage].is_subset(&run.completed[stage]));
+            debug_assert!(run.completed[stage].is_disjoint(&run.failed[stage]));
+            debug_assert!(run.completed[stage].is_subset(&run.admitted[stage]));
+            debug_assert!(run.failed[stage].is_subset(&run.admitted[stage]));
         }
-    }
-    for (url, _) in &run.admitted[2] {
-        counts[2].0 += u32::from(matches!(
-            state.signal_candidate().state_for(url),
-            Some(C::Completed { .. })
-        ));
-        counts[2].1 += u32::from(matches!(
-            state.signal_candidate().state_for(url),
-            Some(C::Failed { .. })
-        ));
-    }
+        StageCounts {
+            completed: run.completed[stage].len() as u32,
+            failed: run.failed[stage].len() as u32,
+            total: run.admitted[stage].len() as u32,
+            reused: run.reused[stage].len() as u32,
+        }
+    });
     let intake_final = !run.intake_open;
     let triage_final =
         intake_final && state.triage().pending_count() + state.triage().in_progress_count() == 0;
@@ -316,23 +384,53 @@ pub(super) fn record_progress(state: &mut AppState) {
     let Some(progress) = state.run_progress_mut() else {
         return;
     };
-    for (stage, (done, failed, total), total_is_final) in [
+    for (stage, counts, total_is_final) in [
         (Stage::Triaging, counts[0], intake_final),
         (Stage::Summarizing, counts[1], triage_final),
         (Stage::ScoringSignals, counts[2], summary_final),
     ]
     .into_iter()
     {
-        if total > 0 {
-            progress.counts(stage, done, failed, total, now);
+        if counts.total > 0 {
+            progress.counts(stage, counts, now);
         } else if !total_is_final && !stopping {
             progress.activate(stage, 0, now);
         }
         progress.stage_mut(stage).total_is_final = total_is_final || stopping;
     }
-    progress.counts(Stage::LoadingArticles, counts[0].2, 0, counts[0].2, now);
+    progress.counts(
+        Stage::LoadingArticles,
+        StageCounts {
+            completed: counts[0].total,
+            total: counts[0].total,
+            ..StageCounts::default()
+        },
+        now,
+    );
     if intake_final {
         progress.finish(Stage::LoadingArticles, now);
     }
     progress.stage_mut(Stage::LoadingArticles).total_is_final = intake_final || stopping;
+}
+
+pub(super) fn record_reused(state: &mut AppState, stage: Stage, member: &Identity) {
+    let run = state.pipeline_admission.as_mut().expect("run admission");
+    let index = stage.index() - 3;
+    debug_assert!(run.admitted[index].contains(member));
+    debug_assert!(!run.failed[index].contains(member));
+    run.reused[index].insert(member.clone());
+    run.completed[index].insert(member.clone());
+    debug_assert!(run.completed[index].contains(member));
+}
+
+pub(super) fn log_reused(state: &AppState, stage: Stage, admitted: usize, reused: usize) {
+    if reused > 0 {
+        engine_logging::engine_info!(
+            "[pipeline-reuse] run_id={} stage={:?} admitted={} reused={}",
+            run_id(state),
+            stage,
+            admitted,
+            reused
+        );
+    }
 }

@@ -8,6 +8,7 @@ import overlappingActiveStages from "@fixtures/snapshots/overlapping_active_stag
 import reprocessNotice from "@fixtures/snapshots/reprocess_notice.json";
 import runFinishedWithNotice from "@fixtures/snapshots/run_finished_with_notice.json";
 import runInProgressWithFailures from "@fixtures/snapshots/run_in_progress_with_failures.json";
+import runInProgressWithReusedResults from "@fixtures/snapshots/run_in_progress_with_reused_results.json";
 import stoppedWithUnfinishedWork from "@fixtures/snapshots/stopped_with_unfinished_work_export_enabled.json";
 import stoppingWithInFlightWork from "@fixtures/snapshots/stopping_with_in_flight_work.json";
 import unfinishedWorkAvailable from "@fixtures/snapshots/unfinished_work_available.json";
@@ -42,6 +43,7 @@ const reviewFixtures = [
 	["idle last 24 hours", last24Hours],
 	["idle with corpus", withCorpus],
 	["run in progress with failures", runInProgressWithFailures],
+	["run in progress with reused results", runInProgressWithReusedResults],
 	["run finished with notice", runFinishedWithNotice],
 	["AI unavailable", aiUnavailable],
 	["idle with selection", withSelection],
@@ -123,7 +125,7 @@ describe("job list", () => {
 		}
 	});
 
-	it("pins the reduced IPC 13 snapshot in every bridge fixture", () => {
+	it("pins the reduced IPC 14 snapshot in every bridge fixture", () => {
 		const fields = [
 			"job_count",
 			"desktop_job_list",
@@ -150,7 +152,7 @@ describe("job list", () => {
 			"right_pane",
 		].sort();
 		for (const [, fixture] of reviewFixtures) {
-			expect(fixture.schema_version).toBe(13);
+			expect(fixture.schema_version).toBe(14);
 			expect(Object.keys(fixture.view).sort()).toEqual(fields);
 			expect(Object.keys(fixture.view.right_pane)).toEqual([
 				"summary_markdown",

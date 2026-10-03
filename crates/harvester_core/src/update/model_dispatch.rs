@@ -1,12 +1,12 @@
 //! Shared article-model admission scheduler. Cache completions yield back to
 //! priority selection before the next request is issued.
-use super::signal_candidate::{render_extra_template_vars, render_input_content, try_enqueue};
+use super::reuse::TriageReuseOutcome;
+use super::signal_candidate::{render_extra_template_vars, render_input_content};
 use super::summary_cache_support::{
     context_hash_for_log, log_summary_cache_warmup_if_needed, short_hash,
     summary_cache_key_error_reason,
 };
 use crate::briefing::BriefingPhase;
-use crate::state::TriageCacheLookupResult;
 use crate::{AppState, Effect};
 use engine_logging::{engine_info, engine_warn};
 use harvester_engine::llm::prompt::PromptId;
@@ -73,23 +73,7 @@ fn dispatch_scoring(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
             .fail(&url, "missing scoring input snapshot");
         return true;
     };
-    let key = super::signal_candidate::input_key(&url, &snapshot);
-    if let Some(mut cached) = key
-        .as_ref()
-        .and_then(|key| state.try_reuse_signal_candidate(key))
-    {
-        engine_info!(
-            "[signal-cache] url={} decision=hit signal_score={} signal_key={} key_digest={}",
-            url,
-            cached.signal_score,
-            cached.signal_key,
-            key.as_ref().expect("cache hit requires key").digest()
-        );
-        cached.input_tokens = 0;
-        cached.output_tokens = 0;
-        state.signal_candidate_mut().complete(&url, cached);
-        state.clear_signal_candidate_input_snapshot(&url);
-        state.mark_dirty();
+    if super::reuse::reuse_score(state, &url) {
         return true;
     }
     if !has_slot(state) {
@@ -132,48 +116,16 @@ fn dispatch_triage(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
             .set_article_cache_key(next_idx, current_key);
     }
 
-    match state.try_reuse_triage(&content_hash) {
-        TriageCacheLookupResult::Hit {
-            result: cached,
-            stored_model_id,
-        } => {
-            let url = state.triage().articles()[next_idx].url.clone();
-
-            let triage_priority = cached.priority;
-            let result = cached.clone();
-            let stored_model_id = stored_model_id.to_string();
-            let signal_state_present_before_enqueue =
-                state.signal_candidate().state_for(&url).is_some();
-            state.record_triage_cache_hit();
-            engine_info!("[triage-cache] hit content_hash={}", content_hash_short);
-            state
-                .triage_mut()
-                .complete_article_with_model(next_idx, result, Some(stored_model_id));
-            engine_info!(
-                    "[signal-dispatch] triage cache-hit url={} triage_priority={} signal_state_present_before_enqueue={}",
-                    url,
-                    triage_priority,
-                    signal_state_present_before_enqueue
-                );
-            super::waves::triage_changed(state, &url, &content_hash);
-            let enqueued = try_enqueue(state, &url);
-            engine_info!(
-                "[signal-dispatch] triage cache-hit enqueue url={} enqueued={}",
-                url,
-                enqueued
-            );
-
-            state.mark_dirty();
-            return true;
-        }
-        TriageCacheLookupResult::Miss => {
+    match super::reuse::reuse_triage(state, next_idx) {
+        TriageReuseOutcome::Hit => return true,
+        TriageReuseOutcome::Miss => {
             if !has_slot(state) {
                 return false;
             }
             state.record_triage_cache_miss();
             engine_info!("[triage-cache] miss content_hash={}", content_hash_short);
         }
-        TriageCacheLookupResult::KeyUnavailable => {
+        TriageReuseOutcome::KeyUnavailable => {
             if !has_slot(state) {
                 return false;
             }
@@ -233,6 +185,9 @@ fn dispatch_summary(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
     else {
         return false;
     };
+    if super::reuse::reuse_summary(state, next_idx) {
+        return true;
+    }
     let article = &state.briefing().articles()[next_idx];
     let prepared_text = article.prepared_text.clone();
     let content_hash = article.content_hash.clone();
@@ -254,26 +209,6 @@ fn dispatch_summary(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
                     .briefing_mut()
                     .set_article_cache_key(next_idx, Some(key.clone()));
             }
-            if let Some(cached_result) = state.try_reuse_summary(&key) {
-                let result = cached_result.clone();
-                state.record_summary_cache_hit();
-                engine_info!(
-                        "[summary-cache] article={} decision=hit reason=cache-hit prompt_version={} model_id={} context_hash={} content_hash_short={}",
-                        next_idx,
-                        version_display,
-                        model_display,
-                        &context_hash_value,
-                        content_hash_short
-                    );
-                state.briefing_mut().complete_article(next_idx, result);
-
-                state.mark_dirty();
-                let article_url = state.briefing().articles()[next_idx].url.clone();
-                let _ = crate::update::signal_candidate::try_enqueue(state, &article_url);
-                // Cache hit: slot not consumed, continue filling.
-                return true;
-            }
-
             if !has_slot(state) {
                 return false;
             }

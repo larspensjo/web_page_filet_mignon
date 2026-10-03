@@ -203,9 +203,9 @@ pub(super) fn start_triage_from_pretriage(state: &mut AppState) -> Vec<Effect> {
         "[triage] consumed pre-triage for triage start count={}",
         included.len(),
     );
-    super::waves::admit_triage(state, included);
     state.start_triage_cache_run();
     state.mark_triage_metadata_ready();
+    super::waves::admit_triage(state, included);
     Vec::new()
 }
 

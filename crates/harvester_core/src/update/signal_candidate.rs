@@ -180,8 +180,15 @@ pub fn try_enqueue(state: &mut AppState, url: &str) -> bool {
     {
         return false;
     }
-    assert!(super::waves::scoring_admitted(state, member, digest));
+    assert!(super::waves::scoring_admitted(
+        state,
+        member.clone(),
+        digest
+    ));
     state.set_signal_candidate_input_snapshot(url, snapshot);
+    if super::reuse::reuse_score(state, url) {
+        super::waves::record_reused(state, crate::PipelineStage::ScoringSignals, &member);
+    }
     state.mark_dirty();
     true
 }

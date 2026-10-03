@@ -1,6 +1,6 @@
 {
   "generation": 1,
-  "schema_version": 13,
+  "schema_version": 14,
   "view": {
     "ai_unavailable_message": "AI features unavailable: OPENAI_API_KEY is not set",
     "archive_enabled": true,

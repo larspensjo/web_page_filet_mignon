@@ -89,6 +89,9 @@ pub(crate) struct PipelineAdmission {
     pub fresh_load: bool,
     pub initial_admitted: bool,
     pub admitted: [HashSet<Identity>; 3],
+    pub reused: [HashSet<Identity>; 3],
+    pub completed: [HashSet<Identity>; 3],
+    pub failed: [HashSet<Identity>; 3],
     pub previous_window: HashSet<Identity>,
     pub reprocess_notice: Option<(usize, u64)>,
 }
@@ -107,6 +110,9 @@ impl PipelineAdmission {
             fresh_load: true,
             initial_admitted: false,
             admitted: Default::default(),
+            reused: Default::default(),
+            completed: Default::default(),
+            failed: Default::default(),
             previous_window,
             reprocess_notice: None,
         }

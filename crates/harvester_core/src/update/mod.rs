@@ -10,6 +10,7 @@ mod model_dispatch;
 mod pipeline_run;
 mod polling;
 pub(crate) mod processing;
+mod reuse;
 pub(crate) mod signal_candidate;
 mod summary_cache_support;
 mod triage;

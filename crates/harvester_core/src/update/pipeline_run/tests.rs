@@ -431,7 +431,7 @@ fn scoring_request(state: &AppState) -> Option<u64> {
     })
 }
 
-type ProgressSnapshot = [(u8, u32, u32, u32); 6];
+type ProgressSnapshot = [(u8, u32, u32, u32, u32); 6];
 
 fn progress_snapshot(state: &AppState) -> ProgressSnapshot {
     let progress = state.run_progress().expect("run progress");
@@ -442,7 +442,13 @@ fn progress_snapshot(state: &AppState) -> ProgressSnapshot {
             StageStatus::Active => 1,
             StageStatus::Done | StageStatus::Failed => 2,
         };
-        (rank, stage.completed, stage.failed, stage.total)
+        (
+            rank,
+            stage.completed,
+            stage.failed,
+            stage.total,
+            stage.reused,
+        )
     })
 }
 
@@ -465,6 +471,17 @@ fn assert_progress_does_not_regress(previous: &mut ProgressSnapshot, state: &App
             next.3 >= prior.3,
             "total count regressed: {prior:?} -> {next:?}"
         );
+    }
+    for (index, (prior, next)) in previous.iter().zip(current.iter()).enumerate() {
+        assert!(next.4 <= next.1, "reused exceeds completed: {next:?}");
+        assert!(next.4 >= prior.4, "reuse regressed: {prior:?} -> {next:?}");
+        assert!(
+            next.3 - next.4 >= prior.3 - prior.4,
+            "new work regressed: {prior:?} -> {next:?}"
+        );
+        if index < 3 {
+            assert_eq!(next.4, 0);
+        }
     }
     *previous = current;
 }
@@ -1321,6 +1338,7 @@ fn rerun_counts_current_triage_and_summary_hits_without_readmitting_scoring() {
         .all(|e| !matches!(e, Effect::RequestLlmCompletion { .. })));
     for stage in [PipelineStage::Triaging, PipelineStage::Summarizing] {
         let s = &state.run_progress().unwrap().stages[stage.index()];
+        assert_eq!(s.reused, 1);
         assert_eq!(
             (s.status, s.completed, s.total, s.total_is_final),
             (StageStatus::Done, 1, 1, true)
@@ -1336,6 +1354,7 @@ fn rerun_counts_current_triage_and_summary_hits_without_readmitting_scoring() {
         ),
         (StageStatus::Done, 0, 0, true)
     );
+    assert_eq!(scoring.reused, 0);
     assert!(state.pipeline_admission.as_ref().unwrap().admitted[2].is_empty());
     assert_eq!(
         state
@@ -1491,3 +1510,6 @@ fn activity_feed_is_bounded_and_reason_truncation_is_char_safe() {
 
 #[path = "wave_tests.rs"]
 mod wave_tests;
+
+#[path = "reused_work_tests.rs"]
+mod reused_work_tests;

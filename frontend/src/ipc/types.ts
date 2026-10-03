@@ -130,6 +130,7 @@ export type StageProgress = {
 		| "ScoringSignals";
 	status: "Pending" | "Active" | "Done" | "Failed";
 	completed: number;
+	reused: number;
 	failed: number;
 	total: number;
 	total_is_final: boolean;

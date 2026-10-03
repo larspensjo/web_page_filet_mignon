@@ -184,6 +184,7 @@ fn synthetic_run_progress(generation: u64) -> RunProgressView {
                 StageStatus::Active
             },
             completed: (24 + index * 7) as u32,
+            reused: 0,
             failed: u32::from(index == 1),
             total: (30 + index * 8) as u32,
             started_at_utc: Some(probe_time(index as i64)),
