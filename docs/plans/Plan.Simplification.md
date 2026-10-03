@@ -1021,8 +1021,9 @@ Work:
    reducer-owned `RunProgress`: one line each for poll, download, triage, summary and score with
    done and total counts and "Waiting for articles" while intake is open. It redraws in place on
    a terminal and prints periodic plain lines otherwise. Open item (added 2026-10-03): decide
-   whether the block should also report what is left per stage, consistent with the desktop's
-   remaining-work bars (`docs/plans/Plan.RemainingWorkBars.md`).
+   whether the block should also report what is left per stage and whether its totals should
+   exclude work settled without a model request this run, consistent with the desktop. The
+   command line keeps its own counts until then (`docs/plans/Plan.RemainingWorkBars.md`).
 2. Remove `--verbose-progress` and `--ascii-progress`. Keep `--import-saved-web-dir`,
    `--llm-concurrency`, `--signal-candidate-threshold`, `--force-unlock`, `--sources`,
    `--output-dir`, `--contexts-dir`, `--prompts-dir`.
@@ -1133,14 +1134,23 @@ Work:
    - Run progress: same stage lines and wording; totals grow as articles arrive; "Waiting for
      articles" while intake is open; model stages show Done when the run ends.
    - Note (added 2026-10-03 with `docs/plans/Plan.RemainingWorkBars.md`): the stage bars show
-     remaining work per stage, not completed work: article stages share one scale (the largest
-     article-stage total), Scanning sources uses its own, the count reads "N of M to do", and
-     while Stopping every bar is empty and no stage shows an ETA. The rebuild keeps that meaning and its frontend tests
-     (see the decision-log entry on remaining-work bars). It should also put a real per-stage
-     loading backlog in the snapshot, so the Loading articles row, which has no bar today, can
-     regain a remaining-work bar.
+     the remaining work this run actually does, not completed work. For triage, summary and
+     scoring, work settled without a model request at admission is excluded using the snapshot's
+     per-stage reused count. Article stages share one scale (the largest new-work total),
+     Scanning sources uses its own, and the count reads "N of M to do". While Stopping every
+     bar is empty, counts show this run's new work done and no stage shows an ETA. The
+     completion notice counts this run's new scoring work: articles scored by a model request,
+     plus the rare case where a result appears only after admission and settles without its own
+     request (for example, identical content under two URLs); it remains counted as new work.
+     The rebuild keeps that meaning, the reused field and its frontend tests (see the
+     decision-log entry on remaining-work bars). Its per-article pipeline reports reused when
+     a step is already settled at admission. A step judged new work at admission stays new
+     work even if a result produced earlier in the same run later satisfies it without a
+     request. Completed, failed and reused accumulate per run. It should also put a real
+     per-stage loading backlog in the snapshot, so the Loading articles row, which has no bar
+     today, can regain a remaining-work bar.
    - Reprocess notice computed at run start with the same thresholds.
-3. IPC: the snapshot shape should not change; if it does, bump to 14 and regenerate fixtures.
+3. IPC: the snapshot shape should not change; if it does, bump to 15 and regenerate fixtures.
 
 Regression tests: ordering switches exactly when the run has no triage work left; Last 24h
 removes an article after the minute refresh that follows its 24-hour mark; progress wording and

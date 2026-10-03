@@ -2705,3 +2705,15 @@ Change: Consume discarded completed jobs through typed RON deserialization (meas
 Lessons Learned: A smaller file can deserialize much more slowly when an omitted field selects a generic parser path. Mutating accessors have invalidation costs even when the assigned value is unchanged. Completion reporting must never reacquire a held lock. A benchmark copy's processing window is part of its workload, not disposable setup state.
 Prevention: A 12,000-job/link-file save test locks the backup and preserves recovery sentinels; occupied-slot and halted-dispatch ticks retain aggregate revisions; blocked persistence/result writers cannot hold up completion delivery; ten quota rejections report both completion and usage; the pipeline settles with unfinished articles. Both replay hosts preserve historical scope and source bytes. Full real-corpus copies finish in 8.21 seconds (desktop) and 21.33 seconds (batch); deliberately reopening historical work terminates at the 1,000-call quota in 78.79 seconds.
 Refs: docs/plans/Plan.Simplification.md (phase 7 performance regression verification), crates/harvester_io/examples/runtime_save_bench.rs, crates/harvester_io/src/persistence.rs, crates/harvester_core/src/update/model_dispatch.rs, crates/harvester_engine/src/llm/handle.rs, crates/harvester_io/src/result_sink.rs, crates/harvester_batch/tests/replay_bench.rs
+
+## 2026-10-03 - Desktop run-stage bars show remaining work this run actually does
+Type: Implementation
+Context: The owner's desktop run had about 25 new articles in a 158-article window, but the model-stage bars still used the full window total. The synthetic replay had no reused results, so it did not expose that inflation.
+Change: Model-stage progress now excludes work settled without a model request at admission. The count carries the denominator because the bar compares queues across stages and no longer conveys the stage's own fraction; this reverses the reasoning in "Compact desktop run stage rows" from 2026-09-10. Reuse is resolved at admission so a reusable result does not wait behind queued work.
+Lessons Learned:
+- A remaining-work display must define what happens to withdrawn work, or Stop leaves the backlog large and the estimate counting forever.
+- A progress denominator must say whose work it counts. Work satisfied from saved results belongs to an earlier run.
+- Lazily applied cache hits queue behind slot-bound work, so instant reuse requires resolving it at admission.
+- Replay tests need representative data, including reuse, to catch this.
+- Counts recomputed from long-lived sessions lose members when sessions are pruned; per-run counters must accumulate identities themselves.
+Refs: frontend/src/components/RunSurface.tsx, frontend/src/components/RunSurface.test.tsx, crates/harvester_core/src/run_progress.rs, crates/harvester_core/src/update/waves.rs, crates/harvester_core/src/update/reuse.rs, crates/harvester_core/src/update/pipeline_run/reused_work_tests.rs

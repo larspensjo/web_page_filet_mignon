@@ -76,16 +76,36 @@ and the reducer's stored unfinished-work summary is known and nonzero. The view 
 provides both actions' enablement, the unfinished count and disabled reason, and any
 non-blocking reprocess notice; rendering does not classify work. Poll Sources is not
 part of the desktop intent vocabulary. Stop remains separate and destructive, and
-reads `Stopping…` while in-flight work drains. Open stage totals have no ETA; a stage
-with no admitted work while its total remains open reads “Waiting for articles.”
+reads `Stopping…` while in-flight work drains. Open stage totals have no ETA, and no
+stage shows an ETA while the run is Stopping; a stage with no admitted work while its
+total remains open reads “Waiting for articles.”
 
-`RunProgress` accumulates this run's admitted totals, including triage and summary
-cache hits. Scoring already completed under the same digest is not readmitted. Multiple
-stages can be Active together; model stages become Done only at Terminal. Totals grow
-with waves, and `total_is_final` becomes true once upstream can add no more members.
-Every stage is terminal when the run is Terminal. Wave releases and the initial
-reprocessing notice use `engine_logging` with run and count context; they do not consume
-the bounded 50-entry activity feed.
+Each visible stage bar shows admitted work still waiting at that stage: completed and
+failed items are settled, while in-flight items remain waiting. For triage, summary and
+scoring, the bar total excludes work settled without a model request at admission, using
+the snapshot's per-stage `reused` count. Downloading, triage, summary and scoring share
+the largest current new-work total as their scale; Scanning sources has its own scale.
+Count text reads `N of M to do` and never mentions reused results; Loading articles has
+a plain done count and no bar. While Stopping, every bar is empty, bar-row counts show
+this run's new work as `N done`, and statuses are plain labels; Loading articles keeps
+its full count. Bars and counts are derived from the current snapshot without
+render-held progress. ETAs use new-work settlements and elapsed time.
+
+`RunProgress` accumulates this run's admitted totals, including items later marked
+reused. Each model stage also carries a `reused` count for this run's items settled
+without a model request at admission; it is always less than or equal to completed. An item
+judged new work at admission stays new work if a result produced earlier in this run
+later lets it settle without its own request. Completed and failed accumulate per run,
+so they do not fall when a window reload prunes admitted articles. Scoring already
+completed under the same digest is not readmitted, so it is neither counted nor reused.
+The completion notice counts this run's new scoring work: articles scored by a model
+request, plus the rare case where a result appears only after admission (for example,
+identical content under two URLs) and settles without its own request; it remains
+counted as new work. Multiple stages can be Active together; model stages become Done
+only at Terminal. Totals grow with waves, and `total_is_final` becomes true once
+upstream can add no more members. Every stage is terminal when the run is Terminal.
+Wave releases and the initial reprocessing notice use `engine_logging` with run and
+count context; they do not consume the bounded 50-entry activity feed.
 
 ### Desktop intent runtime diagram
 ```mermaid
@@ -187,11 +207,14 @@ and signal-scoring work after reducer messages. All three stages share
 (default 3). Batch uses `--llm-concurrency` (default 10, maximum 10).
 
 The scheduler selects scoring, then summaries, then triage, in that fixed priority
-order. Within each stage it preserves admission order. Cache hits complete without
-occupying a request slot; priority is reconsidered after each completion, including
-cache hits that admit downstream scoring. A freed slot goes to the highest-priority
-pending stage. Hydration admits no scoring; eligible unscored articles are unfinished
-work until a run admits them through this scheduler.
+order. Within each stage it preserves admission order. At stage admission, a current
+saved result is applied immediately without a request slot, before queued new work is
+dispatched. Priority among model requests is unchanged and is reconsidered after each
+completion, including results that admit downstream scoring. A result that appears only
+after admission can still be applied in dispatch without a slot, but the item remains
+counted as new work. A freed slot goes to the highest-priority pending stage. Hydration
+admits no scoring; eligible unscored articles are unfinished work until a run admits
+them through this scheduler.
 
 Scoring admission requires triage under the current triage key and a summary under
 the current summary key, from the summary session or a current-key cache lookup.

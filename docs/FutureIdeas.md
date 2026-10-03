@@ -1401,6 +1401,24 @@ SuccessCriteria:
 - Cap restores gradually toward configured maximum after successful requests.
 - Adaptive cap changes are logged with before/after values.
 
+#### [FI-Performance-LlmProcessing-0003] Queue-aware model-stage priority
+Status: Candidate
+TopLevel: Performance
+SubLevel: LlmProcessing
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.RemainingWorkBars.md
+- SourceSection: Desktop run-stage bars
+- Captured: 2026-10-03
+Tags: [llm, scheduling, performance, queues]
+Summary: Consider changing the fixed scoring, summary, triage request order if a model stage's new-work bar stays long relative to the others over time.
+Rationale: A persistent queue imbalance could indicate that the fixed request order no longer matches observed stage demand.
+SuccessCriteria:
+- Run observations show a sustained new-work backlog on one model stage relative to the others.
+- Any future priority policy preserves the shared request budget and is supported by that queue evidence.
+
 ### Polling
 
 #### [FI-Performance-Polling-0008] Parallel source polling
