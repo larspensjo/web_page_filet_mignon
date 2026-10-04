@@ -43,6 +43,7 @@ mod app_state_tests {
                 url: "https://done.example".to_string(),
                 stage: Stage::Done,
                 outcome: Some(JobResultKind::Success),
+                fetched_utc: Some(utc("2026-09-28T12:00:00Z")),
                 ..Default::default()
             },
         );
@@ -372,6 +373,7 @@ mod app_state_tests {
         );
         briefing.complete_without_briefing();
         state.set_briefing(briefing);
+        crate::fixture_support::save_session_results(&mut state);
 
         state.select_job(1);
         let view = state.view();
@@ -488,6 +490,7 @@ mod app_state_tests {
             },
         );
         state.set_briefing(briefing);
+        crate::fixture_support::save_session_results(&mut state);
         state
     }
 
@@ -529,7 +532,6 @@ mod app_state_tests {
             },
         );
         state.set_triage(triage);
-
         let summary_key = SummaryCacheKey::try_new(
             "cached-hash",
             PromptId::ArticleSummary,
@@ -551,6 +553,7 @@ mod app_state_tests {
             "2026-05-25T12:01:00Z".to_string(),
         );
 
+        crate::fixture_support::save_session_results(&mut state);
         state
     }
 
@@ -846,6 +849,7 @@ mod app_state_tests {
         );
         triage.complete();
         state.set_triage(triage);
+        crate::fixture_support::save_session_results(&mut state);
 
         let view = state.view();
         assert_eq!(state.session, SessionState::Running);
@@ -919,6 +923,7 @@ mod app_state_tests {
             },
         );
         state.set_briefing(briefing);
+        crate::fixture_support::save_session_results(&mut state);
 
         let mut triage = crate::triage::TriageSession::new_loading(None);
         triage.set_articles(vec![LoadedArticle {
@@ -942,6 +947,7 @@ mod app_state_tests {
             },
         );
         state.set_triage(triage);
+        crate::fixture_support::save_session_results(&mut state);
 
         let summary = state.summary_result_for_url(url).unwrap();
         let content = crate::preview::format_summary_for_preview(summary);
@@ -1047,6 +1053,7 @@ mod app_state_tests {
             );
         }
         state.set_briefing(briefing);
+        crate::fixture_support::save_session_results(state);
     }
 
     fn set_fetched_utc(
@@ -1056,6 +1063,7 @@ mod app_state_tests {
         for (job_id, timestamp) in fetched {
             state.jobs.get_mut(job_id).expect("job exists").fetched_utc = *timestamp;
         }
+        state.rebuild_saved_results();
     }
 
     fn set_triage_annotations(state: &mut AppState, annotations: &[(JobId, u8)]) {
@@ -1091,6 +1099,7 @@ mod app_state_tests {
         }
         triage.complete();
         state.set_triage(triage);
+        crate::fixture_support::save_session_results(state);
     }
 
     #[test]
@@ -1189,6 +1198,7 @@ mod app_state_tests {
             },
         );
         state.set_triage(triage);
+        crate::fixture_support::save_session_results(&mut state);
 
         let view = state.view();
 
@@ -1944,6 +1954,7 @@ mod app_state_tests {
             },
         );
         state.job_list_mode = JobListMode::Results;
+        crate::fixture_support::save_session_results(&mut state);
         state.select_job(1);
         assert_eq!(
             state
@@ -2006,7 +2017,7 @@ mod app_state_tests {
                 prepared_text: std::iter::repeat_n("substantial", 220)
                     .collect::<Vec<_>>()
                     .join(" "),
-                content_hash: format!("rich-hash-{url}"),
+                content_hash: format!("hash-{url}"),
                 fetched_utc: None,
             })
             .collect::<Vec<_>>();
@@ -2028,6 +2039,7 @@ mod app_state_tests {
         }
         triage.complete();
         state.set_triage(triage);
+        crate::fixture_support::save_session_results(&mut state);
 
         let mut pre_triage = PreTriageSession::load_articles(loaded, &PreTriagePolicy::default());
         let decision_key = pre_triage

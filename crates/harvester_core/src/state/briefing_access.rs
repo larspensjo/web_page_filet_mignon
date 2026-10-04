@@ -33,6 +33,7 @@ impl AppState {
     pub(crate) fn set_briefing(&mut self, briefing: BriefingSession) {
         self.note_unfinished_inputs_changed();
         self.briefing = briefing;
+        self.rebuild_saved_results();
         self.dirty = true;
     }
 
@@ -42,6 +43,7 @@ impl AppState {
 
     pub(crate) fn set_briefing_since_utc(&mut self, v: Option<DateTime<Utc>>) {
         self.briefing_since_utc = v;
+        self.rebuild_saved_results();
     }
 
     #[cfg(test)]
@@ -70,6 +72,7 @@ impl AppState {
             pending_since_utc,
         });
         self.briefing_since_utc = pending_since_utc;
+        self.rebuild_saved_results();
         self.briefing_checkpoint_status_message =
             Some(CHECKPOINT_SAVING_STATUS_MESSAGE.to_string());
         save_id
@@ -94,6 +97,7 @@ impl AppState {
         match self.pending_briefing_checkpoint_save.as_ref() {
             Some(pending) if pending.save_id == save_id => {
                 self.briefing_since_utc = pending.previous_since_utc;
+                self.rebuild_saved_results();
                 self.pending_briefing_checkpoint_save = None;
                 self.briefing_checkpoint_status_message =
                     Some(format!("Checkpoint save failed: {reason}"));

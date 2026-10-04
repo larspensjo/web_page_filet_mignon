@@ -12,7 +12,9 @@ fn job_list_mode_set_updates_state() {
             mode: crate::JobListMode::Last24Hours,
         },
     );
-    assert!(effects.is_empty());
+    assert!(
+        matches!(effects.as_slice(), [Effect::PersistRuntimeState { snapshot }] if snapshot.job_list_mode == Some(crate::JobListMode::Last24Hours))
+    );
     assert_eq!(state.job_list_mode(), crate::JobListMode::Last24Hours);
 }
 

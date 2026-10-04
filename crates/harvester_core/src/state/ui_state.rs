@@ -59,6 +59,12 @@ impl AppState {
 
     pub(crate) fn observe_utc(&mut self, now: chrono::DateTime<chrono::Utc>) {
         self.last_observed_utc = Some(now);
+        if self
+            .saved_scope_clock
+            .is_none_or(|previous| (now - previous).num_seconds().abs() >= 60)
+        {
+            self.rebuild_saved_results();
+        }
     }
 
     pub fn job_list_mode(&self) -> crate::JobListMode {

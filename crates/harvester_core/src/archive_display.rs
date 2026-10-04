@@ -4,9 +4,9 @@ use crate::working_corpus::CurrentWorkingCorpus;
 /// Provenance for the archive counts shown by the UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArchiveCoverage {
-    /// Counts come from a live triage run completed in this session.
+    /// Saved current-key coverage is complete (or has no hits to report).
     LiveComplete,
-    /// Counts come from current-key triage cache hits before live triage ran.
+    /// Partial coverage from saved current-key triage results in the window.
     CacheDerived {
         triaged: usize,
         actionable_total: usize,

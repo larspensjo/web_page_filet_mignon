@@ -186,6 +186,7 @@ export function App() {
 				<ReadingPane
 					selected={selected}
 					summary={snapshot?.view.right_pane.summary_markdown}
+					aiUnavailableMessage={snapshot?.view.ai_unavailable_message}
 					candidate={selectedCandidate}
 					onToggleExclusion={(signalKey) =>
 						void dispatchIntent({

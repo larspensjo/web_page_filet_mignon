@@ -262,7 +262,7 @@ pub fn handle_toggle_exclusion(
     state.mark_dirty();
 }
 
-fn build_input_snapshot(
+pub(crate) fn build_input_snapshot(
     state: &AppState,
     url: &str,
 ) -> Result<SignalCandidateInputSnapshot, &'static str> {

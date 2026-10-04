@@ -540,7 +540,7 @@ fn run_in_progress_with_reused_results() -> AppState {
             _ => None,
         })
         .expect("fixture preparation request");
-    let (state, effects) = harvester_core::update(
+    let (state, effects) = update(
         state,
         Msg::TriageArticlesLoaded {
             request_id,
@@ -839,7 +839,18 @@ fn time(offset_seconds: i64) -> DateTime<Utc> {
         .with_timezone(&Utc)
 }
 
-fn update(state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
+fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
+    // Mirror the effect worker's metadata publication before its window delta.
+    if let Msg::TriageArticlesLoaded { request_id, delta } = &msg {
+        state = harvester_core::update(
+            state,
+            Msg::SavedArticlesLoaded {
+                request_id: *request_id,
+                articles: delta.members.clone(),
+            },
+        )
+        .0;
+    }
     let (state, effects) = harvester_core::update(state, msg);
     harvester_core::fixture_support::complete_processing_start(state, effects, 100_000)
 }

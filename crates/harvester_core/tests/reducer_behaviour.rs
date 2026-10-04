@@ -93,6 +93,8 @@ fn stop_finish_emits_effect() {
             Effect::PersistRuntimeState {
                 snapshot: harvester_core::PersistenceSnapshot {
                     fetch_time_recovery_done: false,
+                    job_list_mode: Some(Default::default()),
+                    selected_article_url: None,
                     completed: Vec::new(),
                     pending_intake: vec!["https://example.com".to_string()],
                     blacklist: Default::default(),

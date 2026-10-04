@@ -99,13 +99,21 @@ impl AppState {
         self.note_unfinished_inputs_changed();
         self.pending_results
             .push(crate::SavedResult::Summary(key.clone(), entry.clone()));
-        self.summary_cache.insert(key, entry);
+        let previous_created_at = self
+            .saved_newest_summaries
+            .get(&key.content_hash)
+            .and_then(|key| self.summary_cache.lookup(key))
+            .map(|entry| entry.created_at_utc.clone());
+        self.summary_cache.insert(key.clone(), entry);
+        self.refresh_saved_newest_summary(&key, previous_created_at.as_deref());
     }
 
     /// Replace the entire summary cache (used for hydration).
     pub(crate) fn set_summary_cache(&mut self, cache: SummaryCache) {
         self.note_unfinished_global_inputs_changed();
         self.summary_cache = cache;
+        self.rebuild_saved_newest_summaries();
+        self.rebuild_saved_results();
     }
 
     pub(crate) fn start_summary_cache_run(&mut self) {
@@ -226,6 +234,7 @@ impl AppState {
         self.note_unfinished_global_inputs_changed();
         cache.rebuild_alias_index();
         self.triage_cache = cache;
+        self.rebuild_saved_results();
     }
 
     pub fn triage_cache(&self) -> &TriageCache {
@@ -326,17 +335,6 @@ impl AppState {
         }
     }
 
-    pub(crate) fn cached_triage_priority(&self, content_hash: &str) -> Option<u8> {
-        let (prompt_version, model_id, context_hash) = self.triage_cache_metadata()?;
-        self.triage_cache.lookup_current_priority_parts(
-            content_hash,
-            PromptId::ArticleTriage,
-            prompt_version,
-            model_id,
-            context_hash,
-        )
-    }
-
     #[cfg(test)]
     pub(crate) fn store_triage_result(&mut self, content_hash: &str, result: ArticleTriageResult) {
         let _ = self.store_triage_result_with_model(content_hash, result);
@@ -370,7 +368,7 @@ impl AppState {
         self.pending_results
             .push(crate::SavedResult::Triage(key.clone(), entry.clone()));
         self.triage_cache.insert_entry(key, entry);
-        self.refresh_cache_derived_archive_hash(&content_hash);
+        self.refresh_saved_hash(&content_hash);
     }
 
     pub(crate) fn record_triage_cache_hit(&mut self) {

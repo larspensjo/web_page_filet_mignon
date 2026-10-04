@@ -1,4 +1,5 @@
 use super::batch::archive_token_estimates_from_parts;
+use super::signal_candidate_access::SignalCandidateDisplayState as SignalCandidateState;
 use super::{map_job_filter_status, AppState, JobState};
 use crate::archive_display::ArchiveCoverage;
 use crate::briefing::ArticleSummaryResult;
@@ -6,7 +7,7 @@ use crate::pre_triage_filter::PreTriagePhase;
 use crate::preview::format_summary_for_preview;
 use crate::signal_candidate::{
     canonical_signal_key, is_signal_key_excluded, ScoredCandidate, SelectionPolicy,
-    SignalCandidateSelection, SignalCandidateState,
+    SignalCandidateSelection,
 };
 use crate::tabs::JobListMode;
 use crate::triage::TriagePhase;
@@ -18,6 +19,7 @@ use crate::view_model::{
 };
 use chrono::{DateTime, Duration, Utc};
 use harvester_engine::llm::dto::SourceTier;
+#[cfg(test)]
 use harvester_engine::llm::prompt::PromptId;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -75,44 +77,19 @@ impl AppState {
         // The token meter bar and its "filtered" count reflect the archive export target.
         // When all signal candidates are settled and the selection is non-empty, the export
         // defaults to that subset — show those numbers on the bar instead of the full corpus.
-        let sc = self.signal_candidate();
-        let settled = sc.completed_count();
-        let scoring = sc.observation_counts();
-        let in_progress = scoring.pending_or_in_flight;
-        let (archive_token_estimate, archive_filtered_count) =
-            if matches!(archive_display.coverage(), ArchiveCoverage::LiveComplete)
-                && settled > 0
-                && in_progress == 0
-            {
-                let scored: Vec<ScoredCandidate> = sc
-                    .iter_completed()
-                    .map(|(url, result)| ScoredCandidate {
-                        url: url.to_string(),
-                        result: result.clone(),
-                    })
-                    .collect();
-                let policy = SelectionPolicy {
-                    threshold: self.signal_candidate_threshold(),
-                    active_prompt_version: self
-                        .active_version_for(
-                            harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate,
-                        )
-                        .unwrap_or_default(),
-                    excluded: sc.excluded().clone(),
-                };
-                let selection = SignalCandidateSelection::compute(&scored, policy);
-                if selection.selected_urls.is_empty() {
-                    (archive_estimates.summary_tokens, full_filtered_count)
-                } else {
-                    let sc_estimates = self.archive_token_estimates_for_view(
-                        &selection.selected_urls,
-                        &summary_lookup,
-                    );
-                    (sc_estimates.summary_tokens, selection.selected_urls.len())
-                }
-            } else {
-                (archive_estimates.summary_tokens, full_filtered_count)
-            };
+        let selection = self.signal_candidate_selection();
+        let (archive_token_estimate, archive_filtered_count) = if self
+            .signal_candidate()
+            .observation_counts()
+            .pending_or_in_flight
+            == 0
+            && !selection.selected_urls.is_empty()
+        {
+            let estimates = self.archive_token_estimates(&selection.selected_urls);
+            (estimates.summary_tokens, selection.selected_urls.len())
+        } else {
+            (archive_estimates.summary_tokens, full_filtered_count)
+        };
         let run_state = self.run_state();
         let run_enabled = matches!(run_state, crate::RunState::Idle);
         let unfinished_work = self.unfinished_work().clone();
@@ -193,14 +170,14 @@ impl AppState {
         summary_lookup: &SummaryLookup,
     ) -> JobViewMetadata {
         let is_since_checkpoint = is_since_checkpoint(job, since);
-        let triage_annotation =
-            self.triage
-                .result_for_url(&job.url)
-                .map(|result| TriageAnnotationView {
-                    priority: result.priority,
-                    category: result.category.clone(),
-                    tags: result.tags.clone(),
-                });
+        let triage_annotation = self
+            .saved_results_for_url(&job.url)
+            .and_then(|entry| entry.triage.as_ref().map(|(_, result)| result))
+            .map(|result| TriageAnnotationView {
+                priority: result.priority,
+                category: result.category.clone(),
+                tags: result.tags.clone(),
+            });
         let (has_summary, summary_title, summary_tokens) = summary_lookup
             .summary_for_job(self, job)
             .map(|summary| {
@@ -248,38 +225,7 @@ impl AppState {
     }
 
     fn build_summary_lookup(&self) -> SummaryLookup<'_> {
-        let mut lookup = SummaryLookup::default();
-        for (url, summary) in self.briefing.completed_summaries() {
-            lookup.briefing_by_url.entry(url).or_insert(summary);
-        }
-        for (key, entry) in self.summary_cache().iter() {
-            if key.prompt_id != PromptId::ArticleSummary {
-                continue;
-            }
-            let tie_break_key = (
-                key.prompt_version,
-                key.model_id.as_str(),
-                key.context_hash.as_str(),
-            );
-            let replace = lookup
-                .cache_by_content_hash
-                .get(key.content_hash.as_str())
-                .is_none_or(|cached| {
-                    (entry.created_at_utc.as_str(), tie_break_key)
-                        > (cached.created_at_utc, cached.tie_break_key)
-                });
-            if replace {
-                lookup.cache_by_content_hash.insert(
-                    key.content_hash.as_str(),
-                    CachedSummary {
-                        created_at_utc: entry.created_at_utc.as_str(),
-                        tie_break_key,
-                        summary: &entry.result,
-                    },
-                );
-            }
-        }
-        lookup
+        SummaryLookup { state: self }
     }
 
     fn archive_token_estimates_for_view(
@@ -292,8 +238,9 @@ impl AppState {
         }
         let url_tokens = self.archive_article_token_lookup();
         archive_token_estimates_from_parts(urls, url_tokens, |url| {
-            self.content_hash_for_url(url)
-                .and_then(|hash| summary_lookup.summary_for_content_hash(hash))
+            summary_lookup
+                .state
+                .newest_summary_for_url(url)
                 .map(|summary| summary.output_tokens)
         })
     }
@@ -476,15 +423,15 @@ impl AppState {
     }
 
     pub fn build_signal_candidate_rows(&self) -> Vec<SignalCandidateRow> {
-        if self.signal_candidate.iter_states().next().is_none() {
-            return Vec::new();
-        }
-        let completed_candidates: Vec<ScoredCandidate> = self
-            .signal_candidate
-            .iter_completed()
-            .map(|(url, result)| ScoredCandidate {
-                url: url.to_string(),
-                result: result.clone(),
+        let states = self.display_signal_states();
+        let completed_candidates: Vec<ScoredCandidate> = states
+            .iter()
+            .filter_map(|(url, state)| match state {
+                SignalCandidateState::Completed { result } => Some(ScoredCandidate {
+                    url: (*url).to_string(),
+                    result: (*result).clone(),
+                }),
+                _ => None,
             })
             .collect();
         let active_prompt_version = self
@@ -504,9 +451,11 @@ impl AppState {
             selection.selected_urls.iter().map(String::as_str).collect();
         // signal_key -> representative gist (the kept article shown on deduped rows).
         let mut kept_gist_by_key: HashMap<String, String> = HashMap::new();
+        let states_by_url: HashMap<_, _> =
+            states.iter().map(|(url, state)| (*url, state)).collect();
         for url in &selection.selected_urls {
             if let Some(SignalCandidateState::Completed { result }) =
-                self.signal_candidate.state_for(url)
+                states_by_url.get(url.as_str())
             {
                 let cluster_key = canonical_signal_key(&result.signal_key);
                 kept_gist_by_key
@@ -520,13 +469,13 @@ impl AppState {
             .map(|(job_id, job)| (job.url.as_str(), *job_id))
             .collect();
         let mut rows = Vec::new();
-        for (url, state) in self.signal_candidate.iter_states() {
+        for (url, state) in states {
             let Some(job_id) = job_id_by_url.get(url).copied() else {
                 continue;
             };
             match state {
                 SignalCandidateState::Pending => continue,
-                SignalCandidateState::Scoring { .. } => {
+                SignalCandidateState::Scoring => {
                     rows.push(SignalCandidateRow {
                         job_id,
                         url: url.to_string(),
@@ -552,7 +501,7 @@ impl AppState {
                         gist_truncated: String::new(),
                         dupes_count: 0,
                         state_label: SignalCandidateRowState::Failed {
-                            reason: reason.clone(),
+                            reason: reason.to_owned(),
                         },
                         signal_key: String::new(),
                         outcome: None,
@@ -617,7 +566,7 @@ impl AppState {
             .ui
             .selected_job_id()
             .and_then(|job_id| self.jobs.get(&job_id))
-            .and_then(|job| self.briefing.summary_for_url(&job.url))
+            .and_then(|job| self.current_summary_for_url(&job.url))
             .map(format_summary_for_preview);
         RightPaneView { summary_markdown }
     }
@@ -635,45 +584,16 @@ struct JobViewMetadata {
     has_analysis: bool,
 }
 
-struct CachedSummary<'a> {
-    created_at_utc: &'a str,
-    tie_break_key: (u32, &'a str, &'a str),
-    summary: &'a ArticleSummaryResult,
-}
-
-/// Per-view summary index with deterministic duplicate resolution.
-///
-/// Briefing summaries preserve `BriefingSession::summary_for_url`: the first completed article in
-/// session order wins. Cache summaries prefer the newest timestamp, then the lexicographically
-/// greatest `(prompt_version, model_id, context_hash)` tuple when timestamps tie so `HashMap`
-/// iteration order cannot affect views.
-#[derive(Default)]
 struct SummaryLookup<'a> {
-    briefing_by_url: HashMap<&'a str, &'a ArticleSummaryResult>,
-    cache_by_content_hash: HashMap<&'a str, CachedSummary<'a>>,
+    state: &'a AppState,
 }
-
 impl<'a> SummaryLookup<'a> {
     fn summary_for_job(
         &self,
-        state: &AppState,
+        _state: &AppState,
         job: &JobState,
     ) -> Option<&'a ArticleSummaryResult> {
-        self.briefing_by_url
-            .get(job.url.as_str())
-            .copied()
-            .or_else(|| {
-                state
-                    .content_hash_for_url(&job.url)
-                    .and_then(|hash| self.cache_by_content_hash.get(hash))
-                    .map(|cached| cached.summary)
-            })
-    }
-
-    fn summary_for_content_hash(&self, content_hash: &str) -> Option<&'a ArticleSummaryResult> {
-        self.cache_by_content_hash
-            .get(content_hash)
-            .map(|cached| cached.summary)
+        self.state.current_summary_for_url(&job.url)
     }
 }
 
@@ -692,7 +612,7 @@ struct DesktopJobSelectionRow {
     fetched_utc: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-fn is_since_checkpoint(job: &JobState, since: Option<DateTime<Utc>>) -> bool {
+pub(super) fn is_since_checkpoint(job: &JobState, since: Option<DateTime<Utc>>) -> bool {
     match (job.fetched_utc, since) {
         (_, None) => true,
         (None, Some(_)) => false,
@@ -700,7 +620,7 @@ fn is_since_checkpoint(job: &JobState, since: Option<DateTime<Utc>>) -> bool {
     }
 }
 
-fn is_within_recent_window(job: &JobState, window_start: Option<DateTime<Utc>>) -> bool {
+pub(super) fn is_within_recent_window(job: &JobState, window_start: Option<DateTime<Utc>>) -> bool {
     match (job.fetched_utc, window_start) {
         (Some(fetched), Some(window_start)) => fetched >= window_start,
         _ => false,
@@ -815,6 +735,7 @@ mod tests {
             },
         );
         state.rebuild_archive_job_tokens();
+        crate::fixture_support::save_session_results(&mut state);
         assert_archive_view_matches_full_lookup(&state);
         assert_eq!(state.view().archive_token_estimate, 1_200);
 

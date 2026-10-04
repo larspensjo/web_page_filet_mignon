@@ -44,6 +44,25 @@ stored. Reducers do not read replay files or current configuration to guess
 attribution. Annotation values are read at dialog submit time for the document
 selection pinned when the dialog opened.
 
+Annotations and the submit-time priority snapshot come from saved current-key
+results in the checkpoint window, including compatible dated model aliases.
+They work immediately after restart without a processing run. Stale-key results
+remain in their stores but supply neither annotations nor priorities. The priority
+snapshot includes every window article with current-key triage, including manually
+excluded and unselected articles, rather than only the pinned export selection.
+Window membership uses corpus frontmatter, including missing or malformed
+`fetched_utc` dates when a checkpoint is set, matching the scan and exporter.
+Such articles can supply selection, annotations and priorities even though their
+jobs remain hidden from time-scoped lists without a valid job fetch time.
+
+In summary mode the body is the newest saved summary for the article's content
+hash under any key, including a stale key; otherwise the exporter falls back to
+the full article. Dialog and header summary-token estimates resolve the same
+summary and count its output tokens, or full article tokens if none resolves.
+Reading-pane summaries separately require a current key. The saved-results index
+supplies content hashes for these lookups without requiring a live session.
+These source changes preserve all field meanings and `export_schema: 2`.
+
 The export deliberately excludes source tier, rationale, reasoning, draft
 gist, and confidence.
 
@@ -105,7 +124,7 @@ held back."
 `unexported_by_priority` is compact JSON with exactly these keys, in this order:
 `5`, `4`, `3`, `2`, `1`, `unavailable`. Its values count the canonical URLs
 remaining after the selection loop. The exporter looks those URLs up in the
-submit-time triage priority snapshot. `unavailable` means the session held no
+submit-time triage priority snapshot. `unavailable` means the saved current-key results held no
 usable priority from 1 through 5 for that URL; it does not mean that the article
 was never triaged. An out-of-range cached priority is logged and counted as
 `unavailable`. The invariant is `window_count = doc_count + sum(values)`.

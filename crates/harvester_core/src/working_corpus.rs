@@ -1,10 +1,12 @@
 //! Archive corpus selected from completed triage under its priority policy.
 
+#[cfg(test)]
 use crate::{
     briefing::TriageSelectionPolicy,
-    pre_triage_filter::stable_hash_u64,
     triage::{TriagePhase, TriageSession},
 };
+
+use crate::pre_triage_filter::stable_hash_u64;
 
 /// Where the current working corpus came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,10 +28,21 @@ pub struct CurrentWorkingCorpus {
 }
 
 impl CurrentWorkingCorpus {
+    pub(crate) fn from_saved_urls(ordered_urls: Vec<String>) -> Self {
+        Self {
+            source: if ordered_urls.is_empty() {
+                CurrentWorkingCorpusSource::Unavailable
+            } else {
+                CurrentWorkingCorpusSource::TriageComplete
+            },
+            ordered_urls,
+        }
+    }
     /// Select the archive corpus: only `TriageComplete` articles.
     ///
     /// Archive exports curated articles only. Pre-triage articles (`ReadyToTriage`,
     /// `Reviewing`) are intentionally excluded — they require triage before archiving.
+    #[cfg(test)]
     pub(crate) fn select_for_archive(
         triage: &TriageSession,
         triage_policy: TriageSelectionPolicy,

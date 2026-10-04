@@ -77,6 +77,8 @@ pub(super) fn with_summary_metadata(state: AppState) -> AppState {
     let contexts = HashMap::new();
     let (mut state, _) = update(state, Msg::PromptContextsLoaded { contexts });
     seed_current_triage_cache(&mut state);
+    state.rebuild_saved_results();
+    state.rebuild_saved_results();
     state
 }
 
@@ -97,6 +99,8 @@ pub(super) fn with_signal_candidate_metadata(mut state: AppState) -> AppState {
     seed_current_triage_cache(&mut state);
     state.start_summary_cache_run();
     state.mark_briefing_metadata_ready();
+    state.rebuild_saved_results();
+    state.rebuild_saved_results();
     state
 }
 
@@ -143,7 +147,10 @@ pub(super) fn seed_summary_for_content_hash(state: &mut AppState, content_hash: 
             content_hash: content_hash.to_string(),
             prompt_id: PromptId::ArticleSummary,
             prompt_version: 1,
-            model_id: "test-model".to_string(),
+            model_id: state
+                .effective_model_for(PromptId::ArticleSummary)
+                .unwrap_or("test-model")
+                .to_string(),
             context_hash: crate::summary_cache::context_hash(
                 state.context_for(PromptId::ArticleSummary),
             ),
@@ -171,7 +178,7 @@ pub(super) fn complete_triage_state_for_test(n: usize) -> AppState {
                 .collect::<Vec<_>>()
                 .join(" "),
             content_hash: format!("hash-tc-{i}"),
-            fetched_utc: None,
+            fetched_utc: Some("2026-09-28T12:00:00Z".into()),
         })
         .collect();
     session.set_articles(articles);
@@ -197,6 +204,7 @@ pub(super) fn complete_triage_state_for_test(n: usize) -> AppState {
 
     let mut state = AppState::new();
     state.set_triage(session);
+    crate::fixture_support::save_session_results(&mut state);
     state
 }
 
@@ -382,7 +390,7 @@ pub(super) fn add_completed_job_for_test(state: AppState, url: &str) -> AppState
             job_id,
             result: JobResultKind::Success,
             extracted_links: Vec::new(),
-            fetched_utc: None,
+            fetched_utc: Some("2026-09-28T12:00:00Z".into()),
         },
     );
     apply_pending_pre_triage_refresh_evaluation(state)
@@ -419,7 +427,7 @@ pub(super) fn add_completed_job_with_tokens_for_test(
             job_id,
             result: JobResultKind::Success,
             extracted_links: Vec::new(),
-            fetched_utc: None,
+            fetched_utc: Some("2026-09-28T12:00:00Z".into()),
         },
     );
     apply_pending_pre_triage_refresh_evaluation(state)
@@ -450,7 +458,7 @@ pub(super) fn loaded_pre_triage_articles(urls: &[&str]) -> Vec<LoadedArticle> {
                 .collect::<Vec<_>>()
                 .join(" "),
             content_hash: format!("hash-{url}"),
-            fetched_utc: None,
+            fetched_utc: Some("2026-09-28T12:00:00Z".into()),
         })
         .collect()
 }

@@ -72,6 +72,10 @@ pub(super) fn run_triage_refresh_load(
             engine_info!("[corpus-index] request_id={} files={} reused={} read={} reprepared={} removed={} budget={} elapsed_ms={}",
                 request_id, stats.files, stats.reused, stats.read, stats.reprepared, stats.removed,
                 delta.preparation_budget, load_started.elapsed().as_millis());
+            let _ = msg_tx.send(Msg::SavedArticlesLoaded {
+                request_id,
+                articles: index.article_metadata(),
+            });
             let _ = msg_tx.send(Msg::TriageArticlesLoaded { request_id, delta });
         }
         Err(reason) => {

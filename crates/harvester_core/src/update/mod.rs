@@ -24,6 +24,9 @@ mod tests;
 
 /// Pure update function: applies a message to state and returns any effects.
 pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
+    let view_change_requested =
+        matches!(&msg, Msg::JobSelected { .. } | Msg::JobListModeSet { .. });
+    let previous_view_selection = (state.job_list_mode(), state.selected_job_id());
     let run_was_active = state.run_progress_is_active();
     let stop_requested = matches!(&msg, Msg::StopFinishClicked)
         && state.stop_finish_button_state().policy().is_some();
@@ -99,6 +102,27 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::JobsSearchCleared => {
             state.clear_jobs_search_query();
+            Vec::new()
+        }
+        Msg::RestoreDesktopView {
+            mode,
+            selected_article_url,
+            now,
+        } => {
+            if let Some(mode) = mode {
+                state.set_job_list_mode(mode);
+            }
+            state.pending_selected_article_url = selected_article_url;
+            state.observe_utc(now);
+            Vec::new()
+        }
+        Msg::SavedArticlesLoaded {
+            request_id,
+            articles,
+        } => {
+            if state.triage_in_flight_request_id() == Some(request_id) {
+                state.saved_articles_loaded(articles);
+            }
             Vec::new()
         }
         Msg::StartupHydrationRequested => {
@@ -179,6 +203,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
 
         Msg::JobSelected { job_id } => {
+            state.pending_selected_article_url = None;
             let previous = state.selected_job_id();
             state.select_job(job_id);
             if state.selected_job_id() == Some(job_id) && previous != Some(job_id) {
@@ -215,6 +240,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             Vec::new()
         }
         Msg::JobListModeSet { mode } => {
+            state.pending_selected_article_url = None;
             state.set_job_list_mode(mode);
             Vec::new()
         }
@@ -276,6 +302,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
 
         Msg::BriefingCheckpointLoaded { since_utc } => {
+            state.restored_checkpoint_ready = true;
             briefing::handle_checkpoint_loaded(&mut state, since_utc)
         }
         Msg::BriefingCheckpointSaveSucceeded { save_id } => {
@@ -561,8 +588,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.recompute_unfinished_work();
         }
     }
-    if after_revisions.1 != unfinished_revisions.1 {
-        state.rebuild_cache_derived_archive_index();
+    state.rebuild_saved_results_if_changed();
+    if let Some(effect) = state.restore_desktop_selection_if_ready() {
+        effects.push(effect);
     }
     pipeline_run::record_progress_after(&mut state, progress_before);
     pipeline_run::finish_if_settled(&mut state);
@@ -575,6 +603,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         effects.push(Effect::FlushResults);
     }
     if persist_runtime_state
+        || (view_change_requested
+            && previous_view_selection != (state.job_list_mode(), state.selected_job_id()))
         || pending_before_stop.is_some_and(|before| state.pending_intake_urls().len() != before)
     {
         effects.push(Effect::PersistRuntimeState {

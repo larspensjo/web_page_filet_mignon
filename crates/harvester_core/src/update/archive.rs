@@ -32,21 +32,21 @@ pub(super) fn handle_archive_clicked(state: &mut AppState) -> Vec<Effect> {
     state.pin_archive_corpus(corpus);
     let since_utc = state.briefing_since_utc();
     state.pin_signal_candidate_selection(signal_candidate_snapshot.clone());
-    let signal_candidate_default = if matches!(state.triage().phase(), crate::TriagePhase::Complete)
-    {
+    let signal_candidate_default = {
         crate::signal_candidate::compute_dialog_default(
-            state.signal_candidate().completed_count(),
+            state.saved_signal_count(),
             state.signal_candidate().in_flight_count(),
             state.signal_candidate().failed_count(),
             signal_candidate_snapshot.selected_urls.len(),
         )
-    } else {
-        crate::signal_candidate::SignalCandidateDialogDefault::OffDisabled
     };
     let signal_candidate_count = signal_candidate_snapshot.selected_urls.len();
     let signal_candidate_scoring_done =
-        state.signal_candidate().completed_count() + state.signal_candidate().failed_count();
-    let signal_candidate_scoring_total = state.signal_candidate().enqueued_count();
+        state.saved_signal_count() + state.signal_candidate().failed_count();
+    let signal_candidate_scoring_total = state
+        .signal_candidate()
+        .enqueued_count()
+        .max(signal_candidate_scoring_done);
     vec![Effect::OpenArchiveDialog {
         request_id,
         article_count,
@@ -228,9 +228,14 @@ fn clear_export_unavailable_status(state: &mut AppState) {
 
 fn build_priority_snapshot(state: &AppState) -> std::collections::HashMap<String, u8> {
     state
-        .triage()
-        .iter_completed_priorities()
-        .map(|(url, priority)| (archive_url_key(url), priority))
+        .saved_results_entries()
+        .filter(|entry| entry.in_window)
+        .filter_map(|entry| {
+            entry
+                .triage
+                .as_ref()
+                .map(|(_, result)| (archive_url_key(&entry.article.url), result.priority))
+        })
         .collect()
 }
 
@@ -238,27 +243,26 @@ fn build_annotation_map(
     state: &AppState,
     ordered_urls: &[String],
 ) -> std::collections::HashMap<String, ArchiveDocAnnotations> {
-    let signal_results: std::collections::HashMap<_, _> =
-        state.signal_candidate().iter_completed().collect();
     let mut annotations = std::collections::HashMap::new();
     for url in ordered_urls {
-        let key = archive_url_key(url);
         let mut annotation = ArchiveDocAnnotations::default();
-        if let Some(result) = state.triage().result_for_url(url) {
-            annotation.priority = Some(result.priority);
-            annotation.tags = Some(result.tags.clone());
-            annotation.triage_model = state
-                .triage()
-                .triage_model_for_url(url)
-                .map(ToOwned::to_owned);
-        }
-        if let Some(result) = signal_results.get(url.as_str()) {
-            annotation.signal_key = Some(result.signal_key.clone());
-            annotation.signal_score = Some(result.signal_score);
-            annotation.themes = Some(result.themes.clone());
+        if let Some(entry) = state
+            .saved_results_for_url(url)
+            .filter(|entry| entry.in_window)
+        {
+            if let Some((key, result)) = &entry.triage {
+                annotation.priority = Some(result.priority);
+                annotation.tags = Some(result.tags.clone());
+                annotation.triage_model = Some(key.model_id.clone());
+            }
+            if let Some(result) = &entry.signal {
+                annotation.signal_key = Some(result.signal_key.clone());
+                annotation.signal_score = Some(result.signal_score);
+                annotation.themes = Some(result.themes.clone());
+            }
         }
         if annotation != ArchiveDocAnnotations::default() {
-            annotations.insert(key, annotation);
+            annotations.insert(archive_url_key(url), annotation);
         }
     }
     annotations
@@ -326,10 +330,8 @@ fn build_summary_map(
 
     let mut map = std::collections::HashMap::new();
     for url in ordered_urls {
-        if let Some(hash) = state.triage().article_content_hash(url) {
-            if let Some(entry) = state.summary_cache().lookup_any_by_content_hash(hash) {
-                map.insert(archive_url_key(url), format_summary_body(&entry.result));
-            }
+        if let Some(summary) = state.newest_summary_for_url(url) {
+            map.insert(archive_url_key(url), format_summary_body(summary));
         }
     }
     map
@@ -349,16 +351,6 @@ fn format_summary_body(result: &crate::briefing::ArticleSummaryResult) -> String
 fn build_signal_candidate_snapshot(
     state: &AppState,
 ) -> crate::signal_candidate::SignalCandidateArchiveSelection {
-    if !matches!(state.triage().phase(), crate::TriagePhase::Complete) {
-        return crate::signal_candidate::SignalCandidateArchiveSelection::new(
-            Vec::new(),
-            state.signal_candidate_threshold(),
-            state.signal_candidate().override_fingerprint(),
-            signal_candidate_selection_fingerprint(state, &[]),
-            crate::ArchiveTokenEstimates::default(),
-            false,
-        );
-    }
     let selection = state.signal_candidate_selection();
     let token_estimates = state.archive_token_estimates(&selection.selected_urls);
     let cache_fingerprint = signal_candidate_selection_fingerprint(state, &selection.selected_urls);
@@ -380,10 +372,9 @@ fn signal_candidate_selection_fingerprint(state: &AppState, urls: &[String]) -> 
     for url in urls {
         hasher.update(url.as_bytes());
         hasher.update(b"|");
-        if let Some((_, result)) = state
-            .signal_candidate()
-            .iter_completed()
-            .find(|(candidate_url, _)| *candidate_url == url)
+        if let Some(result) = state
+            .saved_results_for_url(url)
+            .and_then(|entry| entry.signal.as_ref())
         {
             hasher.update(result.signal_key.as_bytes());
             hasher.update(b"|");
@@ -452,6 +443,7 @@ mod tests {
                 output_tokens: 0,
             },
         );
+        crate::fixture_support::save_session_results(&mut state);
         let annotations =
             build_annotation_map(&state, &[url.into(), "https://example.com/none".into()]);
         assert_eq!(annotations.len(), 1);

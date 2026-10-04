@@ -13,6 +13,8 @@ pub struct PersistenceSnapshot {
     pub pending_intake: Vec<String>,
     pub blacklist: crate::blacklist::BlacklistState,
     pub fetch_time_recovery_done: bool,
+    pub job_list_mode: Option<crate::JobListMode>,
+    pub selected_article_url: Option<String>,
 }
 
 impl PersistenceSnapshot {
@@ -22,6 +24,8 @@ impl PersistenceSnapshot {
             pending_intake: state.pending_intake_urls().to_vec(),
             blacklist: state.blacklist().clone(),
             fetch_time_recovery_done: state.fetch_time_recovery_done,
+            job_list_mode: Some(state.job_list_mode()),
+            selected_article_url: state.remembered_article_url(),
         }
     }
 }

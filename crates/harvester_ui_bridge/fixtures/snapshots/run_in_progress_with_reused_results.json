@@ -5,7 +5,10 @@
     "ai_unavailable_message": null,
     "archive_enabled": false,
     "archive_filtered_count": 1,
-    "archive_partial_coverage": null,
+    "archive_partial_coverage": {
+      "actionable_total": 5,
+      "triaged": 1
+    },
     "archive_token_estimate": 5,
     "checkpoint_status_message": null,
     "desktop_job_list": {

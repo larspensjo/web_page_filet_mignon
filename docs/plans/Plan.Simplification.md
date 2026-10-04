@@ -953,7 +953,7 @@ Work:
    is slim since Phase 7, so rapid clicking produces a few small writes, not one per click.
    Window close flushes. A crash mid-session loses at most about two seconds of view state,
    which reverts to the previous tab and selection.
-7. The reading-pane placeholder distinguishes "not summarised under the current settings" from
+7. The reading-pane placeholder distinguishes "not summarized under the current settings" from
    AI being unavailable, using existing wording where it exists.
 
 Regression tests:
@@ -2751,3 +2751,201 @@ attributes increased **1,256 -> 1,265 (+9)**; the unstaged diff removes none.
 Check logs are `.local/bench/fix-{build,clippy,ui-clippy}-final.log` and
 `.local/bench/fix-workspace-tests-final.log`. No frontend or native-window run was
 needed; desktop replay exercises the production driver with a canned provider.
+
+## Phase 8 notes
+
+Review fixes (2026-10-04):
+
+- Window membership now follows the corpus scan/export frontmatter rule, including
+  undated or malformed-date articles; archive selection, annotations, priorities
+  and coverage retain them, while time-scoped job lists still hide undated jobs.
+  Selection restoration uses those same job-list fetch-time rules.
+- Gate the three paid-session fixture helpers with `cfg(test)`. Share keyed/keyless
+  prompt-model defaults and resolution, and share the resolved pre-triage inclusion
+  rule. Reducer regressions cover undated articles and late startup hydration;
+  keyless/keyed default model maps have an equality regression.
+- Compare summary writes against the prior newest timestamp; retain store-order
+  tie-breaking for equal/older writes. Borrow root metadata and display scoring
+  results, skip an end-of-message rebuild already covered by the current global
+  revision, and use a URL lookup for representative gists. A regression covers
+  newest-any-key ties, store growth and replacement without changing export rules.
+- Drop pending desktop selection restoration when a run is active. Use
+  "Not summarized under the current settings." consistently. Move I/O restart
+  tests beside the effect runner tests. The manual-exclusion fixture now sends a
+  matching `TriageArticlesLoaded` reply to exercise the production rebuild trigger;
+  no new message was added. IPC and export_schema 2 remain unchanged.
+
+Review verification: `cargo build --offline`, `cargo test --offline`, both required
+offline Clippy commands with `-D warnings`, `cargo fmt` and `cargo fmt --check`
+pass. Root tests grow from **1,281 to 1,285 passed**, with **two ignored**;
+the pre-review test-name inventory has no missing names. All six host-drain cost
+tests and the trailing-snapshot driver test pass without relaxed thresholds.
+Frontend `npm run check` (**117 passed**), `npm run build` and `npm run fmt` pass.
+All seven archive fixtures retain their baseline SHA-256 hashes; historical
+DecisionLog entries match HEAD. Logs and reconciliation are in
+`.local/phase8-review/`. GUI checks and the IPC probe remain excluded by the task;
+all changes remain uncommitted.
+
+Verification first (2026-10-03, before implementation):
+
+- The fresh whole root baseline, `cargo test --offline`, passes **1,262 tests,
+  two ignored**. Log: `.local/phase8/baseline-tests.log`. A test-name inventory
+  and SHA-256 inventory of every archive fixture (including hidden files) are
+  pinned in `.local/phase8/` for final reconciliation.
+- Startup hydrates the three stores and requests contexts, metadata and the
+  checkpoint without a run. Pre-triage refresh supplies window hashes, while
+  `CorpusScanIndex::load_delta` scans and retains metadata/hashes for all root
+  articles before applying the checkpoint. Publish that metadata separately to
+  the reducer for Last 24h; do not widen processing or fetch-time recovery.
+- Two startup gaps need closing: metadata can race saved template overlays, and
+  the keyless runner has an empty model map. Load overlays before publishing
+  metadata and supply the same configured model defaults without requiring AI.
+- `input_key_for_current_result_fields_with_context_hash` builds scoring keys
+  from article metadata, current triage and summary results, the current summary
+  key digest, and scoring metadata/context; it needs no live session.
+- `archive_token_estimates_from_parts` adds each resolved summary's
+  `output_tokens`, falling back to that article's full job-token count. The
+  dialog and header must share this composition and newest any-key resolution.
+- Slim state and fetch-time recovery retain the existing ordered worker,
+  frontmatter-only one-time recovery marker, notices and hidden-job behaviour.
+  Existing `ai_unavailable_message` supports the reading-pane distinction;
+  no desktop IPC change is necessary.
+
+Implementation and regression coverage (2026-10-03):
+
+- All seven work items are implemented. The reducer owns a derived index over
+  window union Last 24h, keyed by canonical URL, with window/actionable flags,
+  current triage (and stored-key provenance), current summary, upstream-digest
+  scoring, and a separate newest-any-key summary reference. Corpus metadata is
+  published before the window delta without widening processing. Duplicate
+  canonical URLs retain the scan's first-file precedence. Global configuration,
+  checkpoint and minute-clock changes rebuild it; saved completions refresh
+  affected identities. Context hashes are shared within a rebuild. View reads
+  never walk the summary cache and canonical URLs avoid repeated normalization.
+- Startup loads saved overlays before publishing prompt metadata. Registering
+  an overlay preserves the existing active-version policy; the startup test
+  verifies registration rather than incorrectly expecting a new version to
+  become active. Keyless metadata uses the same configured model defaults.
+- Rows, ordering, Results, reading summaries, archive readiness and coverage read
+  saved current keys. Live sessions still own progress, in-flight presentation
+  and the running-triage ordering rule. Partial header coverage is derived from
+  saved hits versus actionable window members, independently of session phase;
+  complete coverage has the same presentation before and after restart.
+- Archive selection stays window-bound; annotations use the stored triage key's
+  model and current scoring. The priority snapshot includes excluded/unselected
+  current-key window triage. Missing URLs count as unavailable. Export bodies,
+  dialog/header estimates and the fallback summary accessor retain newest-any-key
+  resolution; the accessor still prefers a live session summary. Estimates use
+  summary output tokens or full job tokens when no summary resolves.
+- Slim optional serde-default tab and article URL fields load old files and are
+  ignored by older readers. Restoration waits for startup hydration and drops
+  out-of-tab selections. Tab/selection changes use PersistRuntimeState and the
+  existing worker cadence and close flush. Search and scroll are not persisted.
+  Geometry saves retain the remembered view. Fetch-time recovery and hidden-job
+  handling are unchanged.
+- ReadingPane uses the existing ai_unavailable_message to distinguish missing
+  current summaries from unavailable AI; saved summaries remain readable without
+  AI. IPC stays 14, export_schema stays 2, and corpus layout/schema and launch
+  scripts are unchanged. No new desktop snapshot field or intent was needed.
+
+The 15 new core reducer tests are in
+`crates/harvester_core/src/update/tests/saved_results_tests.rs`:
+
+- `restart_without_run_restores_current_priority_order_summary_results_and_meter`
+- `restart_stale_keys_are_invisible_to_rows_reading_selection_and_annotations`
+- `restart_last_24_hours_retains_results_before_checkpoint_without_processing_or_archiving`
+- `saved_index_checkpoint_changes_restrict_selection_and_priority_snapshot`
+- `saved_index_expires_articles_outside_window_when_last_24_hour_clock_moves`
+- `saved_completion_updates_current_summary_and_invalidates_scoring_upstream_digest`
+- `frozen_run_configuration_rebuilds_saved_current_keys`
+- `restart_summary_export_uses_stale_only_and_newest_any_key_but_reading_uses_current`
+- `restart_estimate_matches_post_run_summary_tokens_and_full_article_fallback`
+- `restart_any_key_lookup_preserves_live_session_summary_precedence`
+- `restart_archive_snapshot_uses_current_results_and_stored_compatible_alias_model`
+- `restart_archive_priority_population_includes_manually_excluded_current_results`
+- `remembered_tab_and_article_restore_after_hydration_without_run`
+- `restored_article_outside_tab_is_dropped_and_view_changes_persist_only_on_change`
+- `post_run_and_restart_emit_identical_saved_archive_requests`
+
+These cover every reducer/snapshot/summary/estimate/any-key/effect/restoration
+regression listed above, plus checkpoint movement, clock expiry, completion
+updates, frozen configuration and scoring invalidation after a summary changes.
+The four new I/O tests in `crates/harvester_io/src/effect_runner/restart_tests.rs` are:
+
+- `post_run_and_real_keyless_restart_export_identical_effects_and_archive_bytes`
+- `startup_keyless_metadata_loads_saved_overlays_and_hashes_before_checkpoint`
+- `optional_view_fields_load_old_state_and_new_state_is_readable_by_old_reader`
+- `worker_shutdown_flushes_latest_tab_and_selection_and_geometry_save_preserves_them`
+
+The first I/O test feeds a real canned processing run, flushes the paid-result
+stores and slim state, restarts through the actual keyless startup effects, and
+compares both ArchiveRequested and exporter-written archive.md bytes. It also
+checks the exporter's unavailable bucket for a window URL missing from the
+priority snapshot. The startup test verifies hashes/results before a newer
+checkpoint and saved-overlay registration without a run. The other two test old
+and new runtime readers, latest view-state shutdown flush and geometry retention.
+The existing carry-over fixture test
+`carry_over_replay_preserves_restored_state_seen_sets_and_paid_results` now also
+hydrates priorities, priority order and reading summaries without starting a run.
+Its checked-in source fixture remains unchanged. Startup tests drive deferred
+refresh with host ticks, as the production host does.
+
+Test-count and name reconciliation:
+
+- Whole-root offline baseline: **1,262 passed, two ignored**. Final whole root:
+  **1,281 passed, two ignored**. Net **+19**: 15 core and four I/O tests.
+  No test was removed without replacement. The pinned source-name inventory
+  identifies exactly five replacements, listed below; all other existing names
+  remain. Existing integration tests were updated to expect view persistence and
+  the metadata-before-window message. Older hand-built live-session fixtures now
+  explicitly seed their saved current-key results; the new restart regressions
+  use production messages rather than that fixture adapter.
+- `update/tests/archive_tests.rs` is retained and edited: **67 tests before and
+  67 after** at this checkout. The plan's historical 71 count had already drifted
+  before this task; Phase 8 did not remove four tests.
+
+| Previous test | Replacement | New contract |
+| --- | --- | --- |
+| `cache_derived_startup_counts_never_reach_full_archive_export` | `saved_startup_counts_reach_full_archive_export` | Saved current results export without a completed session. |
+| `cache_derived_startup_counts_do_not_enable_signal_candidate_export` | `saved_startup_counts_hide_signal_results_without_current_upstream_keys` | Saved scores require current upstream keys; session absence is not a gate. |
+| `view_job_rows_include_cached_summary_tokens` | `view_job_rows_hide_stale_cached_summary_tokens` | Stale summary tokens stay invisible in rows. |
+| `view_job_rows_use_pre_triage_content_hash_for_cached_summary_tokens` | `view_job_rows_hide_stale_pre_triage_cached_summary_tokens` | Pre-triage metadata does not make a stale summary current. |
+| `key_unavailable_triage_completion_exports_priority_without_model_provenance` | `key_unavailable_triage_completion_is_absent_from_saved_export` | A result without a current saved key supplies neither annotation nor priority. |
+
+The first four replacements remain in archive_tests.rs; the fifth remains in
+triage_tests.rs. No test file was deleted. Reconciliation details are in
+`.local/phase8/reconciliation.json`; baseline names and fixture hashes are retained.
+
+Verification:
+
+- `cargo build --offline`, relevant reducer/startup/triage/carry-over/projection
+  tests, then the complete `cargo test --offline` pass. The final root run includes
+  byte-exact archive fixture tests, paid-result stores, persistence and the desktop
+  driver/cost checks. Log: `.local/phase8/final-tests.log`.
+- `cargo clippy --offline --all-targets -- -D warnings`,
+  `cargo clippy --offline -p harvester_ui --all-targets -- -D warnings`,
+  `cargo fmt` and `cargo fmt --check` pass. Build/clippy logs are under
+  `.local/phase8/`.
+- Frontend `npm run check` (117 passing tests), `npm run build` and
+  `npm run fmt` pass. Two ReadingPane regressions cover the placeholder distinction
+  and saved reading while AI is unavailable. The existing StatusMeters test now
+  pins the shared-index partial coverage from the regenerated snapshot.
+- All **seven** archive-export fixture files pass byte for byte and retain their
+  baseline SHA-256 hashes; none was modified. Export field meanings and the
+  2026-09-20 coverage population remain unchanged.
+- Regenerated UI fixtures with UPDATE_UI_FIXTURES=1. Only
+  run_in_progress_with_reused_results.json changes: the existing partial-coverage
+  field now reports one of five. All Channel-2 payload fixtures are unchanged;
+  pinned Rust projection and frontend component checks pass with no IPC bump.
+- Initial large-corpus loaded-view checks exposed repeated normalization in index
+  reads (45–51 ms). The canonical lookup fix reduced isolated checks to 19–24 ms,
+  within the unchanged host-drain budget; all six cost tests pass in the final
+  whole-root run. No timing threshold was relaxed. The keyless replay benchmark
+  ran with --host desktop against a private copy of the checked-in carry-over
+  fixture, no GUI or real output: 6 view builds, 0.055 ms median / 0.126 ms p95,
+  no model calls. This tiny replay is a smoke check, not a production-scale speedup
+  claim. Report: `.local/phase8/desktop-replay/report.json`.
+- The IPC probe and manual close/reopen UI check were not run: this task explicitly
+  forbids GUI windows/probe execution. Human follow-up remains the plan's restart
+  interaction check. No launcher, real output folder, API key or live API was used.
+  All changes remain uncommitted.

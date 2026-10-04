@@ -362,6 +362,86 @@ fn carry_over_replay_preserves_restored_state_seen_sets_and_paid_results() {
         load_desktop_window_size(&work.join(".harvester_state.ron")),
         Some((1512, 982))
     );
+    // Phase 8: hydrate the carry-over copy and show its paid results without a run.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let paths = harvester_io::RuntimePaths::new(
+        work.clone(),
+        work.join(".sources.ron"),
+        root.join("contexts"),
+        root.join("prompts"),
+    );
+    let (tx, rx) = std::sync::mpsc::channel();
+    let runner = harvester_io::EffectRunner::new(
+        paths.clone(),
+        tx,
+        Box::new(harvester_io::NoOpPlatformHandler),
+        Box::new(harvester_io::NoOpRuntimePersistenceSink),
+    );
+    let (mut state, effects) = harvester_io::host_bootstrap::prepare_desktop_startup_state(
+        harvester_core::AppState::new(),
+        &paths,
+        3,
+        None,
+        None,
+    );
+    runner.enqueue(effects);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "carry-over saved view must hydrate: {:?}, metadata {:?}/{:?}, context hashes {:?}",
+            state.view().desktop_job_list,
+            state.active_version_for(harvester_engine::llm::PromptId::ArticleSummary),
+            state.effective_model_for(harvester_engine::llm::PromptId::ArticleSummary),
+            [
+                harvester_engine::llm::PromptId::ArticleTriage,
+                harvester_engine::llm::PromptId::ArticleSummary
+            ]
+            .map(|id| harvester_core::context_hash(state.context_for(id)))
+        );
+        let (next, effects, _) = harvester_io::host_bootstrap::pump_pre_triage_refresh(state);
+        state = next;
+        runner.enqueue(effects);
+        let (next, effects) =
+            harvester_core::update(state, harvester_core::Msg::tick_at(chrono::Utc::now()));
+        state = next;
+        runner.enqueue(effects);
+        let view = state.view();
+        if view.desktop_job_list.rows.len() == 2
+            && view
+                .desktop_job_list
+                .rows
+                .iter()
+                .all(|row| row.triage_annotation.is_some() && row.has_summary)
+        {
+            break;
+        }
+        if let Ok(message) = rx.recv_timeout(std::time::Duration::from_millis(5)) {
+            let (next, effects) = harvester_core::update(state, message);
+            state = next;
+            runner.enqueue(effects);
+        }
+    }
+    assert!(state.run_progress().is_none());
+    let rows = state.view().desktop_job_list.rows;
+    assert!(
+        rows[0].triage_annotation.as_ref().unwrap().priority
+            >= rows[1].triage_annotation.as_ref().unwrap().priority
+    );
+    let selected = harvester_core::update(
+        state,
+        harvester_core::Msg::JobSelected {
+            job_id: rows[0].job_id,
+        },
+    )
+    .0;
+    assert!(selected
+        .view()
+        .right_pane
+        .summary_markdown
+        .unwrap()
+        .contains("canned summary"));
+    drop(runner);
     let second = run_benchmark(HarnessOptions {
         source_dir: fixture,
         work_dir: work.clone(),

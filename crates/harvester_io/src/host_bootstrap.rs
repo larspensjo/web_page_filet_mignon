@@ -124,29 +124,63 @@ pub fn host_ai_environment_from_value(
 }
 
 pub fn effective_model_map(config: &LlmConfig) -> HashMap<PromptId, String> {
+    resolved_model_map(
+        &config.default_model,
+        config.triage_model.as_ref(),
+        config.summary_model.as_ref(),
+        config.signal_candidate_model.as_ref(),
+    )
+}
+
+struct HostPromptModels {
+    triage: Option<ModelId>,
+    summary: Option<ModelId>,
+    signal_candidate: Option<ModelId>,
+}
+
+impl Default for HostPromptModels {
+    fn default() -> Self {
+        Self {
+            triage: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_TRIAGE_MODEL)),
+            summary: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_SUMMARY_MODEL)),
+            signal_candidate: None,
+        }
+    }
+}
+
+pub(crate) fn default_effective_model_map() -> HashMap<PromptId, String> {
+    let models = HostPromptModels::default();
+    resolved_model_map(
+        &ModelId::new(ProviderKind::OpenAi, DEFAULT_SUMMARY_MODEL),
+        models.triage.as_ref(),
+        models.summary.as_ref(),
+        models.signal_candidate.as_ref(),
+    )
+}
+
+fn resolved_model_map(
+    default_model: &ModelId,
+    triage_model: Option<&ModelId>,
+    summary_model: Option<&ModelId>,
+    signal_candidate_model: Option<&ModelId>,
+) -> HashMap<PromptId, String> {
     let mut map = HashMap::new();
 
-    let triage_model = config
-        .triage_model
-        .as_ref()
-        .unwrap_or(&config.default_model)
+    let triage_model = triage_model
+        .unwrap_or(default_model)
         .model_name()
         .to_string();
     map.insert(PromptId::ArticleTriage, triage_model);
 
-    let summary_model = config
-        .summary_model
-        .as_ref()
-        .unwrap_or(&config.default_model)
+    let summary_name = summary_model
+        .unwrap_or(default_model)
         .model_name()
         .to_string();
-    map.insert(PromptId::ArticleSummary, summary_model);
+    map.insert(PromptId::ArticleSummary, summary_name);
 
-    let signal_candidate_model = config
-        .signal_candidate_model
-        .as_ref()
-        .or(config.summary_model.as_ref())
-        .unwrap_or(&config.default_model)
+    let signal_candidate_model = signal_candidate_model
+        .or(summary_model)
+        .unwrap_or(default_model)
         .model_name()
         .to_string();
     map.insert(PromptId::ArticleSignalCandidate, signal_candidate_model);
@@ -256,12 +290,13 @@ pub fn llm_config_with_provider(
     let mut registry = PromptRegistry::new();
     register_defaults(&mut registry);
     let registry = Arc::new(RwLock::new(registry));
+    let models = HostPromptModels::default();
     let config = LlmConfig {
         provider,
         default_model: defaults.default_model.clone(),
-        triage_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_TRIAGE_MODEL)),
-        summary_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_SUMMARY_MODEL)),
-        signal_candidate_model: None,
+        triage_model: models.triage,
+        summary_model: models.summary,
+        signal_candidate_model: models.signal_candidate,
         registry: Arc::clone(&registry),
         quotas: LlmQuotas::default(),
         output_dir: paths.output_dir.clone(),
@@ -325,6 +360,17 @@ pub fn hydrate_state_from_disk(
     if !blacklist.is_empty() {
         (state, _) = update(state, Msg::BlacklistHydrated { state: blacklist });
     }
+
+    let (next, effects) = update(
+        state,
+        Msg::RestoreDesktopView {
+            mode: hydration.job_list_mode,
+            selected_article_url: hydration.selected_article_url,
+            now: Utc::now(),
+        },
+    );
+    state = next;
+    startup_effects.extend(effects);
 
     for message in hydration.notices {
         (state, _) = update(state, Msg::RuntimeStateNotice { message });

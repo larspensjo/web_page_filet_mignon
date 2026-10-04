@@ -89,6 +89,7 @@ fn complete_signal_candidate(state: &mut AppState, index: usize, score: u8, key:
     state
         .signal_candidate_mut()
         .complete(&url, signal_result(score, key));
+    crate::fixture_support::save_session_results(state);
 }
 
 #[test]
@@ -603,3 +604,4 @@ fn changed_result_provenance_emits_only_the_changed_record() {
     );
     assert_eq!(state.summary_cache().lookup(&key), Some(&changed));
 }
+mod saved_results_tests;

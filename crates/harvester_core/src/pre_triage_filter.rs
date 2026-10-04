@@ -414,8 +414,16 @@ impl PreTriageSession {
     /// duplicate entries if a loaded delta contains the same URL more than once.
     pub(crate) fn tentative_included_url_refs(&self) -> impl Iterator<Item = &str> + '_ {
         self.entries.iter().filter_map(|entry| {
-            (resolved_decision(entry) == ManualDecision::Include).then_some(entry.key.url.as_str())
+            entry
+                .is_resolved_included()
+                .then_some(entry.key.url.as_str())
         })
+    }
+
+    /// Missing entries have no exclusion; otherwise manual decisions take precedence.
+    pub(crate) fn is_resolved_included(&self, url: &str) -> bool {
+        self.entry_for_url(url)
+            .is_none_or(ArticleFilterEntry::is_resolved_included)
     }
 
     #[cfg(test)]
@@ -540,6 +548,12 @@ fn resolved_decision(entry: &ArticleFilterEntry) -> ManualDecision {
     match entry.auto_verdict {
         AutoVerdict::HardExclude => ManualDecision::Exclude,
         AutoVerdict::Review | AutoVerdict::Include => ManualDecision::Include,
+    }
+}
+
+impl ArticleFilterEntry {
+    fn is_resolved_included(&self) -> bool {
+        resolved_decision(self) == ManualDecision::Include
     }
 }
 

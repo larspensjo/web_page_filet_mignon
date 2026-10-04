@@ -238,6 +238,8 @@ fn run_worker(
             &pending.snapshot.completed,
             &pending.snapshot.pending_intake,
             pending.snapshot.fetch_time_recovery_done,
+            pending.snapshot.job_list_mode,
+            pending.snapshot.selected_article_url.as_deref(),
             |message| {
                 if let Some(sender) = &sender {
                     let _ = sender.send(harvester_core::Msg::RuntimeStateNotice { message });
@@ -486,6 +488,8 @@ mod tests {
         }
         let snapshot = PersistenceSnapshot {
             fetch_time_recovery_done: false,
+            job_list_mode: None,
+            selected_article_url: None,
             completed: vec![],
             pending_intake: vec![],
             blacklist,

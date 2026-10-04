@@ -1,12 +1,10 @@
-use super::{
-    AppState, ArchiveTokenEstimates, BatchObservation, BatchStatus, JobResultKind, TriagePhase,
-};
+use super::{AppState, ArchiveTokenEstimates, BatchObservation, BatchStatus, JobResultKind};
 use crate::archive_display::{ArchiveDisplayCounts, CacheDerivedArchive};
 #[cfg(test)]
 use crate::fixture_support::ManualPreTriageDecisions;
 use crate::working_corpus::CurrentWorkingCorpus;
 #[cfg(test)]
-use crate::PreTriagePhase;
+use crate::{PreTriagePhase, TriagePhase};
 use std::collections::{BTreeMap, HashMap};
 
 impl AppState {
@@ -109,129 +107,75 @@ impl AppState {
         }
     }
 
-    /// Returns the live-triage-only corpus used by archive actions.
-    ///
-    /// Pre-triage articles (even when ready) are excluded - they need triage first.
+    /// Curated window results under the current configuration, also after restart.
     pub(crate) fn archive_corpus(&self) -> CurrentWorkingCorpus {
-        CurrentWorkingCorpus::select_for_archive(self.triage(), self.briefing_triage_policy())
+        CurrentWorkingCorpus::from_saved_urls(
+            self.briefing_triage_policy().rank_eligible(
+                self.saved_results
+                    .values()
+                    .filter(|entry| entry.in_window && entry.actionable)
+                    .filter_map(|entry| {
+                        entry
+                            .triage
+                            .as_ref()
+                            .map(|(_, result)| (result.priority, entry.article.url.clone()))
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+        )
     }
 
     pub(in crate::state) fn archive_display_counts(&self) -> ArchiveDisplayCounts {
-        if matches!(self.triage().phase(), TriagePhase::Complete) {
-            return ArchiveDisplayCounts::live(CurrentWorkingCorpus::select_for_archive(
-                self.triage(),
+        let scored: Vec<_> = self
+            .saved_results
+            .values()
+            .filter(|entry| entry.in_window && entry.actionable)
+            .filter_map(|entry| {
+                entry
+                    .triage
+                    .as_ref()
+                    .map(|(_, result)| (result.priority, entry.article.url.as_str()))
+            })
+            .collect();
+        let total = self
+            .saved_results
+            .values()
+            .filter(|entry| entry.in_window && entry.actionable)
+            .count();
+        if !scored.is_empty() && scored.len() < total {
+            return ArchiveDisplayCounts::cache_derived(CacheDerivedArchive::from_scored(
+                scored,
+                total,
                 self.briefing_triage_policy(),
             ));
         }
-
-        if let Some(cache_derived) = self.cache_derived_archive_display() {
-            if cache_derived.cache_hit_count() > 0 {
-                return ArchiveDisplayCounts::cache_derived(cache_derived);
-            }
-        }
-
-        ArchiveDisplayCounts::live(CurrentWorkingCorpus::select_for_archive(
-            self.triage(),
-            self.briefing_triage_policy(),
-        ))
+        ArchiveDisplayCounts::live(self.archive_corpus())
     }
 
-    /// Derive the archive corpus URLs from the persisted triage cache for display
-    /// when the live triage session has not run this session.
-    ///
-    /// Covers the actionable pre-triage corpus — both `ReadyToTriage` and the
-    /// tentative `Reviewing` set, mirroring [`can_start_triage_from_pre_triage`] —
-    /// and includes each article that already has a triage cache hit under the
-    /// current prompt version, model, and context. Articles without a hit (never
-    /// triaged, or triaged under a now-superseded prompt/model) are simply omitted,
-    /// so the count reflects exactly the portion of the corpus that is already
-    /// triaged rather than collapsing to zero when coverage is partial.
-    ///
-    /// Returns `None` only when triage metadata is not yet loaded (cache keys can't
-    /// resolve) or there is no actionable pre-triage corpus, so the normal
-    /// live-session path applies. This is read-only and never mutates the
-    /// [`TriageSession`].
-    fn cache_derived_archive_display(&self) -> Option<CacheDerivedArchive> {
-        if !self.triage_metadata_ready() {
-            return None;
-        }
-        if !self.can_start_triage_from_pre_triage() {
-            return None;
-        }
-        let actionable_total = self.cache_derived_archive_index.urls.len();
-        if actionable_total == 0 {
-            return None;
-        }
-        let scored = self
-            .cache_derived_archive_index
-            .urls
-            .iter()
-            .zip(&self.cache_derived_archive_index.hash_positions)
-            .filter_map(|(url, position)| {
-                self.cache_derived_archive_index.priorities[position.as_ref().copied()?]
-                    .map(|priority| (priority, url.as_str()))
-            });
-        Some(CacheDerivedArchive::from_scored(
-            scored,
-            actionable_total,
-            self.briefing_triage_policy(),
-        ))
-    }
-
+    #[cfg(test)]
     pub(crate) fn rebuild_cache_derived_archive_index(&mut self) {
-        let mut index = CacheDerivedArchiveIndex::default();
-        if self.triage_metadata_ready() && self.can_start_triage_from_pre_triage() {
-            for url in self.pre_triage().tentative_included_url_refs() {
-                let content_hash = self.pre_triage().article_content_hash(url);
-                let hash_position = content_hash.map(|hash| {
-                    if let Some(&position) = index.index_by_hash.get(hash) {
-                        position
-                    } else {
-                        let position = index.priorities.len();
-                        index.index_by_hash.insert(hash.to_string(), position);
-                        index.priorities.push(self.cached_triage_priority(hash));
-                        position
-                    }
-                });
-                index.hash_positions.push(hash_position);
-                index.urls.push(url.to_string());
-            }
-        }
-        self.cache_derived_archive_index = index;
-    }
-
-    pub(in crate::state) fn refresh_cache_derived_archive_hash(&mut self, content_hash: &str) {
-        let Some(&position) = self
-            .cache_derived_archive_index
-            .index_by_hash
-            .get(content_hash)
-        else {
-            return;
-        };
-        self.cache_derived_archive_index.priorities[position] =
-            self.cached_triage_priority(content_hash);
+        self.rebuild_saved_results();
     }
 
     /// Compute token estimates for the two archive modes for the given ordered URL list.
     ///
     /// `filtered` is the number of archive-eligible URLs, `raw` is the eligible
     /// count minus summary coverage, and `tokens` use summary output tokens when
-    /// available or full article tokens otherwise. The content hash is resolved
-    /// from live triage first and pre-triage as the cache-derived fallback.
+    /// available or full article tokens otherwise. The saved-results index resolves
+    /// the newest summary under any key for each article's content hash.
     ///
     /// **Limitation:** `full_tokens` aggregates `JobState::tokens`; articles whose job
     /// has been pruned, or imported articles without a job, contribute 0 and are likely
-    /// underreported. Summary coverage uses the same live-triage-first,
-    /// pre-triage-fallback content-hash resolver as cached summary rows.
+    /// underreported. Summary coverage uses the same indexed any-key resolution
+    /// as exported summary bodies.
     pub(crate) fn archive_token_estimates(&self, urls: &[String]) -> ArchiveTokenEstimates {
         if urls.is_empty() {
             return ArchiveTokenEstimates::default();
         }
         let url_tokens = self.archive_article_token_lookup();
         archive_token_estimates_from_parts(urls, url_tokens, |url| {
-            self.content_hash_for_url(url)
-                .and_then(|hash| self.summary_cache().lookup_any_by_content_hash(hash))
-                .map(|entry| entry.result.output_tokens)
+            self.newest_summary_for_url(url)
+                .map(|summary| summary.output_tokens)
         })
     }
 
@@ -253,8 +197,9 @@ impl AppState {
     }
 
     pub(crate) fn content_hash_for_url(&self, url: &str) -> Option<&str> {
-        self.triage()
-            .article_content_hash(url)
+        self.saved_results_for_url(url)
+            .map(|entry| entry.article.content_hash.as_str())
+            .or_else(|| self.triage().article_content_hash(url))
             .or_else(|| self.pre_triage.article_content_hash(url))
     }
 
@@ -295,14 +240,6 @@ impl AppState {
 pub(in crate::state) struct ArchiveArticleTokenLookup {
     tokens_by_key: HashMap<String, BTreeMap<super::JobId, u64>>,
     key_by_exact_url: HashMap<String, String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Default)]
-pub(in crate::state) struct CacheDerivedArchiveIndex {
-    urls: Vec<String>,
-    hash_positions: Vec<Option<usize>>,
-    priorities: Vec<Option<u8>>,
-    index_by_hash: HashMap<String, usize>,
 }
 
 impl ArchiveArticleTokenLookup {
@@ -627,7 +564,7 @@ mod tests {
                     .map(|(_, result)| (result.priority, url.clone()))
             })
             .collect::<Vec<_>>();
-        if scored.is_empty() {
+        if scored.is_empty() || scored.len() == included.len() {
             let corpus = state.archive_corpus();
             assert_eq!(display.coverage(), &ArchiveCoverage::LiveComplete);
             assert_eq!(display.ordered_urls(), corpus.ordered_urls());
@@ -668,7 +605,15 @@ mod tests {
         ));
         set_test_triage_metadata(&mut state, 1);
         state.rebuild_cache_derived_archive_index();
-        assert_eq!(state.cache_derived_archive_index.priorities.len(), 1);
+        assert_eq!(
+            state
+                .saved_results
+                .values()
+                .map(|entry| &entry.article.content_hash)
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            1
+        );
         assert_indexed_cache_display_matches_scratch(&state);
 
         state.store_triage_result(

@@ -39,6 +39,10 @@ struct PersistedState {
     #[serde(default)]
     fetch_time_recovery_done: bool,
     #[serde(default)]
+    job_list_mode: Option<harvester_core::JobListMode>,
+    #[serde(default)]
+    selected_article_url: Option<String>,
+    #[serde(default)]
     pending_intake: Vec<String>,
     #[serde(default)]
     window_width: Option<i32>,
@@ -66,6 +70,10 @@ struct PersistedRuntimeSettings {
     links_in_store: bool,
     #[serde(default)]
     fetch_time_recovery_done: bool,
+    #[serde(default)]
+    job_list_mode: Option<harvester_core::JobListMode>,
+    #[serde(default)]
+    selected_article_url: Option<String>,
     #[serde(default)]
     pending_intake: Vec<String>,
     #[serde(default)]
@@ -412,6 +420,8 @@ pub struct RuntimeHydration {
     pub jobs: Vec<CompletedJobSnapshot>,
     pub notices: Vec<String>,
     pub recovery_needs_persist: bool,
+    pub job_list_mode: Option<harvester_core::JobListMode>,
+    pub selected_article_url: Option<String>,
 }
 
 pub fn load_runtime_hydration(state_path: &Path, output: &Path) -> RuntimeHydration {
@@ -456,6 +466,8 @@ pub fn load_runtime_hydration(state_path: &Path, output: &Path) -> RuntimeHydrat
         jobs,
         notices,
         recovery_needs_persist: recovery_done && !settings.fetch_time_recovery_done,
+        job_list_mode: settings.job_list_mode,
+        selected_article_url: settings.selected_article_url,
     }
 }
 
@@ -653,7 +665,15 @@ pub fn try_persist_runtime_state_with_pending(
     completed: &[SlimJobRecord],
     pending_intake: &[String],
 ) -> Result<(), String> {
-    persist_snapshot_with_notices(state_path, completed, pending_intake, false, |_| {})
+    persist_snapshot_with_notices(
+        state_path,
+        completed,
+        pending_intake,
+        false,
+        None,
+        None,
+        |_| {},
+    )
 }
 
 fn runtime_settings(state_path: &Path) -> PersistedRuntimeSettings {
@@ -675,6 +695,8 @@ pub(crate) fn persist_snapshot_with_notices(
     completed: &[SlimJobRecord],
     pending_intake: &[String],
     fetch_time_recovery_done: bool,
+    job_list_mode: Option<harvester_core::JobListMode>,
+    selected_article_url: Option<&str>,
     notice: impl FnMut(String),
 ) -> Result<(), String> {
     let _guard = RUNTIME_IO.lock().map_err(|e| e.to_string())?;
@@ -689,6 +711,10 @@ pub(crate) fn persist_snapshot_with_notices(
         existing = runtime_settings(state_path);
     }
     existing.fetch_time_recovery_done |= fetch_time_recovery_done;
+    if job_list_mode.is_some() {
+        existing.job_list_mode = job_list_mode;
+        existing.selected_article_url = selected_article_url.map(str::to_owned);
+    }
     persist_runtime_state_with_existing(state_path, completed, pending_intake, existing)
 }
 
@@ -704,6 +730,8 @@ fn persist_runtime_state_with_existing(
     let state = PersistedState {
         links_in_store: true,
         fetch_time_recovery_done: existing.fetch_time_recovery_done,
+        job_list_mode: existing.job_list_mode,
+        selected_article_url: existing.selected_article_url,
         completed: completed
             .iter()
             .map(|job| PersistedJob {

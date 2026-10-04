@@ -50,6 +50,7 @@ fn complete_candidate(
             output_tokens: 10,
         },
     );
+    crate::fixture_support::save_session_results(state);
 }
 
 fn outcome_for<'a>(

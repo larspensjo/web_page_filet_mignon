@@ -50,6 +50,29 @@ fn runner_with_receiver(base: &Path) -> (EffectRunner, mpsc::Receiver<Msg>) {
 }
 
 #[test]
+fn keyless_and_keyed_default_model_maps_match() {
+    use crate::host_bootstrap::{effective_model_map, llm_config_with_provider, HostLlmDefaults};
+    use harvester_engine::llm::{MockLlmProvider, ModelId, ProviderKind};
+    use std::sync::Arc;
+
+    let dir = tempdir().unwrap();
+    let (runner, _) = runner_with_receiver(dir.path());
+    let defaults = HostLlmDefaults {
+        default_model: ModelId::new(ProviderKind::OpenAi, "host-fallback"),
+        session_id_prefix: "test-",
+    };
+    let provider = Arc::new(MockLlmProvider::new());
+    let (config, _) = llm_config_with_provider(
+        &make_test_runtime_paths(dir.path()),
+        3,
+        &defaults,
+        provider.clone(),
+    );
+    assert_eq!(runner.llm_metadata_models, effective_model_map(&config));
+    assert!(provider.recorded_requests().is_empty());
+}
+
+#[test]
 fn rejected_model_effect_returns_a_terminal_completion() {
     let dir = tempdir().unwrap();
     let (mut runner, rx) = runner_with_receiver(dir.path());
@@ -108,10 +131,15 @@ fn completed_download_stores_links_and_restored_selection_loads_and_opens_them()
     let (restored, effects) = harvester_core::update(restored, Msg::JobSelected { job_id: 1 });
     assert_eq!(
         effects,
-        [Effect::LoadArticleLinks {
-            job_id: 1,
-            url: url.into()
-        }]
+        [
+            Effect::LoadArticleLinks {
+                job_id: 1,
+                url: url.into()
+            },
+            Effect::PersistRuntimeState {
+                snapshot: harvester_core::PersistenceSnapshot::capture(&restored)
+            }
+        ]
     );
     let (runner, rx2) = runner_with_receiver(temp.path());
     runner.enqueue(effects);
@@ -175,6 +203,7 @@ fn receive_delta(rx: &mpsc::Receiver<Msg>) -> harvester_engine::TriageArticleDel
     loop {
         match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
             Msg::TriageArticlesLoadProgress { .. } => {}
+            Msg::SavedArticlesLoaded { .. } => {}
             Msg::TriageArticlesLoaded { delta, .. } => return delta,
             other => panic!("unexpected load response: {other:?}"),
         }
@@ -609,6 +638,20 @@ fn load_articles_for_triage_respects_since_utc_filter() {
                 assert_eq!(files_total, 2);
                 assert!(files_scanned >= 1);
                 saw_progress = true;
+            }
+            Msg::SavedArticlesLoaded {
+                request_id,
+                articles,
+            } => {
+                assert_eq!(request_id, 1);
+                assert_eq!(
+                    articles.len(),
+                    2,
+                    "display metadata also includes pre-checkpoint articles"
+                );
+                assert!(articles
+                    .iter()
+                    .all(|article| !article.content_hash.is_empty()));
             }
             Msg::TriageArticlesLoaded { request_id, delta } => {
                 assert_eq!(request_id, 1);

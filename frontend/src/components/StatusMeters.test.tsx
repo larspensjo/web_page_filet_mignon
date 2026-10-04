@@ -1,4 +1,5 @@
 import withCorpus from "@fixtures/snapshots/idle_with_corpus.json";
+import reusedResults from "@fixtures/snapshots/run_in_progress_with_reused_results.json";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { SnapshotEnvelope } from "../ipc/types";
@@ -21,6 +22,13 @@ describe("StatusMeters", () => {
 			},
 		});
 		expect(corpus.view).toHaveProperty("archive_partial_coverage");
+		const reused = reusedResults as unknown as SnapshotEnvelope;
+		expect(reused.view.archive_partial_coverage).toEqual({
+			triaged: 1,
+			actionable_total: 5,
+		});
+		render(<StatusMeters view={reused.view} />);
+		expect(screen.getByText("1 of 5 triaged")).toBeInTheDocument();
 	});
 
 	it("renders one labelled archive meter and one quota meter from the fixture", () => {

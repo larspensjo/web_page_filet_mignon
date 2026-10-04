@@ -16,6 +16,7 @@ impl AppState {
     pub(crate) fn set_triage(&mut self, triage: TriageSession) {
         self.note_unfinished_inputs_changed();
         self.triage = triage;
+        self.rebuild_saved_results();
         self.dirty = true;
     }
 
@@ -95,6 +96,7 @@ impl AppState {
             self.pre_triage_load_context = None;
         }
         self.pre_triage = pre_triage;
+        self.rebuild_saved_results();
         self.dirty = true;
     }
 

@@ -83,7 +83,7 @@ fn fresh_triage_completion_records_snapshot_model_provenance() {
 }
 
 #[test]
-fn key_unavailable_triage_completion_exports_priority_without_model_provenance() {
+fn key_unavailable_triage_completion_is_absent_from_saved_export() {
     use harvester_engine::archive_url_key;
     use harvester_engine::llm::prompt::PromptId;
 
@@ -135,9 +135,7 @@ fn key_unavailable_triage_completion_exports_priority_without_model_provenance()
             _ => None,
         })
         .expect("ArchiveRequested effect expected");
-    let annotation = &annotations[&archive_url_key("https://example.com/no-key")];
-    assert_eq!(annotation.priority, Some(3));
-    assert!(annotation.triage_model.is_none());
+    assert!(!annotations.contains_key(&archive_url_key("https://example.com/no-key")));
 }
 
 #[test]

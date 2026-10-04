@@ -137,7 +137,7 @@ impl EffectRunner {
             None,
             None,
             registry,
-            HashMap::new(),
+            crate::host_bootstrap::default_effective_model_map(),
             platform_handler,
             persistence_sink,
             None,
@@ -471,3 +471,6 @@ impl Drop for EffectRunner {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod restart_tests;

@@ -17,6 +17,7 @@ import {
 type ReadingPaneProps = {
 	selected: SelectedJobView | null | undefined;
 	summary: BodyRef | null | undefined;
+	aiUnavailableMessage?: string | null;
 	/** The selected job's scored signal candidate, when it has one. */
 	candidate: SignalCandidateRow | null;
 	onToggleExclusion: (signalKey: string) => void;
@@ -25,12 +26,18 @@ type ReadingPaneProps = {
 function BodyContent({
 	state,
 	selected,
+	aiUnavailableMessage,
 }: {
+	aiUnavailableMessage?: string | null;
 	state: BodyState;
 	selected: SelectedJobView;
 }) {
 	if (state.kind === "unavailable")
-		return <p className="empty-state">No summary available.</p>;
+		return (
+			<p className="empty-state">
+				{aiUnavailableMessage ?? "Not summarized under the current settings."}
+			</p>
+		);
 	if (state.kind === "loading")
 		return <p className="empty-state">Loading article…</p>;
 	if (state.kind === "changed")
@@ -131,6 +138,7 @@ function ExclusionToggle({
 export function ReadingPane({
 	selected,
 	summary,
+	aiUnavailableMessage,
 	candidate,
 	onToggleExclusion,
 }: ReadingPaneProps) {
@@ -183,7 +191,11 @@ export function ReadingPane({
 			</header>
 			<AnnotationBand selected={selected} />
 			<div className="reading-body">
-				<BodyContent selected={selected} state={summaryBody} />
+				<BodyContent
+					selected={selected}
+					state={summaryBody}
+					aiUnavailableMessage={aiUnavailableMessage}
+				/>
 			</div>
 		</section>
 	);

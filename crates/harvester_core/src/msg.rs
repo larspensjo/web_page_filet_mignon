@@ -22,7 +22,9 @@ pub enum Msg {
     /// User pressed Esc inside the Jobs search box.
     JobsSearchCleared,
     /// App startup hook for reducer-owned metadata hydration.
+    RestoreDesktopView { mode: Option<crate::JobListMode>, selected_article_url: Option<String>, now: chrono::DateTime<chrono::Utc> },
     StartupHydrationRequested,
+    SavedArticlesLoaded { request_id: u64, articles: Vec<harvester_engine::WindowArticle> },
     /// User submitted the current URL input for ingestion.
     UrlsSubmitted,
     /// Restore previously completed jobs from persisted state.
@@ -247,6 +249,8 @@ impl Msg {
             Self::InputChanged(..) => "InputChanged",
             Self::JobsSearchQueryChanged(..) => "JobsSearchQueryChanged",
             Self::JobsSearchCleared => "JobsSearchCleared",
+            Self::RestoreDesktopView { .. } => "RestoreDesktopView",
+            Self::SavedArticlesLoaded { .. } => "SavedArticlesLoaded",
             Self::StartupHydrationRequested => "StartupHydrationRequested",
             Self::UrlsSubmitted => "UrlsSubmitted",
             Self::RestoreCompletedJobs(..) => "RestoreCompletedJobs",

@@ -64,8 +64,11 @@ another Full run can poll and download without restarting. Withdrawn and never-s
 unfinished under their current keys.
 
 Archive availability is owned by core and depends only on run state: it is disabled
-while a run is Active or Stopping, and enabled after Terminal regardless of failed
-or unfinished articles. Both opening the archive dialog and submitting an export
+while a run is Active or Stopping, and enabled while Idle, including immediately
+after restart without a run, regardless of failed or unfinished articles.
+Saved current-key results supply the dialog, selection, annotations and priority
+snapshot; a completed live triage session is not required. Both opening the archive
+dialog and submitting an export
 are gated by this state; a rejected submit reports that export is unavailable while
 a run is in progress. Desktop snapshots expose `archive_enabled` and `run_state`
 (`Idle`, `Active`, or `Stopping { in_flight }`) as IPC fields.
@@ -263,20 +266,41 @@ Scheduler probes do not mutate session cache keys when they are already equal,
 or fail already-empty pending queues. Waiting for occupied model slots and draining
 a quota halt therefore do not invalidate the aggregate on every host message.
 
-The triage cache also keeps a skipped-from-persistence alias index keyed by content
-hash for current-metadata lookups. Each alias carries the cached priority used by
-cache-derived archive coverage, avoiding a full cache-key allocation and second
-cache lookup per included article. Cache hydration rebuilds the index, while writes
-and eviction keep it aligned with the authoritative cache entries.
+The triage cache keeps a skipped-from-persistence alias index keyed by content
+hash for current-metadata lookups, including compatible dated model aliases.
+Cache hydration, writes and eviction keep it aligned with authoritative entries.
 
 The live triage session indexes article URLs to their positions, preserving first-entry
 lookup and first-completed-result precedence when duplicate URLs occur. Pre-triage
 indexes the first filter entry by URL and stores its unresolved-review count; set,
 merge, replacement, and manual-decision operations refresh those values. The
-reducer also stores cache-derived archive scores aligned with the included URL set.
-Global input-revision changes rebuild that score index; triage cache writes and
-evictions refresh only affected content hashes. Views rank the stored scores with
-the same archive selection policy used by dialog and export actions.
+reducer owns one saved-results index over the union of the checkpoint window and
+Last 24h, with explicit window membership. Startup effects publish root article
+metadata (including content hashes before the checkpoint), prompt contexts and
+metadata, and loaded result stores through messages; reducers perform no I/O.
+Each entry resolves current-key triage, summary and scoring, including scoring's
+upstream summary digest, plus the newest saved summary under any key for its hash.
+Rows, priorities, Results, reading-pane summaries and archive readiness read this
+index without walking result stores during view construction. Stale keys remain
+stored but are invisible to those current-key consumers. Live sessions still drive
+run progress and the running-triage ordering rule.
+Window membership follows corpus frontmatter, including missing or malformed
+fetch dates, as the scan and exporter do. Time-scoped job lists still exclude
+jobs without a valid fetch time. Startup selection restoration is discarded
+once a run is active, so late hydration never navigates during a run. Keyless
+and keyed startup share prompt-model defaults and model resolution.
+Restoration uses the job lists' fetch-time rules, so an undated archive member
+does not become a selected article hidden from the remembered time-scoped tab.
+
+Archive selection and processing remain window-bound. Annotations use current-key
+results and the matching stored triage model; the priority snapshot includes every
+window article with current-key triage, including excluded and unselected articles.
+Export bodies, dialog and header summary-token estimates use the indexed newest
+summary under any key, with full article tokens when no summary resolves. The
+legacy summary accessor still prefers a live session summary before that lookup.
+Global configuration and checkpoint changes rebuild membership and current keys;
+saved completions refresh affected entries, and clock movement expires Last 24h
+entries outside the window. The index is derived state, never persisted.
 
 Each job stores its canonical archive URL key when its URL is created or changed.
 The reducer maintains a job-token index on restore and token progress; duplicate
@@ -334,11 +358,17 @@ unfinished count. A host prints the reducer-recorded notice after initial admiss
   pending intake and both geometry pairs. Only desktop logical inner dimensions
   restore geometry; legacy window dimensions remain readable and carried forward.
   PersistenceSnapshot captures slim records without cloning any job's links. Normal
-  saves retain only pending intake, geometry and the optional links_in_store and
+  saves retain pending intake, geometry, the remembered tab and article URL, and the optional links_in_store and
   fetch_time_recovery_done markers from the old file. They consume completed jobs
   through typed deserialization and discard each immediately: RON's generic
   unknown-field skipping is prohibitively slow at corpus scale. Already-slim saves
   neither verify backups nor enumerate article-link files.
+  job_list_mode and selected_article_url are optional serde-default fields: old files
+  load and older readers ignore the additions. Startup restores selection only after
+  metadata and results hydrate and only if the article belongs to the restored tab.
+  Search and scroll are not persisted. Tab or selection changes emit PersistRuntimeState;
+  the existing 350 ms debounce and 2 s maximum interval coalesce writes, and close
+  flushes the worker. Geometry saves preserve the remembered view.
   Extracted links live in .article_links/<SHA-256 of canonical archive URL key>.json.
   Each record keeps URL, anchor text (text) and link kind. Selection emits
   LoadArticleLinks only for successful jobs with no resident links;

@@ -160,10 +160,15 @@ fn selection_loads_links_only_on_change_and_ignores_stale_replies() {
     let (state, effects) = update(state, Msg::JobSelected { job_id: 1 });
     assert_eq!(
         effects,
-        [Effect::LoadArticleLinks {
-            job_id: 1,
-            url: snapshots[0].url.clone()
-        }]
+        [
+            Effect::LoadArticleLinks {
+                job_id: 1,
+                url: snapshots[0].url.clone()
+            },
+            Effect::PersistRuntimeState {
+                snapshot: harvester_core::PersistenceSnapshot::capture(&state)
+            }
+        ]
     );
     let (state, effects) = update(state, Msg::JobSelected { job_id: 1 });
     assert!(effects.is_empty());
@@ -211,7 +216,12 @@ fn late_empty_or_failed_link_reply_preserves_completed_session_links() {
     let (state, _) = update(AppState::new(), Msg::InputChanged(url.into()));
     let (state, _) = update(state, Msg::UrlsSubmitted);
     let (state, effects) = update(state, Msg::JobSelected { job_id: 1 });
-    assert!(effects.is_empty(), "in-flight jobs do not load links");
+    assert!(
+        effects
+            .iter()
+            .all(|effect| matches!(effect, Effect::PersistRuntimeState { .. })),
+        "in-flight jobs only persist selection and do not load links"
+    );
     let (state, _) = update(
         state,
         Msg::JobDone {
@@ -248,7 +258,15 @@ fn late_empty_or_failed_link_reply_preserves_completed_session_links() {
     let (state, _) = update(state, Msg::InputChanged("https://example.com/other".into()));
     let (state, _) = update(state, Msg::UrlsSubmitted);
     let (state, effects) = update(state, Msg::JobSelected { job_id: 2 });
-    assert!(effects.is_empty());
+    assert_eq!(
+        effects,
+        [Effect::PersistRuntimeState {
+            snapshot: harvester_core::PersistenceSnapshot::capture(&state)
+        }]
+    );
     let (_, effects) = update(state, Msg::JobSelected { job_id: 1 });
-    assert!(effects.is_empty());
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::PersistRuntimeState { .. }]
+    ));
 }

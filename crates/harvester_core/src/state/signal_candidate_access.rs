@@ -10,6 +10,13 @@ use crate::signal_candidate_cache::{
 use crate::update::signal_candidate::SignalCandidateInputSnapshot;
 use harvester_engine::llm::dto::SignalCandidateResult;
 
+pub(super) enum SignalCandidateDisplayState<'a> {
+    Pending,
+    Scoring,
+    Failed { reason: &'a str },
+    Completed { result: &'a SignalCandidateResult },
+}
+
 impl AppState {
     /// Pin the signal-candidate archive selection snapshot for the current dialog session.
     pub fn pin_signal_candidate_selection(&mut self, selection: SignalCandidateArchiveSelection) {
@@ -42,6 +49,7 @@ impl AppState {
     pub(crate) fn set_signal_candidate_cache(&mut self, cache: SignalCandidateCache) {
         self.note_unfinished_global_inputs_changed();
         self.signal_candidate_cache = cache;
+        self.rebuild_saved_results();
     }
 
     pub fn try_reuse_signal_candidate(
@@ -69,7 +77,8 @@ impl AppState {
                 key.clone(),
                 entry.clone(),
             ));
-        self.signal_candidate_cache.insert(key, entry);
+        self.signal_candidate_cache.insert(key.clone(), entry);
+        self.refresh_saved_signal(&key);
     }
 
     pub(crate) fn signal_candidate_input_snapshot(
@@ -105,23 +114,60 @@ impl AppState {
             return Some(summary);
         }
 
-        let content_hash = self
-            .triage()
-            .article_content_hash(url)
-            .or_else(|| self.pre_triage.article_content_hash(url))?;
-
-        self.summary_cache()
-            .lookup_any_by_content_hash(content_hash)
-            .map(|entry| &entry.result)
+        self.newest_summary_for_url(url)
     }
 
-    /// The live signal-candidate selection computed from the current session:
+    pub(crate) fn saved_signal_count(&self) -> u32 {
+        self.saved_results
+            .values()
+            .filter(|entry| entry.in_window && entry.actionable && entry.signal.is_some())
+            .count() as u32
+    }
+
+    pub(in crate::state) fn display_signal_states(
+        &self,
+    ) -> Vec<(&str, SignalCandidateDisplayState<'_>)> {
+        use crate::signal_candidate::SignalCandidateState;
+        let mut states: std::collections::BTreeMap<_, _> = self
+            .saved_results
+            .values()
+            .filter_map(|entry| {
+                entry.signal.as_ref().map(|result| {
+                    (
+                        entry.article.url.as_str(),
+                        SignalCandidateDisplayState::Completed { result },
+                    )
+                })
+            })
+            .collect();
+        for (url, state) in self.signal_candidate().iter_states() {
+            let state = match state {
+                SignalCandidateState::Pending => SignalCandidateDisplayState::Pending,
+                SignalCandidateState::Scoring { .. } => SignalCandidateDisplayState::Scoring,
+                SignalCandidateState::Failed { reason } => {
+                    SignalCandidateDisplayState::Failed { reason }
+                }
+                SignalCandidateState::Completed { .. } => continue,
+            };
+            states.entry(url).or_insert(state);
+        }
+        states.into_iter().collect()
+    }
+
+    /// The signal-candidate selection computed from saved current-key window results:
     /// the same threshold + exclusion logic the Archive dialog uses. Single
     /// source of truth shared by the dialog snapshot and archive selection.
     pub(crate) fn signal_candidate_selection(&self) -> SignalCandidateSelection {
         let scored: Vec<ScoredCandidate> = self
-            .signal_candidate()
-            .iter_completed()
+            .saved_results
+            .values()
+            .filter(|entry| entry.in_window && entry.actionable)
+            .filter_map(|entry| {
+                entry
+                    .signal
+                    .as_ref()
+                    .map(|result| (entry.article.url.as_str(), result))
+            })
             .map(|(url, result)| ScoredCandidate {
                 url: url.to_string(),
                 result: result.clone(),
@@ -144,10 +190,10 @@ impl AppState {
     ///
     /// Note: in-flight scoring is intentionally not consulted here. Callers that
     /// must not act mid-scoring should gate before calling this accessor.
-    /// Callers must also gate on live [`crate::TriagePhase::Complete`].
+    /// Archive actions gate on run state; a completed live triage session is not required.
     pub fn archive_final_selection(&self) -> ArchiveFinalSelection {
         let base = self.archive_corpus();
-        let completed = self.signal_candidate().completed_count();
+        let completed = self.saved_signal_count();
         let failed = self.signal_candidate().failed_count();
 
         if completed == 0 && failed == 0 {

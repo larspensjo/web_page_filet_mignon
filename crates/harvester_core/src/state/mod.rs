@@ -28,6 +28,7 @@ mod prompt;
 mod provider_alert;
 mod run_progress;
 pub(crate) use run_progress::PollPipelineJobSnapshot;
+mod saved_results;
 mod signal_candidate_access;
 mod source_poll;
 mod ui_state;
@@ -270,7 +271,16 @@ pub struct AppState {
     session: SessionState,
     jobs: BTreeMap<JobId, JobState>,
     archive_article_tokens: batch::ArchiveArticleTokenLookup,
-    cache_derived_archive_index: batch::CacheDerivedArchiveIndex,
+    pub(crate) saved_articles_ready: bool,
+    pub(crate) restored_checkpoint_ready: bool,
+    pub(crate) pending_selected_article_url: Option<String>,
+    saved_articles: BTreeMap<String, harvester_engine::WindowArticle>,
+    saved_newest_summaries: HashMap<String, crate::SummaryCacheKey>,
+    saved_urls_by_hash: HashMap<String, Vec<String>>,
+    saved_urls_by_signal_key: HashMap<crate::SignalCandidateCacheKey, Vec<String>>,
+    saved_results: BTreeMap<String, saved_results::SavedArticleResults>,
+    saved_scope_clock: Option<chrono::DateTime<chrono::Utc>>,
+    saved_results_global_revision: u64,
     metrics: MetricsState,
     ui: UiState,
     seen_urls: HashSet<String>,
@@ -379,7 +389,16 @@ impl Default for AppState {
             session: SessionState::Idle,
             jobs: BTreeMap::new(),
             archive_article_tokens: batch::ArchiveArticleTokenLookup::default(),
-            cache_derived_archive_index: batch::CacheDerivedArchiveIndex::default(),
+            saved_articles_ready: false,
+            restored_checkpoint_ready: false,
+            pending_selected_article_url: None,
+            saved_articles: BTreeMap::new(),
+            saved_newest_summaries: HashMap::new(),
+            saved_urls_by_hash: HashMap::new(),
+            saved_urls_by_signal_key: HashMap::new(),
+            saved_results: BTreeMap::new(),
+            saved_scope_clock: None,
+            saved_results_global_revision: 0,
             metrics: MetricsState::default(),
             ui: UiState::default(),
             seen_urls: HashSet::new(),

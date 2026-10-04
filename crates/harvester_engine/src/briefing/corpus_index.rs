@@ -113,6 +113,16 @@ impl CorpusScanIndex {
         Ok(times)
     }
 
+    /// Metadata for display hydration, including articles before the checkpoint.
+    pub fn article_metadata(&self) -> Vec<WindowArticle> {
+        let mut files: Vec<_> = self.files.iter().collect();
+        files.sort_by_key(|(path, _)| *path);
+        files
+            .into_iter()
+            .filter_map(|(_, file)| file.article.clone())
+            .collect()
+    }
+
     pub fn clear(&mut self) {
         self.files.clear();
     }

@@ -161,6 +161,7 @@ impl TriageCache {
         Some((stored_key, &entry.result))
     }
 
+    #[cfg(test)]
     pub(crate) fn lookup_current_priority_parts(
         &self,
         content_hash: &str,

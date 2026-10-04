@@ -348,10 +348,12 @@ impl EffectRunner {
                 });
             }
             Effect::LoadLlmMetadata => {
+                let prompts_dir = self.paths.prompts_dir.clone();
                 let msg_tx = self.msg_tx.clone();
                 let registry = self.prompt_registry.clone();
                 let models = self.llm_metadata_models.clone();
                 thread::spawn(move || {
+                    super::configuration::load_overlays(&prompts_dir, &registry);
                     let active_versions = {
                         let guard = registry.read().unwrap();
                         guard.active_versions_map()

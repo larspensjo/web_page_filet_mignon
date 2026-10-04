@@ -96,7 +96,8 @@ impl AppState {
     pub fn triage_result_for_job(&self, job_id: JobId) -> Option<&ArticleTriageResult> {
         self.jobs
             .get(&job_id)
-            .and_then(|job| self.triage.result_for_url(&job.url))
+            .and_then(|job| self.saved_results_for_url(&job.url))
+            .and_then(|entry| entry.triage.as_ref().map(|(_, result)| result))
     }
 
     pub(crate) fn restore_completed_jobs(&mut self, entries: Vec<CompletedJobSnapshot>) {
@@ -166,6 +167,55 @@ impl AppState {
         self.set_briefing(crate::briefing::BriefingSession::default());
         self.set_triage(TriageSession::default());
         self.source_states = SourceStateIndex::default();
+    }
+
+    pub fn remembered_article_url(&self) -> Option<String> {
+        self.selected_job_id()
+            .and_then(|id| self.job_url_for(id))
+            .map(str::to_owned)
+            .or_else(|| self.pending_selected_article_url.clone())
+    }
+
+    pub(crate) fn restore_desktop_selection_if_ready(&mut self) -> Option<crate::Effect> {
+        if self.run_progress_is_active() {
+            self.pending_selected_article_url = None;
+            return None;
+        }
+        if !self.saved_articles_ready
+            || !self.restored_checkpoint_ready
+            || !self.prompt_contexts_ready
+            || !self.triage_metadata_ready()
+        {
+            return None;
+        }
+        let url = self.pending_selected_article_url.take()?;
+        let key = harvester_engine::archive_url_key(&url);
+        let entry = self.saved_results.get(&key)?;
+        let (id, job) = self
+            .jobs
+            .iter()
+            .find(|(_, job)| job.archive_url_key() == key)?;
+        let id = *id;
+        let in_tab = match self.job_list_mode() {
+            crate::JobListMode::Results => entry.signal.is_some(),
+            crate::JobListMode::SinceCheckpoint => {
+                super::view_builder::is_since_checkpoint(job, self.briefing_since_utc())
+            }
+            crate::JobListMode::Last24Hours => super::view_builder::is_within_recent_window(
+                job,
+                self.last_observed_utc()
+                    .map(|now| now - chrono::Duration::hours(24)),
+            ),
+        };
+        if !in_tab {
+            return None;
+        }
+        self.select_job(id);
+        self.article_links_load_url(id)
+            .map(|url| crate::Effect::LoadArticleLinks {
+                job_id: id,
+                url: url.to_owned(),
+            })
     }
 
     pub(crate) fn select_job(&mut self, job_id: JobId) {

@@ -105,6 +105,14 @@ fn archive_submit_and_open_are_gated_while_run_is_active() {
 fn archive_submit_is_gated_until_a_stopping_run_finishes_draining() {
     init_logging();
     let state = complete_triage_state_for_test(1);
+    let (state, _) = update(
+        state,
+        Msg::AiAvailabilityDetected {
+            availability: crate::AiAvailability::Unavailable {
+                reason: crate::AiUnavailableReason::MissingApiKey,
+            },
+        },
+    );
     let (state, open_effects) = update(state, Msg::ArchiveClicked);
     let request_id = archive_request_id(&open_effects);
     let (state, _) = update(
@@ -397,7 +405,7 @@ fn archive_token_estimates_uses_summary_output_tokens_when_available() {
 }
 
 #[test]
-fn view_job_rows_include_cached_summary_tokens() {
+fn view_job_rows_hide_stale_cached_summary_tokens() {
     use crate::briefing::ArticleSummaryResult;
     use crate::summary_cache::SummaryCacheKey;
     use harvester_engine::llm::dto::SummaryEntities;
@@ -435,12 +443,12 @@ fn view_job_rows_include_cached_summary_tokens() {
         .expect("expected matching job row");
 
     assert_eq!(row.tokens, Some(500));
-    assert_eq!(row.summary_tokens, Some(42));
-    assert!(row.has_summary);
+    assert_eq!(row.summary_tokens, None);
+    assert!(!row.has_summary);
 }
 
 #[test]
-fn view_job_rows_use_pre_triage_content_hash_for_cached_summary_tokens() {
+fn view_job_rows_hide_stale_pre_triage_cached_summary_tokens() {
     use crate::briefing::{ArticleSummaryResult, LoadedArticle};
     use crate::pre_triage_filter::{PreTriagePolicy, PreTriageSession};
     use crate::summary_cache::SummaryCacheKey;
@@ -492,8 +500,8 @@ fn view_job_rows_use_pre_triage_content_hash_for_cached_summary_tokens() {
         .expect("expected matching job row");
 
     assert_eq!(row.tokens, Some(500));
-    assert_eq!(row.summary_tokens, Some(42));
-    assert!(row.has_summary);
+    assert_eq!(row.summary_tokens, None);
+    assert!(!row.has_summary);
 }
 
 #[test]
@@ -1093,6 +1101,7 @@ fn archive_dialog_submitted_emits_triage_and_signal_annotations() {
     init_logging();
     let mut state = complete_triage_state_for_test(2);
     complete_signal_candidate(&mut state, 1, 0, "zero-event");
+    crate::fixture_support::save_session_results(&mut state);
     let (state, _) = update(state, Msg::ArchiveClicked);
     let request_id = state.archive_request_id();
     let (_state, effects) = update(
@@ -1122,7 +1131,7 @@ fn archive_dialog_submitted_emits_triage_and_signal_annotations() {
     let triaged = &annotations[&archive_url_key("https://triage-complete.com/0")];
     assert_eq!(triaged.priority, Some(3));
     assert_eq!(triaged.tags, Some(vec![]));
-    assert!(triaged.triage_model.is_none());
+    assert_eq!(triaged.triage_model.as_deref(), Some("fixture-triage"));
     assert!(triaged.signal_key.is_none());
     let scored = &annotations[&archive_url_key("https://triage-complete.com/1")];
     assert_eq!(scored.priority, Some(3));
@@ -1137,6 +1146,7 @@ fn archive_submit_priority_snapshot_includes_unselected_completed_result() {
     init_logging();
     let mut state = complete_triage_state_for_test(2);
     complete_signal_candidate(&mut state, 0, 80, "selected-event");
+    crate::fixture_support::save_session_results(&mut state);
     let (state, _) = update(state, Msg::ArchiveClicked);
     let request_id = state.archive_request_id();
     let (_state, effects) = update(
@@ -1188,6 +1198,7 @@ fn archive_submit_priority_snapshot_includes_manually_excluded_candidate() {
     let mut state = complete_triage_state_for_test(2);
     complete_signal_candidate(&mut state, 0, 80, "selected-event");
     complete_signal_candidate(&mut state, 1, 90, "excluded-event");
+    crate::fixture_support::save_session_results(&mut state);
     let (state, _) = update(
         state,
         Msg::ToggleSignalCandidateExclusion {
@@ -1236,7 +1247,8 @@ fn archive_annotations_are_read_at_submit_after_scoring_without_changing_pinned_
     use harvester_engine::llm::prompt::PromptId;
 
     init_logging();
-    let state = complete_triage_state_for_test(2);
+    let mut state = with_signal_candidate_metadata(complete_triage_state_for_test(2));
+    seed_summaries_for_triage_hashes(&mut state, 2);
     let (mut state, _) = update(state, Msg::ArchiveClicked);
     let request_id = state.archive_request_id();
     let url = "https://triage-complete.com/0";
@@ -1245,7 +1257,11 @@ fn archive_annotations_are_read_at_submit_after_scoring_without_changing_pinned_
         .enqueue(url.to_string(), "fixture-input".to_string());
     state.signal_candidate_mut().mark_scoring(url, 77);
     state.record_pending_llm_request(77, PromptId::ArticleSignalCandidate);
+    let snapshot = crate::update::signal_candidate::build_input_snapshot(&state, url)
+        .expect("current upstream fixture");
+    state.set_signal_candidate_input_snapshot(url, snapshot);
 
+    crate::fixture_support::save_session_results(&mut state);
     let (state, _) = update(
         state,
         Msg::LlmCompleted {
@@ -2106,6 +2122,7 @@ fn archive_clicked_reports_signal_candidate_snapshot() {
         },
     );
 
+    crate::fixture_support::save_session_results(&mut state);
     let (state, effects) = update(state, Msg::ArchiveClicked);
     let effect = effects
         .into_iter()
@@ -2129,7 +2146,11 @@ fn archive_clicked_reports_signal_candidate_snapshot() {
             assert_eq!(signal_candidate_scoring_total, 1);
             assert_eq!(
                 signal_candidate_token_estimates,
-                crate::ArchiveTokenEstimates::default()
+                crate::ArchiveTokenEstimates {
+                    full_tokens: 0,
+                    summary_tokens: 1,
+                    summary_coverage: 1
+                }
             );
         }
         _ => unreachable!(),
@@ -2172,6 +2193,7 @@ fn archive_dialog_submit_uses_pinned_signal_candidate_snapshot_and_clears_overri
         },
     );
 
+    crate::fixture_support::save_session_results(&mut state);
     let (state, _) = update(
         state,
         Msg::ToggleSignalCandidateExclusion {
@@ -2355,6 +2377,7 @@ fn signal_candidate_selection_applies_threshold_and_order() {
         );
     }
 
+    crate::fixture_support::save_session_results(&mut state);
     let selection = state.signal_candidate_selection();
     assert_eq!(
         selection.selected_urls,
@@ -2395,6 +2418,7 @@ fn archive_final_selection_signal_filtered_matches_shared_selection() {
         );
     }
 
+    crate::fixture_support::save_session_results(&mut state);
     let final_selection = state.archive_final_selection();
     assert_eq!(
         final_selection.source,
@@ -2443,6 +2467,7 @@ fn archive_final_selection_settled_empty_falls_back_to_full_corpus() {
         );
     }
 
+    crate::fixture_support::save_session_results(&mut state);
     let final_selection = state.archive_final_selection();
     assert_eq!(
         final_selection.source,
@@ -2754,6 +2779,7 @@ fn signal_candidate_mode_keeps_raw_count_over_full_archive_corpus() {
     assert_eq!(state.signal_candidate().enqueued_count(), 2);
     assert_eq!(state.signal_candidate().completed_count(), 2);
 
+    crate::fixture_support::save_session_results(&mut state);
     let view = state.view();
 
     // Bar/filtered reflect the export subset: the single selected candidate.
@@ -2842,7 +2868,7 @@ fn cache_derived_archive_estimates_use_pre_triage_content_hash_for_summaries() {
 }
 
 #[test]
-fn cache_derived_startup_counts_never_reach_full_archive_export() {
+fn saved_startup_counts_reach_full_archive_export() {
     init_logging();
     let urls = &[
         "https://startup-export.example/1",
@@ -2860,10 +2886,10 @@ fn cache_derived_startup_counts_never_reach_full_archive_export() {
             _ => None,
         })
         .expect("OpenArchiveDialog effect expected");
-    assert_eq!(open, 0);
+    assert_eq!(open, 2);
     assert!(matches!(
         state.pinned_archive_corpus().map(|corpus| corpus.source()),
-        Some(crate::CurrentWorkingCorpusSource::Unavailable)
+        Some(crate::CurrentWorkingCorpusSource::TriageComplete)
     ));
 
     let request_id = state.archive_request_id();
@@ -2885,11 +2911,14 @@ fn cache_derived_startup_counts_never_reach_full_archive_export() {
             _ => None,
         })
         .expect("ArchiveRequested effect expected");
-    assert!(ordered_urls.is_empty());
+    assert_eq!(
+        ordered_urls,
+        urls.iter().map(|url| url.to_string()).collect::<Vec<_>>()
+    );
 }
 
 #[test]
-fn cache_derived_startup_counts_do_not_enable_signal_candidate_export() {
+fn saved_startup_counts_hide_signal_results_without_current_upstream_keys() {
     use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
 
     init_logging();
