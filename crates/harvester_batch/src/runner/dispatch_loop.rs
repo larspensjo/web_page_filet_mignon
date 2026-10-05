@@ -294,6 +294,10 @@ fn run_dispatch_loop_with_sink_inner(
         // Check for shutdown signal
         if shutdown_flag.load(Ordering::Relaxed) {
             engine_info!("[batch] Shutdown signal detected in dispatch loop");
+            if let Some(p) = progress.as_deref_mut() {
+                p.set_stopping(true);
+                p.paint(state, state.llm_quota().usage.cost_microdollars, true);
+            }
             let obs = state.batch_observation();
             return Ok(classify_cycle_outcome(&obs));
         }
@@ -323,7 +327,6 @@ fn run_dispatch_loop_with_sink_inner(
                     *state = new_state;
                     queued_effects.extend(effects);
                     if let Some(p) = progress.as_deref_mut() {
-                        p.clear_phase_override();
                         p.paint(state, state.llm_quota().usage.cost_microdollars, false);
                     }
                 }
@@ -383,7 +386,6 @@ fn run_dispatch_loop_with_sink_inner(
 
         // Check for settlement after processing available work.
         if let Some(p) = progress.as_deref_mut() {
-            p.clear_phase_override();
             p.paint(state, state.llm_quota().usage.cost_microdollars, false);
         }
         let obs = state.batch_observation();

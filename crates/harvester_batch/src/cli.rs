@@ -33,29 +33,21 @@ pub struct Args {
     #[arg(long)]
     pub force_unlock: bool,
 
-    /// Print per-pass progress diagnostics, including cycle, source, and model details.
-    #[arg(long)]
-    pub verbose_progress: bool,
+    /// Set the article time-filter checkpoint to the given RFC3339 timestamp
+    #[arg(long, alias = "set-briefing-since", value_name = "RFC3339")]
+    pub set_checkpoint: Option<String>,
 
-    /// Use ASCII markers and progress bars in the interactive dashboard.
-    #[arg(long)]
-    pub ascii_progress: bool,
+    /// Set the article time-filter checkpoint to the current UTC time
+    #[arg(long, alias = "set-briefing-since-now")]
+    pub set_checkpoint_now: bool,
 
-    /// Set the briefing time-filter checkpoint to the given RFC3339 timestamp
-    #[arg(long, value_name = "RFC3339")]
-    pub set_briefing_since: Option<String>,
+    /// Clear the article time-filter checkpoint (include all articles)
+    #[arg(long, alias = "clear-briefing-since")]
+    pub clear_checkpoint: bool,
 
-    /// Set the briefing time-filter checkpoint to the current UTC time
-    #[arg(long)]
-    pub set_briefing_since_now: bool,
-
-    /// Clear the briefing time-filter checkpoint (include all articles)
-    #[arg(long)]
-    pub clear_briefing_since: bool,
-
-    /// Print the current briefing time-filter checkpoint and exit
-    #[arg(long)]
-    pub show_briefing_since: bool,
+    /// Print the current article time-filter checkpoint and exit
+    #[arg(long, alias = "show-briefing-since")]
+    pub show_checkpoint: bool,
 
     /// Import browser-saved .htm/.html files from this directory.
     #[arg(long, value_name = "PATH")]
@@ -67,7 +59,7 @@ pub struct Args {
 }
 
 /// A resolved checkpoint management command.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum CheckpointCommand {
     Set(String),
     SetNow,
@@ -106,27 +98,27 @@ impl Args {
     /// Resolve the checkpoint flags into a single command, or `None` if no flags are set.
     /// Returns `Err` if more than one checkpoint flag is set simultaneously.
     pub fn checkpoint_command(&self) -> Result<Option<CheckpointCommand>, String> {
-        let count = self.set_briefing_since.is_some() as usize
-            + self.set_briefing_since_now as usize
-            + self.clear_briefing_since as usize
-            + self.show_briefing_since as usize;
+        let count = self.set_checkpoint.is_some() as usize
+            + self.set_checkpoint_now as usize
+            + self.clear_checkpoint as usize
+            + self.show_checkpoint as usize;
         if count > 1 {
             return Err(
-                "--set-briefing-since, --set-briefing-since-now, --clear-briefing-since, \
-                 and --show-briefing-since are mutually exclusive"
+                "--set-checkpoint, --set-checkpoint-now, --clear-checkpoint, \
+                 and --show-checkpoint are mutually exclusive"
                     .to_string(),
             );
         }
-        if self.show_briefing_since {
+        if self.show_checkpoint {
             return Ok(Some(CheckpointCommand::Show));
         }
-        if self.set_briefing_since_now {
+        if self.set_checkpoint_now {
             return Ok(Some(CheckpointCommand::SetNow));
         }
-        if self.clear_briefing_since {
+        if self.clear_checkpoint {
             return Ok(Some(CheckpointCommand::Clear));
         }
-        if let Some(ts) = &self.set_briefing_since {
+        if let Some(ts) = &self.set_checkpoint {
             chrono::DateTime::parse_from_rfc3339(ts).map_err(|_| {
                 format!(
                     "Invalid timestamp format. Expected RFC3339, e.g. 2025-01-01T12:00:00Z\nGot: {}",
@@ -151,7 +143,7 @@ mod tests {
 
     #[test]
     fn checkpoint_command_show() {
-        let args = Args::parse_from(&["harvester_batch", "--show-briefing-since"]);
+        let args = Args::parse_from(&["harvester_batch", "--show-checkpoint"]);
         assert!(matches!(
             args.checkpoint_command(),
             Ok(Some(CheckpointCommand::Show))
@@ -160,7 +152,7 @@ mod tests {
 
     #[test]
     fn checkpoint_command_set_now() {
-        let args = Args::parse_from(&["harvester_batch", "--set-briefing-since-now"]);
+        let args = Args::parse_from(&["harvester_batch", "--set-checkpoint-now"]);
         assert!(matches!(
             args.checkpoint_command(),
             Ok(Some(CheckpointCommand::SetNow))
@@ -169,7 +161,7 @@ mod tests {
 
     #[test]
     fn checkpoint_command_clear() {
-        let args = Args::parse_from(&["harvester_batch", "--clear-briefing-since"]);
+        let args = Args::parse_from(&["harvester_batch", "--clear-checkpoint"]);
         assert!(matches!(
             args.checkpoint_command(),
             Ok(Some(CheckpointCommand::Clear))
@@ -180,7 +172,7 @@ mod tests {
     fn checkpoint_command_valid_set_since() {
         let args = Args::parse_from(&[
             "harvester_batch",
-            "--set-briefing-since",
+            "--set-checkpoint",
             "2025-01-01T12:00:00Z",
         ]);
         match args.checkpoint_command() {
@@ -193,8 +185,7 @@ mod tests {
 
     #[test]
     fn checkpoint_command_invalid_timestamp_returns_err() {
-        let args =
-            Args::parse_from(&["harvester_batch", "--set-briefing-since", "not-a-timestamp"]);
+        let args = Args::parse_from(&["harvester_batch", "--set-checkpoint", "not-a-timestamp"]);
         let err = args.checkpoint_command().unwrap_err();
         assert!(err.contains("Invalid timestamp format"));
         assert!(err.contains("RFC3339"));
@@ -204,8 +195,8 @@ mod tests {
     fn checkpoint_command_rejects_multiple_flags() {
         let args = Args::parse_from(&[
             "harvester_batch",
-            "--set-briefing-since-now",
-            "--show-briefing-since",
+            "--set-checkpoint-now",
+            "--show-checkpoint",
         ]);
         assert!(args.checkpoint_command().is_err());
     }
@@ -232,8 +223,6 @@ mod tests {
         assert_eq!(args.prompts_dir, PathBuf::from("custom_prompts"));
         assert_eq!(args.llm_concurrency, 4);
         assert!(args.force_unlock);
-        assert!(!args.verbose_progress);
-        assert!(!args.ascii_progress);
     }
 
     #[test]
@@ -247,14 +236,43 @@ mod tests {
     }
 
     #[test]
-    fn progress_flags_default_to_false_and_parse_without_conflicts() {
-        let defaults = Args::parse_from(&["harvester_batch"]);
-        assert!(!defaults.verbose_progress);
-        assert!(!defaults.ascii_progress);
+    fn removed_progress_flags_are_rejected() {
+        for flag in ["--verbose-progress", "--ascii-progress"] {
+            let error = Args::try_parse_from(["harvester_batch", flag]).unwrap_err();
+            assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+        }
+    }
 
-        let args = Args::parse_from(&["harvester_batch", "--verbose-progress", "--ascii-progress"]);
-        assert!(args.verbose_progress);
-        assert!(args.ascii_progress);
+    #[test]
+    fn checkpoint_aliases_resolve_to_the_same_commands_and_stay_hidden() {
+        use clap::CommandFactory;
+        for (new, old) in [
+            ("--set-checkpoint", "--set-briefing-since"),
+            ("--set-checkpoint-now", "--set-briefing-since-now"),
+            ("--clear-checkpoint", "--clear-briefing-since"),
+            ("--show-checkpoint", "--show-briefing-since"),
+        ] {
+            let mut new_args = vec!["harvester_batch", new];
+            let mut old_args = vec!["harvester_batch", old];
+            if new == "--set-checkpoint" {
+                new_args.push("2025-01-01T12:00:00Z");
+                old_args.push("2025-01-01T12:00:00Z");
+            }
+            assert_eq!(
+                Args::parse_from(&new_args).checkpoint_command(),
+                Args::parse_from(&old_args).checkpoint_command()
+            );
+            let help = Args::command().render_long_help().to_string();
+            assert!(help.contains(new));
+            assert!(!help.contains(old));
+        }
+        let aliases = Args::parse_from(&[
+            "harvester_batch",
+            "--show-briefing-since",
+            "--clear-briefing-since",
+        ]);
+        let error = aliases.checkpoint_command().unwrap_err();
+        assert_eq!(error, "--set-checkpoint, --set-checkpoint-now, --clear-checkpoint, and --show-checkpoint are mutually exclusive");
     }
 
     #[test]

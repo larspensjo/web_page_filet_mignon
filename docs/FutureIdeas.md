@@ -132,12 +132,13 @@ Origin:
 - SourceSection: Blockers — item 5 (Checkpoint CLI flags absent until Slice A ships)
 - Captured: 2026-02-21
 Tags: [batch, checkpoint, briefing, cli, slice-a]
-Summary: Add `--set-briefing-since`, `--set-briefing-since-now`, and `--clear-briefing-since` CLI flags to `crates/harvester_batch/src/cli.rs` for direct checkpoint management.
+Summary: The shipped `--set-checkpoint`, `--set-checkpoint-now`, `--clear-checkpoint` and `--show-checkpoint` CLI flags provide direct checkpoint management. The old briefing-since spellings remain hidden aliases; the file is still `.briefing_checkpoint.ron`.
 Rationale: The shipped flags provide checkpoint management directly against the built batch binary without a launcher UI dependency.
 SuccessCriteria:
-- `harvester_batch --set-briefing-since <timestamp>` persists the briefing window start.
-- `harvester_batch --set-briefing-since-now` sets briefing-since to the current timestamp.
-- `harvester_batch --clear-briefing-since` removes the briefing window constraint.
+- `harvester_batch --set-checkpoint <timestamp>` persists the article window start.
+- `harvester_batch --set-checkpoint-now` sets the checkpoint to the current timestamp.
+- `harvester_batch --clear-checkpoint` removes the checkpoint constraint.
+- `harvester_batch --show-checkpoint` prints the current checkpoint.
 - The launcher probe was removed; the flags are invoked directly against the built binary.
 Related: FI-Architecture-BatchOrchestration-0006, FI-LLM-Briefing-0001
 

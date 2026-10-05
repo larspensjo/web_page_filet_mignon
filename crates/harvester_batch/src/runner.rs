@@ -1,5 +1,4 @@
 use crate::cli::{Args, CheckpointCommand};
-use crate::progress::{BatchDisplayPhase, BatchRunBaseline};
 use chrono::Utc;
 use crossterm::{cursor::Show, QueueableCommand};
 use engine_logging::{engine_info, engine_warn};
@@ -46,8 +45,7 @@ pub(crate) use dispatch_loop::{
 use live_progress::LiveBatchProgress;
 pub(crate) use reporting::CycleStartWorkReporter;
 use reporting::{
-    format_optional_cycle_diagnostics, format_startup_notice, print_final_summary,
-    print_poll_stats, CycleCounts,
+    format_startup_notice, print_final_summary, print_poll_stats, CycleCounts, PollSummaryReporter,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -191,9 +189,8 @@ pub fn run(args: Args) -> Result<i32, String> {
     let (mut state, effect_runner) = bootstrap::prepare_runtime(&paths, &args, msg_tx.clone())?;
     prepare_startup_window(&mut state, &msg_rx, &effect_runner)?;
     let run_started_at = Instant::now();
-    let baseline = BatchRunBaseline::from_observation(&state.batch_observation());
     let mut cycle_baseline = CycleCounterBaseline::from_observation(&state.batch_observation());
-    let mut progress = LiveBatchProgress::new(baseline, interactive, args.ascii_progress);
+    let mut progress = LiveBatchProgress::new(interactive);
     if !interactive {
         println!("[batch] started mode=one-cycle");
     }
@@ -202,6 +199,7 @@ pub fn run(args: Args) -> Result<i32, String> {
     let mut reducer_observer = |_: &str, _: Duration| {};
     let mut cycle_counts = CycleCounts::default();
     let mut cycle_outcome = CycleOutcome::Success;
+    let mut poll_summary = PollSummaryReporter::default();
     execute_cycle_with_sink(
         &mut state,
         &paths,
@@ -215,21 +213,9 @@ pub fn run(args: Args) -> Result<i32, String> {
             cycle_outcome = outcome;
             let obs = state.batch_observation();
             cycle_counts = cycle_baseline.measure_cycle_and_advance(&obs);
-            let diagnostics = format_optional_cycle_diagnostics(
-                args.verbose_progress,
-                true,
-                true,
-                1,
-                &outcome,
-                &cycle_counts,
-                &obs,
-                &state.llm_usage_rows(),
-            );
-            if !diagnostics.is_empty() {
+            if let Some(summary) = poll_summary.take(&obs.source_poll_stats) {
                 progress.suspend_for_output();
-                for line in diagnostics {
-                    println!("{line}");
-                }
+                println!("{summary}");
                 progress.resume(state, state.llm_quota().usage.cost_microdollars);
             }
         },
@@ -241,11 +227,7 @@ pub fn run(args: Args) -> Result<i32, String> {
     drop(effect_runner);
     drop(msg_rx);
     persist_final_cycle_state(&paths, &state, None);
-    progress.set_phase(if shutdown_flag.load(Ordering::Relaxed) {
-        BatchDisplayPhase::Interrupted
-    } else {
-        BatchDisplayPhase::Complete
-    });
+    progress.set_stopping(shutdown_flag.load(Ordering::Relaxed));
     progress.paint(&state, state.llm_quota().usage.cost_microdollars, true);
     progress.suspend_for_output();
     print_final_summary(
@@ -256,7 +238,6 @@ pub fn run(args: Args) -> Result<i32, String> {
         cycle_counts.summary_completed,
         run_started_at.elapsed(),
     );
-    print_poll_stats(&state.batch_observation().source_poll_stats);
     progress.finish();
     engine_info!("[batch] Shutdown complete");
     Ok(exit_code_with_shutdown(
@@ -314,9 +295,8 @@ pub fn run_single_cycle_with_effect_sink(
     file_write_observer: &harvester_io::FileWriteObserver,
 ) -> Result<(), String> {
     let shutdown_flag = Arc::new(AtomicBool::new(false));
-    let baseline = BatchRunBaseline::from_observation(&state.batch_observation());
     let started = Instant::now();
-    let mut progress = LiveBatchProgress::new(baseline, false, false);
+    let mut progress = LiveBatchProgress::new(false);
     println!("[batch] started mode=one-cycle");
     progress.paint(state, state.llm_quota().usage.cost_microdollars, true);
     execute_cycle_with_sink(
@@ -331,7 +311,6 @@ pub fn run_single_cycle_with_effect_sink(
         |_, _, _| {},
         Some(file_write_observer),
     )?;
-    progress.set_phase(BatchDisplayPhase::Complete);
     progress.paint(state, state.llm_quota().usage.cost_microdollars, true);
     progress.suspend_for_output();
     let obs = state.batch_observation();
@@ -385,7 +364,6 @@ where
     // The reducer loop is the sole state owner. This checkpoint can race the
     // debounced writer; final shutdown writes again after the runner stops.
     engine_info!("[batch] Persisting state");
-    progress.set_phase(BatchDisplayPhase::Persisting);
     progress.paint(state, state.llm_quota().usage.cost_microdollars, true);
     persist_cycle_state(paths, state, file_write_observer);
     Ok(())
@@ -487,7 +465,7 @@ fn install_signal_handler(shutdown_flag: Arc<AtomicBool>, interactive: bool) {
         if shutdown_flag.swap(true, Ordering::Relaxed) {
             eprintln!("harvester_batch: interrupted again — exiting immediately");
             // The process exits without unwinding on the second interrupt, so
-            // Drop cannot restore a cursor hidden by the dashboard.
+            // Drop cannot restore a cursor hidden by the progress block.
             let mut stdout = std::io::stdout();
             restore_cursor_before_immediate_exit(&mut stdout, interactive);
             std::process::exit(130);

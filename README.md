@@ -72,6 +72,21 @@ The Batch launcher supplies no runtime arguments. External scheduling starts a
 new process for each cycle. Browser-page import and checkpoint editing remain
 available through the command-line options; see `harvester_batch --help`.
 
+Each cycle shows a compact progress block with elapsed time, cost so far, and
+remaining work for source scanning, downloading, triage, summaries and scoring.
+Counts match the desktop and exclude reused work; stopping shows work done.
+Terminal output redraws in place; redirected output prints stage-status changes,
+the start of stopping, changed forced updates and a 60-second heartbeat. Count-only
+changes wait for the next update; identical lines are suppressed. Ctrl+C stops
+safely; pressing it again exits immediately. The former `--verbose-progress` and
+`--ascii-progress` options are removed.
+
+Checkpoint commands are `--set-checkpoint <RFC3339>`, `--set-checkpoint-now`,
+`--clear-checkpoint` and `--show-checkpoint`. The old `--set-briefing-since`,
+`--set-briefing-since-now`, `--clear-briefing-since` and `--show-briefing-since`
+spellings remain accepted as hidden aliases. The file remains
+`.briefing_checkpoint.ron`.
+
 The launchers are interactive because they never add vault secrets to the
 environment of a process an LLM coding agent controls or can spawn: harvested
 article content flows into agent context, and environment variables are

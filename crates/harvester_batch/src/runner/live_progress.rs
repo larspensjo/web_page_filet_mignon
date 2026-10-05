@@ -1,47 +1,36 @@
 use crate::progress::{
-    BatchDisplayPhase, BatchProgressProjection, BatchProgressSnapshot, BatchRunBaseline,
-    PlainProgressReporter, ProgressClock, ProgressGlyphs, ProjectionContext, SystemProgressClock,
+    format_progress_block, progress_status_signature, PlainProgressReporter,
     TerminalProgressSurface,
 };
 use engine_logging::engine_warn;
-use harvester_core::AppState;
+use harvester_core::{AppState, PipelineRunPhase};
 use std::io::Write;
 use std::time::{Duration, Instant};
 
 const PROGRESS_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
 const PLAIN_PROGRESS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
 
+pub(super) trait ProgressClock {
+    fn now(&self) -> Instant;
+}
+
+pub(super) struct SystemProgressClock;
+impl ProgressClock for SystemProgressClock {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+}
+
 enum BatchProgressSurface<W: Write> {
     Terminal(TerminalProgressSurface<W>),
     Plain(PlainProgressReporter<W>),
 }
 
-impl BatchProgressSurface<std::io::Stdout> {
-    fn new(interactive: bool, ascii_progress: bool) -> Self {
-        if interactive {
-            Self::Terminal(TerminalProgressSurface::new(
-                std::io::stdout(),
-                progress_glyphs(ascii_progress),
-            ))
-        } else {
-            Self::Plain(PlainProgressReporter::new(std::io::stdout()))
-        }
-    }
-}
-
-fn progress_glyphs(ascii_progress: bool) -> ProgressGlyphs {
-    if ascii_progress {
-        ProgressGlyphs::Ascii
-    } else {
-        ProgressGlyphs::Unicode
-    }
-}
-
 impl<W: Write> BatchProgressSurface<W> {
-    fn paint(&mut self, snapshot: &BatchProgressSnapshot) {
+    fn paint(&mut self, lines: &[String]) {
         let result = match self {
-            Self::Terminal(surface) => surface.repaint(snapshot),
-            Self::Plain(reporter) => reporter.report(snapshot),
+            Self::Terminal(surface) => surface.repaint(lines),
+            Self::Plain(reporter) => reporter.report(lines),
         };
         if let Err(err) = result {
             engine_warn!(
@@ -50,33 +39,20 @@ impl<W: Write> BatchProgressSurface<W> {
             );
         }
     }
-
     fn suspend_for_output(&mut self) {
         if let Self::Terminal(surface) = self {
             if let Err(err) = surface.suspend_for_output() {
-                engine_warn!("[batch-progress] failed to suspend dashboard: {}", err);
+                engine_warn!("[batch-progress] failed to suspend block: {}", err);
             }
         }
     }
-
-    fn resume(&mut self, snapshot: &BatchProgressSnapshot) {
-        if let Self::Terminal(surface) = self {
-            if let Err(err) = surface.resume(snapshot) {
-                engine_warn!("[batch-progress] failed to resume dashboard: {}", err);
-            }
-        } else {
-            self.paint(snapshot);
-        }
-    }
-
     fn finish(&mut self) {
         if let Self::Terminal(surface) = self {
             if let Err(err) = surface.finish() {
-                engine_warn!("[batch-progress] failed to finish dashboard: {}", err);
+                engine_warn!("[batch-progress] failed to finish block: {}", err);
             }
         }
     }
-
     fn is_terminal(&self) -> bool {
         matches!(self, Self::Terminal(_))
     }
@@ -84,88 +60,94 @@ impl<W: Write> BatchProgressSurface<W> {
 
 pub(super) struct LiveBatchProgress<C: ProgressClock, W: Write> {
     clock: C,
-    projection: BatchProgressProjection,
+    started_at: Instant,
     surface: BatchProgressSurface<W>,
-    phase_override: Option<BatchDisplayPhase>,
+    stopping: bool,
+    last_check: Instant,
     last_render: Instant,
-    last_plain_phase: Option<BatchDisplayPhase>,
+    last_lines: Vec<String>,
+    last_statuses: Vec<&'static str>,
+    last_stopping: bool,
 }
 
 pub(super) type LiveSystemBatchProgress = LiveBatchProgress<SystemProgressClock, std::io::Stdout>;
 
-impl LiveBatchProgress<SystemProgressClock, std::io::Stdout> {
-    pub(super) fn new(baseline: BatchRunBaseline, interactive: bool, ascii_progress: bool) -> Self {
-        let clock = SystemProgressClock;
-        let surface = BatchProgressSurface::new(interactive, ascii_progress);
-        Self::with_parts(baseline, clock, surface)
+impl LiveSystemBatchProgress {
+    pub(super) fn new(interactive: bool) -> Self {
+        let surface = if interactive {
+            BatchProgressSurface::Terminal(TerminalProgressSurface::new(std::io::stdout()))
+        } else {
+            BatchProgressSurface::Plain(PlainProgressReporter::new(std::io::stdout()))
+        };
+        Self::with_parts(SystemProgressClock, surface)
     }
 }
 
 impl<C: ProgressClock, W: Write> LiveBatchProgress<C, W> {
-    fn with_parts(baseline: BatchRunBaseline, clock: C, surface: BatchProgressSurface<W>) -> Self {
-        let started_at = clock.monotonic_now();
+    fn with_parts(clock: C, surface: BatchProgressSurface<W>) -> Self {
+        let started_at = clock.now();
         Self {
             clock,
-            projection: BatchProgressProjection::new(baseline, started_at),
+            started_at,
             surface,
-            phase_override: None,
+            stopping: false,
+            last_check: started_at,
             last_render: started_at,
-            last_plain_phase: None,
+            last_lines: Vec::new(),
+            last_statuses: Vec::new(),
+            last_stopping: false,
         }
     }
-
-    pub(super) fn set_phase(&mut self, phase: BatchDisplayPhase) {
-        self.phase_override = Some(phase);
+    // Keep stopping presentation through final persistence, even after core settles.
+    pub(super) fn set_stopping(&mut self, stopping: bool) {
+        self.stopping |= stopping;
     }
-
-    pub(super) fn clear_phase_override(&mut self) {
-        self.phase_override = None;
-    }
-
-    fn snapshot(
-        &mut self,
-        state: &AppState,
-        cost_this_run_microdollars: u64,
-    ) -> BatchProgressSnapshot {
-        self.projection.snapshot(
-            &state.batch_observation(),
-            ProjectionContext {
-                phase_override: self.phase_override,
-                cost_this_run_microdollars,
-            },
-            &self.clock,
-        )
-    }
-
     pub(super) fn paint(&mut self, state: &AppState, cost: u64, force: bool) {
-        let now = self.clock.monotonic_now();
-        let due = now.saturating_duration_since(self.last_render) >= PROGRESS_REFRESH_INTERVAL;
-        let plain_due =
+        let now = self.clock.now();
+        let terminal = self.surface.is_terminal();
+        if terminal
+            && !force
+            && now.saturating_duration_since(self.last_check) < PROGRESS_REFRESH_INTERVAL
+        {
+            return;
+        }
+        self.last_check = now;
+        self.stopping |= state.pipeline_run_phase() == PipelineRunPhase::Stopping;
+        let heartbeat =
             now.saturating_duration_since(self.last_render) >= PLAIN_PROGRESS_HEARTBEAT_INTERVAL;
-        if !force && !due {
+        let progress = state.run_progress_view();
+        let statuses = progress_status_signature(&progress.stages, self.stopping);
+        // Plain output reports status transitions immediately, but count-only
+        // changes wait for a heartbeat or a forced paint with changed content.
+        if !terminal
+            && !force
+            && !heartbeat
+            && self.stopping == self.last_stopping
+            && statuses == self.last_statuses
+        {
             return;
         }
-        let snapshot = self.snapshot(state, cost);
-        let phase_changed = self.last_plain_phase != Some(snapshot.phase);
-        if !self.surface.is_terminal() && !force && !phase_changed && !plain_due {
+        let lines = format_progress_block(
+            &progress.stages,
+            self.stopping,
+            now.saturating_duration_since(self.started_at),
+            cost,
+        );
+        if !terminal && self.last_lines == lines {
             return;
         }
-        self.surface.paint(&snapshot);
+        self.surface.paint(&lines);
+        self.last_lines = lines;
+        self.last_statuses = statuses;
+        self.last_stopping = self.stopping;
         self.last_render = now;
-        self.last_plain_phase = Some(snapshot.phase);
     }
-
     pub(super) fn suspend_for_output(&mut self) {
         self.surface.suspend_for_output();
     }
-
     pub(super) fn resume(&mut self, state: &AppState, cost: u64) {
-        let snapshot = self.snapshot(state, cost);
-        self.surface.resume(&snapshot);
-        self.last_render = self.clock.monotonic_now();
-        self.last_plain_phase = Some(snapshot.phase);
+        self.paint(state, cost, true);
     }
-
     pub(super) fn finish(&mut self) {
         self.surface.finish();
     }
@@ -174,98 +156,51 @@ impl<C: ProgressClock, W: Write> LiveBatchProgress<C, W> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::progress::TestProgressClock;
-    use chrono::TimeZone;
-    use std::cell::{Cell, RefCell};
+    use harvester_core::{Msg, PipelineRunScope};
+    use std::cell::Cell;
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]
     struct SharedRunnerOutput(Arc<Mutex<Vec<u8>>>);
-
     impl SharedRunnerOutput {
-        fn bytes(&self) -> Vec<u8> {
-            self.0.lock().unwrap().clone()
-        }
-
         fn text(&self) -> String {
-            String::from_utf8(self.bytes()).unwrap()
+            String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
         }
     }
-
     impl Write for SharedRunnerOutput {
         fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
             self.0.lock().unwrap().extend_from_slice(buffer);
             Ok(buffer.len())
         }
-
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
     }
-
-    struct ManualWaitClock {
+    struct ManualClock {
         start: Instant,
         elapsed: Cell<Duration>,
-        wall: RefCell<chrono::DateTime<chrono::FixedOffset>>,
     }
-
-    impl ManualWaitClock {
-        fn new(wall: chrono::DateTime<chrono::FixedOffset>) -> Self {
+    impl ManualClock {
+        fn new() -> Self {
             Self {
                 start: Instant::now(),
                 elapsed: Cell::new(Duration::ZERO),
-                wall: RefCell::new(wall),
             }
         }
+        fn advance(&self, duration: Duration) {
+            self.elapsed.set(self.elapsed.get() + duration);
+        }
     }
-
-    impl ProgressClock for ManualWaitClock {
-        fn monotonic_now(&self) -> Instant {
+    impl ProgressClock for &ManualClock {
+        fn now(&self) -> Instant {
             self.start + self.elapsed.get()
         }
     }
-
-    impl TestProgressClock for ManualWaitClock {
-        fn wall_now(&self) -> chrono::DateTime<chrono::FixedOffset> {
-            *self.wall.borrow()
-        }
-
-        fn sleep(&self, duration: Duration) {
-            self.elapsed.set(self.elapsed.get() + duration);
-            let updated = *self.wall.borrow() + chrono::Duration::from_std(duration).unwrap();
-            *self.wall.borrow_mut() = updated;
-        }
-    }
-
-    impl ProgressClock for &ManualWaitClock {
-        fn monotonic_now(&self) -> Instant {
-            (*self).monotonic_now()
-        }
-    }
-
-    impl TestProgressClock for &ManualWaitClock {
-        fn wall_now(&self) -> chrono::DateTime<chrono::FixedOffset> {
-            (*self).wall_now()
-        }
-
-        fn sleep(&self, duration: Duration) {
-            (*self).sleep(duration);
-        }
-    }
-
-    fn empty_run_baseline() -> BatchRunBaseline {
-        BatchRunBaseline {
-            jobs_total: 0,
-            jobs_done: 0,
-            jobs_failed: 0,
-        }
-    }
-
     #[test]
     fn painted_cost_reflects_synchronous_session_usage() {
         let (state, _) = harvester_core::update(
             AppState::new(),
-            harvester_core::Msg::LlmQuotaUsageUpdated {
+            Msg::LlmQuotaUsageUpdated {
                 usage: harvester_core::LlmQuotaUsage {
                     calls: 1,
                     cost_microdollars: 1_250_000,
@@ -276,146 +211,176 @@ mod tests {
         for terminal in [false, true] {
             let output = SharedRunnerOutput::default();
             let surface = if terminal {
-                BatchProgressSurface::Terminal(TerminalProgressSurface::new(
-                    output.clone(),
-                    ProgressGlyphs::Ascii,
-                ))
+                BatchProgressSurface::Terminal(TerminalProgressSurface::new(output.clone()))
             } else {
                 BatchProgressSurface::Plain(PlainProgressReporter::new(output.clone()))
             };
-            let mut progress =
-                LiveBatchProgress::with_parts(empty_run_baseline(), SystemProgressClock, surface);
+            let mut progress = LiveBatchProgress::with_parts(SystemProgressClock, surface);
             progress.paint(&state, state.llm_quota().usage.cost_microdollars, true);
             assert!(output.text().contains("$1.25"), "{}", output.text());
             progress.suspend_for_output();
             progress.resume(&state, state.llm_quota().usage.cost_microdollars);
-            assert_eq!(output.text().matches("$1.25").count(), 2);
+            assert_eq!(
+                output.text().matches("$1.25").count(),
+                if terminal { 2 } else { 1 }
+            );
             progress.finish();
         }
     }
-
-    #[test]
-    fn ascii_progress_selects_ascii_glyphs_only_for_interactive_dashboard() {
-        assert_eq!(progress_glyphs(true), ProgressGlyphs::Ascii);
-        assert_eq!(progress_glyphs(false), ProgressGlyphs::Unicode);
-    }
-
     #[test]
     fn plain_progress_throttles_steady_heartbeats_and_flushes_each_phase_transition() {
-        let wall = chrono::FixedOffset::east_opt(2 * 60 * 60)
-            .unwrap()
-            .with_ymd_and_hms(2026, 7, 23, 9, 43, 30)
-            .single()
-            .unwrap();
-        let clock = ManualWaitClock::new(wall);
+        let clock = ManualClock::new();
         let output = SharedRunnerOutput::default();
         let surface = BatchProgressSurface::Plain(PlainProgressReporter::new(output.clone()));
-        let mut progress = LiveBatchProgress::with_parts(empty_run_baseline(), &clock, surface);
+        let mut progress = LiveBatchProgress::with_parts(&clock, surface);
         let state = AppState::new();
-
-        progress.set_phase(BatchDisplayPhase::Intake);
-        clock.sleep(PROGRESS_REFRESH_INTERVAL);
+        progress.paint(&state, 0, true);
+        clock.advance(PLAIN_PROGRESS_HEARTBEAT_INTERVAL - Duration::from_secs(1));
         progress.paint(&state, 0, false);
         assert_eq!(output.text().lines().count(), 1);
-
-        clock.sleep(PLAIN_PROGRESS_HEARTBEAT_INTERVAL - Duration::from_secs(1));
+        clock.advance(Duration::from_secs(1));
         progress.paint(&state, 0, false);
-        assert_eq!(
-            output.text().lines().count(),
-            1,
-            "steady-state output must remain quiet before the minute boundary"
-        );
-
-        clock.sleep(Duration::from_secs(1));
+        assert_eq!(output.text().lines().count(), 2);
+        clock.advance(PROGRESS_REFRESH_INTERVAL);
         progress.paint(&state, 0, false);
-        assert_eq!(
-            output.text().lines().count(),
-            2,
-            "exactly one steady-state heartbeat is due after one minute"
+        assert_eq!(output.text().lines().count(), 2);
+        // Real reducer transitions replace the old host-selected phase overrides.
+        let (state, _) = harvester_core::update(
+            state,
+            Msg::PipelineRunRequested {
+                scope: PipelineRunScope::Full,
+            },
         );
-
-        clock.sleep(PROGRESS_REFRESH_INTERVAL);
+        clock.advance(PROGRESS_REFRESH_INTERVAL);
         progress.paint(&state, 0, false);
-        assert_eq!(
-            output.text().lines().count(),
-            2,
-            "a second steady-state line must not follow within the minute"
-        );
-
-        progress.set_phase(BatchDisplayPhase::Triage);
-        clock.sleep(PROGRESS_REFRESH_INTERVAL);
+        assert_eq!(output.text().lines().count(), 3);
+        clock.advance(PROGRESS_REFRESH_INTERVAL);
         progress.paint(&state, 0, false);
-        assert_eq!(
-            output.text().lines().count(),
-            3,
-            "a phase transition must flush one line within the heartbeat window"
-        );
-
-        clock.sleep(PROGRESS_REFRESH_INTERVAL);
+        assert_eq!(output.text().lines().count(), 3);
+        let (state, _) = harvester_core::update(state, Msg::PollStarted { total: 2 });
+        // The following changes arrive at the same instant, inside the terminal
+        // repaint interval. Starting the poll changes a stage status and emits.
         progress.paint(&state, 0, false);
-        assert_eq!(
-            output.text().lines().count(),
-            3,
-            "the phase transition must emit exactly one line"
+        assert_eq!(output.text().lines().count(), 4);
+        let (state, _) = harvester_core::update(
+            state,
+            Msg::SourcePollCompleted {
+                source_id: harvester_engine::SourceId::new("first").unwrap(),
+                urls: Vec::new(),
+                kind: harvester_engine::SourceKind::Rss,
+                parsed: 0,
+                dedup_filtered: 0,
+            },
         );
-
-        progress.set_phase(BatchDisplayPhase::Summaries);
-        clock.sleep(PROGRESS_REFRESH_INTERVAL);
         progress.paint(&state, 0, false);
         assert_eq!(
             output.text().lines().count(),
             4,
-            "every distinct phase transition must flush exactly one line"
+            "count changes within a stage do not emit a line"
         );
+        assert!(!output.text().contains("Scanning sources: 1 of 2 to do"));
+        clock.advance(PLAIN_PROGRESS_HEARTBEAT_INTERVAL);
+        progress.paint(&state, 0, false);
+        assert_eq!(output.text().lines().count(), 5);
+        assert!(output.text().contains("Scanning sources: 1 of 2 to do"));
+        let (state, _) = harvester_core::update(
+            state,
+            Msg::SourcePollCompleted {
+                source_id: harvester_engine::SourceId::new("second").unwrap(),
+                urls: Vec::new(),
+                kind: harvester_engine::SourceKind::Rss,
+                parsed: 0,
+                dedup_filtered: 0,
+            },
+        );
+        let (state, _) = harvester_core::update(state, Msg::AllSourcesPollEnded);
+        progress.paint(&state, 0, false);
+        assert_eq!(
+            output.text().lines().count(),
+            6,
+            "stage completion emits a line"
+        );
+        assert!(output
+            .text()
+            .contains("Scanning sources: 0 of 2 to do | Done"));
+    }
+    #[test]
+    fn terminal_progress_stays_live_across_stages_and_finishes_once() {
+        let output = SharedRunnerOutput::default();
+        let surface = BatchProgressSurface::Terminal(TerminalProgressSurface::new(output.clone()));
+        let mut progress = LiveBatchProgress::with_parts(SystemProgressClock, surface);
+        let mut state = AppState::new();
+        progress.paint(&state, 0, true);
+        for msg in [
+            Msg::PipelineRunRequested {
+                scope: PipelineRunScope::Full,
+            },
+            Msg::PipelineRunAdvance,
+        ] {
+            (state, _) = harvester_core::update(state, msg);
+            progress.paint(&state, 0, true);
+        }
+        let before_finish = output.text();
+        assert_eq!(before_finish.matches("\u{1b}[?25l").count(), 1);
+        assert!(!before_finish.contains("\u{1b}[?25h"));
+        progress.finish();
+        progress.finish();
+        let finished = output.text();
+        assert_eq!(finished.matches("\u{1b}[?25h").count(), 1);
+        assert!(finished.ends_with("\u{1b}[?25h\n"));
+    }
+    #[test]
+    fn stopping_counts_persist_through_final_paints() {
+        let clock = ManualClock::new();
+        let output = SharedRunnerOutput::default();
+        let surface = BatchProgressSurface::Plain(PlainProgressReporter::new(output.clone()));
+        let mut progress = LiveBatchProgress::with_parts(&clock, surface);
+        progress.set_stopping(true);
+        let state = AppState::new();
+        progress.paint(&state, 0, true);
+        progress.set_stopping(false);
+        clock.advance(Duration::from_secs(1));
+        progress.paint(&state, 0, true);
+        assert_eq!(output.text().matches("Triage: 0 done").count(), 2);
+        assert!(!output.text().contains("to do"));
     }
 
     #[test]
-    fn terminal_progress_stays_live_across_stages_and_finishes_once() {
-        let wall = chrono::FixedOffset::east_opt(0)
-            .unwrap()
-            .with_ymd_and_hms(2026, 7, 23, 9, 43, 30)
-            .single()
-            .unwrap();
-        let clock = ManualWaitClock::new(wall);
+    fn plain_progress_emits_stopping_once_and_suppresses_identical_forced_paints() {
+        let clock = ManualClock::new();
         let output = SharedRunnerOutput::default();
-        let surface = BatchProgressSurface::Terminal(TerminalProgressSurface::new(
-            output.clone(),
-            ProgressGlyphs::Unicode,
-        ));
-        let mut progress = LiveBatchProgress::with_parts(empty_run_baseline(), &clock, surface);
+        let surface = BatchProgressSurface::Plain(PlainProgressReporter::new(output.clone()));
+        let mut progress = LiveBatchProgress::with_parts(&clock, surface);
         let state = AppState::new();
-
-        progress.set_phase(BatchDisplayPhase::Intake);
         progress.paint(&state, 0, true);
-        for _ in 0..3 {
-            progress.set_phase(BatchDisplayPhase::Triage);
-            progress.paint(&state, 0, true);
-        }
-
-        let before_finish = output.text();
-        assert_eq!(
-            before_finish.matches("\u{1b}[?25l").count(),
-            1,
-            "one persistent surface hides the cursor only once"
-        );
-        assert!(
-            !before_finish.contains("\u{1b}[?25h"),
-            "collection passes must not finish and append historical dashboards"
-        );
-
-        progress.set_phase(BatchDisplayPhase::Complete);
+        progress.resume(&state, 0);
         progress.paint(&state, 0, true);
-        progress.finish();
-
-        let finished = output.text();
+        assert_eq!(output.text().lines().count(), 1);
+        progress.paint(&state, 10_000, false);
+        assert_eq!(output.text().lines().count(), 1, "cost-only change waits");
+        progress.paint(&state, 10_000, true);
+        progress.resume(&state, 10_000);
         assert_eq!(
-            finished.matches("\u{1b}[?25h").count(),
-            1,
-            "the terminal surface must be finished exactly once"
+            output.text().lines().count(),
+            2,
+            "changed forced paint emits once"
         );
-        assert!(
-            finished.ends_with("\u{1b}[?25h\n"),
-            "only the final dashboard may be terminated as historical output"
+        progress.set_stopping(true);
+        progress.paint(&state, 10_000, false);
+        assert_eq!(
+            output.text().lines().count(),
+            3,
+            "stopping emits immediately"
         );
+        progress.paint(&state, 10_000, true);
+        progress.paint(&state, 10_000, true);
+        assert_eq!(
+            output.text().lines().count(),
+            3,
+            "final identical paints are silent"
+        );
+        assert!(output
+            .text()
+            .contains("Stopping safely; Ctrl+C again exits immediately"));
     }
 }

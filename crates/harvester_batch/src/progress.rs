@@ -1,7 +1,6 @@
 //! Terminal progress surfaces for article processing and import.
 //!
-//! Activated only when both stdout and stderr are terminals; otherwise every
-//! method is a no-op.
+//! Terminal blocks redraw in place; redirected output uses append-only plain lines.
 
 use crossterm::{
     cursor::{Hide, MoveDown, MoveToColumn, MoveUp, Show},
@@ -10,23 +9,16 @@ use crossterm::{
 };
 use std::io::Write;
 
-mod dashboard;
-pub(crate) use dashboard::{format_dashboard, ProgressGlyphs, MIN_DASHBOARD_WIDTH};
+mod block;
+#[cfg(test)]
+pub(crate) use block::{format_cost, test_stages};
+pub(crate) use block::{format_progress_block, progress_status_signature};
 mod import_reporter;
 pub use import_reporter::ImportProgressReporter;
-mod projection;
-#[cfg(test)]
-pub(crate) use projection::TestProgressClock;
-#[allow(unused_imports)]
-pub use projection::{
-    BatchDisplayPhase, BatchProgressProjection, BatchProgressSnapshot, BatchRunBaseline,
-    IntakeProgress, ProgressClock, ProjectionContext, StageProgress, SystemProgressClock,
-};
 /// Cursor-managed stdout surface. It owns only terminal control and a caller
-/// supplied writer; its input remains the pure dashboard frame above.
+/// supplied writer; its input remains the pure block frame above.
 pub struct TerminalProgressSurface<W: Write> {
     sink: W,
-    glyphs: ProgressGlyphs,
     enabled: bool,
     painted_lines: usize,
     cursor_hidden: bool,
@@ -34,10 +26,9 @@ pub struct TerminalProgressSurface<W: Write> {
 }
 
 impl<W: Write> TerminalProgressSurface<W> {
-    pub fn new(sink: W, glyphs: ProgressGlyphs) -> Self {
+    pub fn new(sink: W) -> Self {
         Self {
             sink,
-            glyphs,
             enabled: true,
             painted_lines: 0,
             cursor_hidden: false,
@@ -48,10 +39,9 @@ impl<W: Write> TerminalProgressSurface<W> {
     /// Creates an inert surface for callers that intentionally selected plain
     /// output. It emits no terminal-control bytes.
     #[cfg(test)]
-    pub fn disabled(sink: W, glyphs: ProgressGlyphs) -> Self {
+    pub fn disabled(sink: W) -> Self {
         Self {
             sink,
-            glyphs,
             enabled: false,
             painted_lines: 0,
             cursor_hidden: false,
@@ -60,23 +50,19 @@ impl<W: Write> TerminalProgressSurface<W> {
     }
 
     /// Queries the terminal for every repaint so a resize is reflected in the
-    /// next frame. Terminal-query failures use the conservative dashboard
+    /// next frame. Terminal-query failures use the conservative block
     /// minimum rather than propagating a presentation-only failure.
-    pub fn repaint(&mut self, snapshot: &BatchProgressSnapshot) -> std::io::Result<()> {
+    pub fn repaint(&mut self, snapshot: &[String]) -> std::io::Result<()> {
         let width = terminal::size()
             .map(|(columns, _)| usize::from(columns).max(1))
-            .unwrap_or(MIN_DASHBOARD_WIDTH);
+            .unwrap_or(80);
         self.repaint_with_width(snapshot, width)
     }
 
     /// Paints at an explicit width. This is useful for deterministic tests and
     /// for any future terminal abstraction; production callers use
     /// [`Self::repaint`] so the width is queried each time.
-    pub fn repaint_with_width(
-        &mut self,
-        snapshot: &BatchProgressSnapshot,
-        width: usize,
-    ) -> std::io::Result<()> {
+    pub fn repaint_with_width(&mut self, snapshot: &[String], width: usize) -> std::io::Result<()> {
         if !self.enabled || self.finished {
             return Ok(());
         }
@@ -85,11 +71,21 @@ impl<W: Write> TerminalProgressSurface<W> {
             self.cursor_hidden = true;
         }
         self.clear_previous_frame()?;
-        let lines = format_dashboard(snapshot, width, self.glyphs);
+        let lines = snapshot;
         for (index, line) in lines.iter().enumerate() {
             self.sink.queue(MoveToColumn(0))?;
             self.sink.queue(Clear(ClearType::CurrentLine))?;
-            self.sink.write_all(line.as_bytes())?;
+            // Reserve the final column to avoid terminal auto-wrap corrupting
+            // the fixed-height block, including after a terminal resize.
+            let mut columns = 0;
+            let clipped: String = line
+                .chars()
+                .take_while(|ch| {
+                    columns += unicode_width::UnicodeWidthChar::width(*ch).unwrap_or(0);
+                    columns <= width.saturating_sub(1)
+                })
+                .collect();
+            self.sink.write_all(clipped.as_bytes())?;
             if index + 1 < lines.len() {
                 self.sink.write_all(b"\n")?;
             }
@@ -99,7 +95,7 @@ impl<W: Write> TerminalProgressSurface<W> {
         Ok(())
     }
 
-    /// Clears the current dashboard and makes the cursor visible so ordinary
+    /// Clears the current block and makes the cursor visible so ordinary
     /// append-only diagnostics can be printed by the caller.
     pub fn suspend_for_output(&mut self) -> std::io::Result<()> {
         if !self.enabled || self.finished {
@@ -108,12 +104,6 @@ impl<W: Write> TerminalProgressSurface<W> {
         self.clear_previous_frame()?;
         self.show_cursor()?;
         self.sink.flush()
-    }
-
-    /// Hides the cursor again and paints a replacement frame after a caller's
-    /// ordinary output has been written.
-    pub fn resume(&mut self, snapshot: &BatchProgressSnapshot) -> std::io::Result<()> {
-        self.repaint(snapshot)
     }
 
     /// Restores cursor visibility and terminates the current final frame. The
@@ -180,7 +170,7 @@ fn terminal_count(count: usize) -> u16 {
 }
 
 /// Append-only progress sink for redirected output. Its compact rows are
-/// deliberately ASCII and contain neither carriage-return dashboards nor
+/// deliberately ASCII and contain neither carriage-return blocks nor
 /// cursor-control sequences.
 pub struct PlainProgressReporter<W: Write> {
     sink: W,
@@ -191,11 +181,8 @@ impl<W: Write> PlainProgressReporter<W> {
         Self { sink }
     }
 
-    pub fn report(&mut self, snapshot: &BatchProgressSnapshot) -> std::io::Result<()> {
-        let line = format_dashboard(snapshot, MIN_DASHBOARD_WIDTH - 1, ProgressGlyphs::Ascii)
-            .into_iter()
-            .next()
-            .unwrap_or_default();
+    pub fn report(&mut self, snapshot: &[String]) -> std::io::Result<()> {
+        let line = snapshot.join("; ");
         writeln!(self.sink, "{line}")?;
         self.sink.flush()
     }
@@ -208,18 +195,45 @@ impl<W: Write> PlainProgressReporter<W> {
 
 #[cfg(test)]
 mod tests {
-    use super::dashboard::renderer_snapshot;
     use super::*;
 
     #[test]
+    fn terminal_surface_clips_rows_by_display_columns_and_reserves_last_column() {
+        let mut block = format_progress_block(&test_stages(), false, std::time::Duration::ZERO, 0);
+        block.push("界界界界界界界界界界界".into());
+        let mut surface = TerminalProgressSurface::new(Vec::new());
+        surface.repaint_with_width(&block, 20).unwrap();
+        let output = std::str::from_utf8(surface.sink()).unwrap();
+        let mut visible = String::new();
+        let mut chars = output.chars();
+        while let Some(ch) = chars.next() {
+            if ch == '\u{1b}' {
+                assert_eq!(chars.next(), Some('['));
+                for control in chars.by_ref() {
+                    if ('@'..='~').contains(&control) {
+                        break;
+                    }
+                }
+            } else {
+                visible.push(ch);
+            }
+        }
+        assert_eq!(visible.lines().count(), block.len());
+        for row in visible.lines() {
+            assert!(unicode_width::UnicodeWidthStr::width(row) <= 19, "{row:?}");
+        }
+        assert_eq!(visible.lines().last(), Some("界界界界界界界界界"));
+    }
+
+    #[test]
     fn plain_and_disabled_terminal_surfaces_emit_no_cursor_control_bytes() {
-        let snapshot = renderer_snapshot(BatchDisplayPhase::Signals);
+        let snapshot = format_progress_block(&test_stages(), false, std::time::Duration::ZERO, 0);
         let mut plain = PlainProgressReporter::new(Vec::new());
         plain.report(&snapshot).unwrap();
         let plain = std::str::from_utf8(plain.sink()).unwrap();
         assert!(!plain.contains('\u{1b}') && !plain.contains('\r'));
 
-        let mut disabled = TerminalProgressSurface::disabled(Vec::new(), ProgressGlyphs::Unicode);
+        let mut disabled = TerminalProgressSurface::disabled(Vec::new());
         disabled.repaint_with_width(&snapshot, 140).unwrap();
         assert!(disabled.sink().is_empty());
     }
@@ -240,10 +254,10 @@ mod tests {
 
     #[test]
     fn terminal_surface_drop_and_finish_restore_cursor_and_terminate_the_frame() {
-        let snapshot = renderer_snapshot(BatchDisplayPhase::Signals);
+        let snapshot = format_progress_block(&test_stages(), false, std::time::Duration::ZERO, 0);
         let shared = SharedOutput(std::sync::Arc::new(std::sync::Mutex::new(Vec::new())));
         {
-            let mut surface = TerminalProgressSurface::new(shared.clone(), ProgressGlyphs::Unicode);
+            let mut surface = TerminalProgressSurface::new(shared.clone());
             surface.repaint_with_width(&snapshot, 140).unwrap();
         }
         let dropped = shared.0.lock().unwrap().clone();
@@ -251,7 +265,7 @@ mod tests {
         assert!(dropped.ends_with(b"\n"));
 
         let shared = SharedOutput(std::sync::Arc::new(std::sync::Mutex::new(Vec::new())));
-        let mut surface = TerminalProgressSurface::new(shared.clone(), ProgressGlyphs::Unicode);
+        let mut surface = TerminalProgressSurface::new(shared.clone());
         surface.repaint_with_width(&snapshot, 140).unwrap();
         surface.finish().unwrap();
         drop(surface);
@@ -268,19 +282,19 @@ mod tests {
 
     #[test]
     fn terminal_surface_repaint_clears_the_prior_multiline_frame_before_repainting() {
-        let first = renderer_snapshot(BatchDisplayPhase::Signals);
+        let first = format_progress_block(&test_stages(), false, std::time::Duration::ZERO, 0);
 
-        let second = renderer_snapshot(BatchDisplayPhase::Complete);
+        let second = format_progress_block(&test_stages(), false, std::time::Duration::ZERO, 0);
         let shared = SharedOutput(std::sync::Arc::new(std::sync::Mutex::new(Vec::new())));
-        let mut surface = TerminalProgressSurface::new(shared.clone(), ProgressGlyphs::Unicode);
+        let mut surface = TerminalProgressSurface::new(shared.clone());
 
         surface.repaint_with_width(&first, 140).unwrap();
         surface.repaint_with_width(&second, 60).unwrap();
 
         let output = String::from_utf8(shared.0.lock().unwrap().clone()).unwrap();
-        // The first wide dashboard is six rows; the second repaint must move
+        // The first wide block is six rows; the second repaint must move
         // back to its first row and clear every previous row before drawing a
-        // one-line narrow fallback.
+        // compact replacement block.
         assert!(
             output.contains("\u{1b}[5A"),
             "missing MoveUp for prior frame: {output:?}"

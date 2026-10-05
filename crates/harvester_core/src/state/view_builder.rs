@@ -140,10 +140,7 @@ impl AppState {
             stop_finish_button,
             signal_candidate_rows,
             ai_unavailable_message,
-            run_progress: self
-                .run_progress
-                .as_ref()
-                .map_or_else(Default::default, crate::RunProgress::view),
+            run_progress: self.run_progress_view(),
             archive_enabled: self.export_available(),
             run_state,
             run_completion_notice: self.run_completion_notice.clone(),
@@ -689,6 +686,26 @@ mod tests {
         SummaryCacheKey, TriageSession,
     };
     use crate::{JobResultKind, Stage};
+
+    #[test]
+    fn run_progress_accessor_matches_embedded_view() {
+        let state = AppState::new();
+        assert_eq!(state.run_progress_view(), state.view().run_progress);
+        let (state, _) = crate::update(
+            state,
+            crate::Msg::PipelineRunRequested {
+                scope: crate::PipelineRunScope::Full,
+            },
+        );
+        let (state, _) = crate::update(state, crate::Msg::PollStarted { total: 2 });
+        let snapshot = state.run_progress_view();
+        assert!(snapshot.run_active);
+        assert_eq!(
+            snapshot.stages[crate::PipelineStage::ScanningSources.index()].total,
+            2
+        );
+        assert_eq!(snapshot, state.view().run_progress);
+    }
 
     #[test]
     fn archive_view_estimates_track_triage_job_url_cache_and_checkpoint_inputs() {

@@ -1,5 +1,4 @@
-use super::CycleOutcome;
-use harvester_core::{BatchObservation, LlmModelUsageView, UnfinishedWork};
+use harvester_core::{BatchObservation, UnfinishedWork};
 use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -57,86 +56,26 @@ impl CycleStartWorkReporter {
     }
 }
 
-/// Returns the once-per-intake poll summary plus the former per-pass transcript
-/// when the operator explicitly opts in. Runtime logging is unaffected.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn format_optional_cycle_diagnostics(
-    verbose_progress: bool,
-    include_header: bool,
-    include_poll_summary: bool,
-    cycle: usize,
-    outcome: &CycleOutcome,
-    counts: &CycleCounts,
-    observation: &BatchObservation,
-    usage_rows: &[LlmModelUsageView],
-) -> Vec<String> {
-    let mut lines = Vec::new();
-    if verbose_progress {
-        if include_header {
-            lines.push(format!(
-                "{:<6} {:<9} {:>20} {:>18} {:>21}",
-                "Cycle", "Outcome", "Jobs(new/done/fail)", "Triage(ok/fail)", "Summaries(ok/fail)"
-            ));
-            lines.push("-".repeat(78));
-        }
-        lines.push(format!(
-            "{:<6} {:<9} {:>20} {:>18} {:>21}",
-            cycle,
-            cycle_outcome_label(outcome),
-            format!(
-                "{}/{}/{}",
-                counts.new_jobs, counts.jobs_done, counts.jobs_failed
-            ),
-            format!("{}/{}", counts.triage_completed, counts.triage_failed),
-            format!("{}/{}", counts.summary_completed, counts.summary_failed),
-        ));
-    }
-    if include_poll_summary {
-        lines.extend(format_poll_summary(&observation.source_poll_stats));
-    }
-    if verbose_progress {
-        lines.extend(format_llm_usage_lines(usage_rows));
-    }
-    lines
-}
-
-fn cycle_outcome_label(outcome: &CycleOutcome) -> &'static str {
-    match outcome {
-        CycleOutcome::Success => "SUCCESS",
-        CycleOutcome::PartialFailure => "PARTIAL",
-        CycleOutcome::TotalFailure => "FAILED",
-    }
-}
-
-/// Formats a token count as a compact human-readable string (e.g. 12K, 1.2M).
-fn format_compact_tokens(n: u64) -> String {
-    if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    } else if n >= 1_000 {
-        format!("{}K", n / 1_000)
-    } else {
-        n.to_string()
-    }
-}
-
-/// Formats per-model usage rows as indented display lines.
-fn format_llm_usage_lines(rows: &[LlmModelUsageView]) -> Vec<String> {
-    rows.iter()
-        .map(|r| {
-            format!(
-                "  {}: in={} out={}",
-                r.model,
-                format_compact_tokens(r.input_tokens),
-                format_compact_tokens(r.output_tokens)
-            )
-        })
-        .collect()
-}
-
 /// Prints a grouped poll-stats summary (RSS / Brave / other source types).
 pub(super) fn print_poll_stats(stats: &[harvester_core::SourcePollStat]) {
     if let Some(summary) = format_poll_summary(stats) {
         println!("{summary}");
+    }
+}
+
+#[derive(Default)]
+pub(super) struct PollSummaryReporter {
+    printed: bool,
+}
+
+impl PollSummaryReporter {
+    pub(super) fn take(&mut self, stats: &[harvester_core::SourcePollStat]) -> Option<String> {
+        if self.printed {
+            return None;
+        }
+        let summary = format_poll_summary(stats)?;
+        self.printed = true;
+        Some(summary)
     }
 }
 
@@ -212,20 +151,15 @@ fn format_summary_elapsed(elapsed: Duration) -> String {
 }
 
 /// One-line notice printed before state hydration so an interactive launch is
-/// never silent between the password prompt and the live dashboard.
+/// never silent between the password prompt and the live progress block.
 pub(super) fn format_startup_notice(mode_label: &str) -> String {
     format!("Harvester batch · starting ({mode_label}) · loading state and caches")
 }
 
 #[cfg(test)]
 mod tests {
-    fn microdollars_to_display(microdollars: u64) -> String {
-        let cents = (microdollars + 5000) / 10000; // Round to nearest cent
-        let dollars = cents / 100;
-        let remaining_cents = cents % 100;
-        format!("${}.{:02}", dollars, remaining_cents)
-    }
     use super::*;
+    use crate::progress::format_cost as microdollars_to_display;
     use harvester_core::{CompletedJobSnapshot, SessionState, SourcePollStat};
     use harvester_engine::{llm::PromptId, SourceId, SourceKind};
     use std::collections::HashMap;
@@ -443,18 +377,17 @@ mod tests {
 
     #[test]
     fn test_microdollars_to_display_rounds_down() {
-        // 50 microdollars = $0.000050 -> rounds to $0.00
+        // 50 microdollars = $0.000050 -> displays $0.00
         assert_eq!(microdollars_to_display(50), "$0.00");
-        // 4999 microdollars = $0.004999 -> rounds to $0.00
+        // 4999 microdollars = $0.004999 -> displays $0.00
         assert_eq!(microdollars_to_display(4999), "$0.00");
     }
 
     #[test]
-    fn test_microdollars_to_display_rounds_up() {
-        // 5000 microdollars = $0.005000 -> rounds to $0.01
-        assert_eq!(microdollars_to_display(5000), "$0.01");
-        // 15000 microdollars = $0.015000 -> rounds to $0.02
-        assert_eq!(microdollars_to_display(15000), "$0.02");
+    fn test_microdollars_to_display_truncates_fractional_cents() {
+        // Preserve the dashboard header's precision: truncate fractional cents.
+        assert_eq!(microdollars_to_display(5000), "$0.00");
+        assert_eq!(microdollars_to_display(15000), "$0.01");
     }
 
     #[test]
@@ -467,59 +400,18 @@ mod tests {
 
     #[test]
     fn test_microdollars_to_display_typical_values() {
-        // 1234567 microdollars = $1.234567 -> rounds to $1.23
+        // 1234567 microdollars = $1.234567 -> displays $1.23
         assert_eq!(microdollars_to_display(1234567), "$1.23");
-        // 5678901 microdollars = $5.678901 -> rounds to $5.68
-        assert_eq!(microdollars_to_display(5678901), "$5.68");
+        // 5678901 microdollars = $5.678901 -> displays $5.67
+        assert_eq!(microdollars_to_display(5678901), "$5.67");
     }
 
     #[test]
     fn test_microdollars_to_display_large_values() {
-        // 123456789 microdollars = $123.456789 -> rounds to $123.46
-        assert_eq!(microdollars_to_display(123456789), "$123.46");
+        // 123456789 microdollars = $123.456789 -> displays $123.45
+        assert_eq!(microdollars_to_display(123456789), "$123.45");
         // 1000000000 microdollars = $1000.00
         assert_eq!(microdollars_to_display(1000000000), "$1000.00");
-    }
-
-    #[test]
-    fn format_compact_tokens_thresholds() {
-        assert_eq!(format_compact_tokens(0), "0");
-        assert_eq!(format_compact_tokens(999), "999");
-        assert_eq!(format_compact_tokens(1_000), "1K");
-        assert_eq!(format_compact_tokens(12_345), "12K");
-        assert_eq!(format_compact_tokens(999_999), "999K");
-        assert_eq!(format_compact_tokens(1_000_000), "1.0M");
-        assert_eq!(format_compact_tokens(1_234_567), "1.2M");
-    }
-
-    #[test]
-    fn format_llm_usage_lines_formats_rows_compactly() {
-        let rows = vec![
-            LlmModelUsageView {
-                model: "alpha".to_string(),
-                input_tokens: 12_345,
-                output_tokens: 3_100,
-            },
-            LlmModelUsageView {
-                model: "beta".to_string(),
-                input_tokens: 500,
-                output_tokens: 80,
-            },
-        ];
-        let lines = format_llm_usage_lines(&rows);
-        assert_eq!(lines.len(), 2);
-        assert!(lines[0].contains("alpha"));
-        assert!(lines[0].contains("in=12K"));
-        assert!(lines[0].contains("out=3K"));
-        assert!(lines[1].contains("beta"));
-        assert!(lines[1].contains("in=500"));
-        assert!(lines[1].contains("out=80"));
-    }
-
-    #[test]
-    fn format_llm_usage_lines_empty_returns_empty() {
-        let lines = format_llm_usage_lines(&[]);
-        assert!(lines.is_empty());
     }
 
     #[test]
@@ -532,73 +424,21 @@ mod tests {
             dedup_filtered: 1,
             emitted: 1,
         });
-        let usage_rows = [LlmModelUsageView {
-            model: "gpt-test".to_string(),
-            input_tokens: 10,
-            output_tokens: 20,
-        }];
-
-        let intake_details = format_optional_cycle_diagnostics(
+        let mut reporter = PollSummaryReporter::default();
+        assert!(reporter.take(&[]).is_none());
+        let details = reporter.take(&observation.source_poll_stats).unwrap();
+        let block = crate::progress::format_progress_block(
+            &crate::progress::test_stages(),
             false,
-            true,
-            true,
-            1,
-            &CycleOutcome::Success,
-            &CycleCounts::default(),
-            &observation,
-            &usage_rows,
+            Duration::ZERO,
+            0,
         );
-        let additional_details = format_optional_cycle_diagnostics(
-            false,
-            false,
-            false,
-            2,
-            &CycleOutcome::Success,
-            &CycleCounts::default(),
-            &observation,
-            &usage_rows,
-        );
-        let details = intake_details
-            .into_iter()
-            .chain(additional_details)
-            .collect::<Vec<_>>()
-            .join("\n");
-
+        assert!(!block.join("\n").contains("Poll summary"));
+        assert!(reporter.take(&observation.source_poll_stats).is_none());
         assert_eq!(details.matches("--- Poll summary ---").count(), 1);
         assert!(details.contains("test-rss"));
         assert!(!details.contains("Cycle"));
         assert!(!details.contains("gpt-test: in=10 out=20"));
-    }
-
-    #[test]
-    fn verbose_progress_output_contains_cycle_source_and_model_diagnostics() {
-        let mut observation = observation_with_totals(1, 1, 0, 1, 0, 1, 0);
-        observation.source_poll_stats.push(SourcePollStat {
-            source_id: SourceId::new("test-rss").unwrap(),
-            kind: SourceKind::Rss,
-            parsed: 2,
-            dedup_filtered: 1,
-            emitted: 1,
-        });
-        let details = format_optional_cycle_diagnostics(
-            true,
-            true,
-            true,
-            1,
-            &CycleOutcome::Success,
-            &CycleCounts::default(),
-            &observation,
-            &[LlmModelUsageView {
-                model: "gpt-test".to_string(),
-                input_tokens: 10,
-                output_tokens: 20,
-            }],
-        )
-        .join("\n");
-
-        assert!(details.contains("Cycle"));
-        assert!(details.contains("--- Poll summary ---"));
-        assert!(details.contains("gpt-test: in=10 out=20"));
     }
 
     #[test]

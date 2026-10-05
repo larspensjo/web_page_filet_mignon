@@ -66,6 +66,13 @@ impl AppState {
         self.run_progress.as_ref()
     }
 
+    /// Read-only progress snapshot, without building the rest of the desktop view.
+    pub fn run_progress_view(&self) -> crate::RunProgressView {
+        self.run_progress
+            .as_ref()
+            .map_or_else(Default::default, RunProgress::view)
+    }
+
     pub fn run_completion_notice(&self) -> Option<&RunCompletionNotice> {
         self.run_completion_notice.as_ref()
     }

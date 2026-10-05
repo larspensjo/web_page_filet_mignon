@@ -1018,12 +1018,23 @@ Work:
 1. Replace the console dashboard (`crates/harvester_batch/src/progress/dashboard.rs`,
    `progress/projection.rs`, `runner/live_progress.rs` and the dashboard parts of
    `runner/reporting.rs` and `progress.rs`) with a compact per-stage block that reads the
-   reducer-owned `RunProgress`: one line each for poll, download, triage, summary and score with
-   done and total counts and "Waiting for articles" while intake is open. It redraws in place on
-   a terminal and prints periodic plain lines otherwise. Open item (added 2026-10-03): decide
-   whether the block should also report what is left per stage and whether its totals should
-   exclude work settled without a model request this run, consistent with the desktop. The
-   command line keeps its own counts until then (`docs/plans/Plan.RemainingWorkBars.md`).
+   reducer-owned `RunProgress`: a header with elapsed time and cost so far, then one line each
+   for poll, download, triage, summary and score. It redraws in place on a terminal and prints
+   60-second plain heartbeats, stage-status transitions, the start of stopping and changed
+   forced updates otherwise, never repeating identical lines. Count-only changes wait for
+   those updates. Open item resolved by the
+   owner (2026-10-04): counts match the desktop (`docs/plans/Plan.RemainingWorkBars.md`).
+   `newTotal = max(0, total - reused)`, `newDone = max(0, completed - reused)` and
+   `remaining = max(0, newTotal - newDone - failed)`. Text is `N of M to do`, or `0 to do`
+   when there is no new work, plus failures when nonzero; while stopping it is `N done`
+   plus failures. Reused results are never mentioned. Only Active article stages with no
+   remaining work and open intake show "Waiting for articles"; Pending and Failed stay
+   visible. There is no time-left estimate. While stopping the header says
+   "Stopping safely; Ctrl+C again exits immediately".
+   Owner-approved review exception (option A): add only the read-only core
+   `AppState::run_progress_view()` accessor, built through existing `RunProgress::view`,
+   and have both the batch block and `AppState::view()` use it. No IPC, desktop or
+   progress behavior change.
 2. Remove `--verbose-progress` and `--ascii-progress`. Keep `--import-saved-web-dir`,
    `--llm-concurrency`, `--signal-candidate-threshold`, `--force-unlock`, `--sources`,
    `--output-dir`, `--contexts-dir`, `--prompts-dir`.
@@ -1034,9 +1045,11 @@ Work:
 Regression tests: the block's text for a representative `RunProgress` (golden strings); old and
 new checkpoint flag spellings parse to the same command.
 
-Expected test counts. May be deleted wholesale: `progress/dashboard.rs` (6),
-`progress/projection.rs` (16), `runner/live_progress.rs` (8). Edited: `runner/reporting.rs`
-(20), `progress.rs` (3), `cli.rs`. About 30 to 40 removed, about 6 added.
+Verified baseline test counts (2026-10-04): batch library 99, replay integration 3,
+result-store-refusal integration 3. May be deleted wholesale: `progress/dashboard.rs` (5),
+`progress/projection.rs` (9), `runner/live_progress.rs` (4). All other test files are retained
+and edited where needed, including `runner/reporting.rs` (14), `progress.rs` (3) and
+`cli.rs` (14). Final counts and every removed/replaced test are recorded in the benchmark log.
 
 Verification: standard Rust checks; benchmark `--host batch`. The launch policy does not change
 (the launcher passes no flags since Phase 4), so Pester is not needed. Human testing
@@ -1316,6 +1329,159 @@ Filled in as phases land (debug build, copy of `output/`, 40 held-back articles)
 | 2 (0 model calls) | batch | 1500 ms | 266 s | 5.0 s + 127.5 s state clones | JobDone 105 ms | 10.1 MB | | | |
 | 2 (0 model calls) | desktop | 0 ms | 28 s | 3.8 s | JobDone 129 ms | 4.1 MB | | | |
 | 2 (0 model calls) | desktop | 1500 ms | 28 s | 3.8 s | JobDone 147 ms | 4.1 MB | | | |
+| 9 before | batch | 0 ms | 14.096 s | 6.049 s | TriageArticlesLoaded 754.075 ms | 404,080 B | n/a | n/a | 99 lib + 6 integration |
+| 9 before review fixes | batch | 0 ms | 16.879 s | 4.736 s | TriageArticlesLoaded 525.399 ms | 570,402 B | n/a | n/a | 87 lib + 6 integration |
+| 9 after review fixes | batch | 0 ms | 14.022 s | 4.905 s | TriageArticlesLoaded 537.575 ms | 403,112 B | n/a | n/a | 91 lib + 6 integration |
+
+
+Phase 9 notes (2026-10-04; implementation complete):
+
+- Replaced the normal-run dashboard and host-owned projection with the pure
+  `progress/block.rs` formatter and a terminal/plain surface reading
+  `state.run_progress_view().stages`. The owner's open counting item is resolved:
+  counts follow the desktop remaining-new-work formula, show failures and switch
+  to new work done while stopping. All five rows remain visible during overlap.
+  Only Active rows can show Waiting for articles; Pending and Failed stay visible.
+  The header keeps elapsed time and session cost; while stopping its hint warns
+  that a second Ctrl+C exits immediately. No ETA.
+- Terminal repaint is limited to four per second. Plain output emits stage-status
+  transitions (Pending/Active/Waiting/Done/Failed), the start of stopping, changed
+  forced updates and one heartbeat per minute. A shared pure status-only signature
+  excludes count text; count-only changes wait for those updates. Comparing the
+  whole formatted block suppresses identical lines, including forced resumes and
+  persistence/final paints. The read-only core accessor builds just RunProgressView;
+  AppState::view calls the same function so its embedded snapshot cannot diverge.
+  Cursor restoration on finish, Drop and second-interrupt hard exit remains.
+- Removed verbose/ASCII options and their per-pass transcript. Checkpoint options
+  have their new names and hidden clap aliases; the checkpoint file is unchanged.
+  Import reporter, core progress behavior, IPC, desktop, launch scripts and Pester
+  are unchanged. The sole core scope exception is the owner's read-only accessor
+  option A and its equality regression.
+  Poll summaries appear once per intake; cycle-start unfinished/reprocess lines stay.
+- Required keyless offline checks pass: build, batch tests, whole-root tests,
+  clippy with all targets and denied warnings, cargo fmt and cargo fmt --check.
+  Batch totals are **99 -> 91 library tests**, **3 -> 3 replay integration** and
+  **3 -> 3 refusal integration**. Core adds one accessor test. Whole root passes
+  **1,278 tests, two ignored**;
+  the pre-task full-root total **1,285** is the existing diary's reviewed-baseline
+  record, not a new full-root run before this task. Batch baseline was run here.
+  Rust test attributes under crates: **1,295 -> 1,288** (same attribute regex as
+  Count-RustTests, counted independently without running the owner-only script).
+  Frontend was not touched or run; its recorded baseline remains 117 tests.
+- Batch `src/**/*.rs` total source lines (production plus tests): **6,157 -> 5,103**,
+  a reduction of **1,054**. Separate production/test line statistics were not run:
+  `scripts/project-stats.ps1` remains owner-only. No git write commands or commits.
+- Before and after replay use a private copy of output, 40 held-back articles,
+  synchronous canned calls and 0 ms synthetic latency. Before calls: `{'ArticleSignalCandidate': 33, 'ArticleSummary': 33, 'ArticleTriage': 36}`;
+  before-review after calls: `{'ArticleSignalCandidate': 33, 'ArticleSummary': 33, 'ArticleTriage': 36}`.
+  Final review-fix calls: `{'ArticleSignalCandidate': 31, 'ArticleSummary': 31, 'ArticleTriage': 36}`.
+  Wall time measures the replay cycle after setup, not
+  corpus-copy or startup time. Bytes/download are all observed private writes
+  divided by 40, including final saves, results and replay records. These are single
+  measurements, not a claim that presentation changes improve scheduling speed.
+  Reports: `.local/bench/20261004-144752/report.json` and
+  `.local/bench/20261004-150837/report.json`.
+  The 14.096 -> 16.879 s regression came from each block paint calling AppState::view(),
+  rebuilding the full desktop view (about 31 ms per debug build); count changes also
+  triggered excess plain-output paints. Review option A replaces that call with
+  AppState::run_progress_view(), shared by view(), and the plain path now compares
+  only stage statuses before formatting and suppresses identical forced lines.
+  The requested `cargo run --offline -p harvester_batch --example replay_bench -- --host batch`
+  completed after review in **14.022 s**, below the recorded **14.096 s** baseline,
+  with **18 plain progress lines and zero identical consecutive repeats** (review
+  reported 181 before the fix). Report: `.local/bench/20261004-183351/report.json`.
+  This final replay made **98**, rather than the older baseline's **102**, canned
+  model calls; it therefore is not an identical-work timing comparison. The call
+  difference's cause was not established, and no provider or scheduling behavior
+  was changed in this review. The explicit full-view rebuild has been removed.
+  Verification afterwards alternated HEAD and the working tree in one session
+  (same `output/` source): HEAD 10.71 s and 10.88 s, working tree 12.16 s and
+  10.78 s, i.e. within run-to-run noise. HEAD alone made 106 and 96 model calls
+  across its two runs, so the call count varies between replays independently of
+  this change.
+  The earlier after-run before the immediate-transition refinement is superseded.
+  Desktop replay and human morning-run readability checks were not run; the phase's
+  verification scope here is the batch host.
+
+Test attributes by file (all non-wholesale test files retained):
+
+| File within harvester_batch | Before | After |
+| --- | --- | --- |
+| `src/cli.rs` | 14 | 15 |
+| `src/import_mode.rs` | 8 | 8 |
+| `src/no_progress.rs` | 3 | 3 |
+| `src/progress.rs` | 3 | 4 |
+| `src/progress/block.rs` | 0 | 7 |
+| `src/progress/dashboard.rs` | 5 | 0 |
+| `src/progress/import_reporter.rs` | 7 | 7 |
+| `src/progress/projection.rs` | 9 | 0 |
+| `src/runner/bootstrap.rs` | 2 | 2 |
+| `src/runner/live_progress.rs` | 4 | 5 |
+| `src/runner/reporting.rs` | 14 | 10 |
+| `src/runner/tests.rs` | 30 | 30 |
+| `tests/replay_bench.rs` | 3 | 3 |
+| `tests/result_store_refusal.rs` | 3 | 3 |
+
+Every removed name and its covered feature (including two rewritten/renamed tests):
+
+| Previous test name | Covered feature and disposition |
+| --- | --- |
+| `ascii_progress_selects_ascii_glyphs_only_for_interactive_dashboard` | Removed ASCII/Unicode mode selection. |
+| `clock_contract_supports_manual_advancement_and_all_display_phases` | Removed projection clock and host-selected phases; manual clock and reducer transitions are covered in live_progress. |
+| `dynamic_stage_totals_remain_per_stage_without_an_overall_percentage` | Removed host projection; independent totals are covered by the block saturation regression. |
+| `failures_settle_stage_progress_without_hiding_failure_count` | Removed host settlement derivation; failure settlement/count text is covered by the golden block. |
+| `format_compact_tokens_thresholds` | Removed verbose transcript token abbreviations. |
+| `format_llm_usage_lines_empty_returns_empty` | Removed verbose per-model transcript rows for empty usage. |
+| `format_llm_usage_lines_formats_rows_compactly` | Removed verbose per-model token transcript formatting. |
+| `formatter_clips_by_display_columns_at_requested_widths` | Removed width-dependent pure dashboard renderer; replaced by `terminal_surface_clips_rows_by_display_columns_and_reserves_last_column`, which paints at width 20 and checks every row is at most 19 display columns, including wide Unicode. |
+| `formatter_exact_wide_dashboard_for_complete_and_interrupted` | Removed wide final/interrupted dashboard; zero-work and stopping block golden strings replace it. |
+| `formatter_exact_wide_dashboard_for_intake_and_each_llm_stage` | Removed wide intake/LLM dashboard; mid-run and waiting block golden strings replace it. |
+| `formatter_narrow_fallback_and_ascii_mode_preserve_required_information` | Removed one-line narrow dashboard fallback and glyph modes; plain output now prints the complete compact block in one ASCII line. |
+| `formatter_zero_totals_and_overfull_counts_never_make_fake_or_overfull_bars` | Removed dashboard bars; zero-work and saturating count regressions replace it. |
+| `intake_remains_the_first_display_phase_during_stage_overlap` | Removed selection of one display phase during overlap; all stage rows are always visible. |
+| `pending_window_can_shrink_without_shrinking_latched_total` | Removed host-owned total latching; rows read reducer-owned accumulated totals directly. |
+| `progress_flags_default_to_false_and_parse_without_conflicts` | Rewritten as removed_progress_flags_are_rejected: obsolete options are now rejected. |
+| `projection_uses_current_run_intake_deltas_and_freezes_total` | Removed host intake baseline/delta/freeze projection; source counts now come from reducer run progress. |
+| `replay_cost_is_explicitly_scoped_to_this_run` | Removed explicit-cost projection; block header golden strings and retained synchronous-session-usage test cover cost. |
+| `settlement_cannot_shrink_latched_stage_total` | Removed host stage-total latching; reducer totals are the sole source. |
+| `signal_work_selects_signals_before_terminal_fallback` | Removed selection of scoring as the single display phase; the scoring row is always visible. |
+| `test_microdollars_to_display_rounds_up` | Rewritten as test_microdollars_to_display_truncates_fractional_cents against the real header formatter. The former helper existed only in tests; the actual dashboard already truncated fractional cents. |
+| `verbose_progress_output_contains_cycle_source_and_model_diagnostics` | Removed verbose per-pass transcript; once-per-intake poll summary remains covered. |
+
+Reconciliation: **99 - 21 removed names + 13 new names = 91** batch library tests.
+Core adds **one** test, `run_progress_accessor_matches_embedded_view`, with no
+removed or renamed core tests. Of the 21 removed batch names,
+19 cover retired dashboard/projection/transcript features and two are rewritten
+replacements (removed option acceptance and the test-only cent-rounding helper).
+The three preserved live-progress tests, all three prior surface tests, poll summary,
+cycle-start, checkpoint and hard-exit cursor tests remain and use the new surface.
+Only dashboard.rs and projection.rs are deleted wholesale; live_progress.rs is
+rewritten. The preserved cost tests now call the actual production cost formatter.
+
+New names, including the two replacements:
+
+- `checkpoint_aliases_resolve_to_the_same_commands_and_stay_hidden`
+- `mid_run_block_excludes_reused_work_and_shows_failures`
+- `open_article_stages_wait_for_articles`
+- `overfull_counts_saturate_and_stages_keep_independent_totals`
+- `pending_and_failed_open_article_stages_keep_their_status`
+- `plain_progress_emits_stopping_once_and_suppresses_identical_forced_paints`
+- `progress_signature_tracks_waiting_and_status_changes_without_counts`
+- `removed_progress_flags_are_rejected`
+- `settled_zero_new_work_has_zero_to_do`
+- `stopping_block_shows_new_done_counts_and_failures`
+- `stopping_counts_persist_through_final_paints`
+- `test_microdollars_to_display_truncates_fractional_cents`
+- `terminal_surface_clips_rows_by_display_columns_and_reserves_last_column`
+
+Verification logs and exact inventory after review: `.local/review-progress-build.log`,
+`.local/review-progress-targeted-tests.log`, `.local/review-progress-full-tests.log`,
+`.local/review-progress-clippy.log`, `.local/review-progress-fmt.log`,
+`.local/review-progress-benchmark.log`, `.local/review-progress-reconciliation.json`.
+The named batch inventory was compared directly with HEAD: 105 -> 97 including
+the six integration tests, exactly 21 removed and 13 added names. Changes are
+uncommitted. The plan stops at
+the cleanup checkpoint; later pipeline-replacement phases have not been started.
 
 Phase 1 notes (2026-09-28, 40 held-back articles, synchronous model-call path, not `--batch-api`):
 

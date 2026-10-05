@@ -16,6 +16,27 @@ fn cli_with_no_flags_polls_one_cycle_persists_and_exits() {
     assert_eq!(result.status.code(), Some(0), "{stdout}\n{stderr}");
     assert!(stdout.contains("mode=one-cycle"), "{stdout}");
     assert_eq!(stdout.matches("Batch complete: 1 cycles").count(), 1);
+    assert!(stdout.contains("Ctrl+C stops safely"), "{stdout}");
+    for label in [
+        "Scanning sources",
+        "Downloading",
+        "Triage",
+        "Summaries",
+        "Scoring",
+    ] {
+        assert!(
+            stdout.contains(&format!("{label}: 0 to do | Done")),
+            "{stdout}"
+        );
+    }
+    assert!(
+        !stdout.contains('\u{1b}') && !stdout.contains('\r'),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("--- Poll summary ---"),
+        "empty intake has no summary"
+    );
     let log = fs::read_to_string(dir.path().join("engine.log")).unwrap();
     assert_eq!(log.matches("[source-poll] polling requested").count(), 1);
     assert!(log.contains("[run-terminal]"), "{log}");
