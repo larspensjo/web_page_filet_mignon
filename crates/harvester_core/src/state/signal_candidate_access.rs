@@ -3,6 +3,7 @@ use crate::briefing::ArticleSummaryResult;
 use crate::signal_candidate::{
     ArchiveFinalSelection, ArchiveSelectionSource, ScoredCandidate, SelectionPolicy,
     SignalCandidateArchiveSelection, SignalCandidateSelection, SignalCandidateSession,
+    SignalExclusions,
 };
 use crate::signal_candidate_cache::{
     SignalCandidateCache, SignalCandidateCacheEntry, SignalCandidateCacheKey,
@@ -40,6 +41,14 @@ impl AppState {
     pub fn signal_candidate_mut(&mut self) -> &mut SignalCandidateSession {
         self.note_unfinished_inputs_changed();
         &mut self.signal_candidate
+    }
+
+    pub fn signal_exclusions(&self) -> &SignalExclusions {
+        &self.signal_exclusions
+    }
+
+    pub(crate) fn signal_exclusions_mut(&mut self) -> &mut SignalExclusions {
+        &mut self.signal_exclusions
     }
 
     pub fn signal_candidate_cache(&self) -> &SignalCandidateCache {
@@ -178,7 +187,7 @@ impl AppState {
             active_prompt_version: self
                 .active_version_for(harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate)
                 .unwrap_or_default(),
-            excluded: self.signal_candidate().excluded().clone(),
+            excluded: self.signal_exclusions().excluded().clone(),
         };
         SignalCandidateSelection::compute(&scored, policy)
     }

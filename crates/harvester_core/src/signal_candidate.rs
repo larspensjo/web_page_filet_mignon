@@ -44,6 +44,52 @@ pub struct OverrideKey {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct SignalExclusions {
+    excluded: HashSet<OverrideKey>,
+}
+
+impl SignalExclusions {
+    pub fn excluded(&self) -> &HashSet<OverrideKey> {
+        &self.excluded
+    }
+
+    pub(crate) fn set_excluded(&mut self, set: HashSet<OverrideKey>) {
+        self.excluded = set;
+    }
+
+    pub(crate) fn add_exclusion(&mut self, key: OverrideKey) {
+        self.excluded.insert(key);
+    }
+
+    pub(crate) fn remove_exclusion(&mut self, key: &OverrideKey) {
+        self.excluded.remove(key);
+    }
+
+    pub fn override_fingerprint(&self) -> String {
+        use sha2::Digest;
+
+        let mut entries: Vec<&OverrideKey> = self.excluded.iter().collect();
+        entries.sort_by(|a, b| {
+            a.signal_key
+                .cmp(&b.signal_key)
+                .then(a.prompt_id.cmp(&b.prompt_id))
+                .then(a.prompt_version.cmp(&b.prompt_version))
+        });
+
+        let mut h = sha2::Sha256::new();
+        for key in entries {
+            h.update(key.signal_key.as_bytes());
+            h.update(b"|");
+            h.update(key.prompt_id.as_bytes());
+            h.update(b"|");
+            h.update(key.prompt_version.to_be_bytes());
+            h.update(b";");
+        }
+        hex_digest(h.finalize())
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SignalCandidateSession {
     states: HashMap<String, SignalCandidateState>,
     input_digests: HashMap<String, String>,
@@ -53,7 +99,6 @@ pub struct SignalCandidateSession {
     enqueued: u32,
     completed: u32,
     failed: u32,
-    excluded: HashSet<OverrideKey>,
 }
 
 impl SignalCandidateSession {
@@ -237,45 +282,6 @@ impl SignalCandidateSession {
                 )
             })
             .count() as u32
-    }
-
-    pub fn excluded(&self) -> &HashSet<OverrideKey> {
-        &self.excluded
-    }
-
-    pub fn set_excluded(&mut self, set: HashSet<OverrideKey>) {
-        self.excluded = set;
-    }
-
-    pub fn add_exclusion(&mut self, key: OverrideKey) {
-        self.excluded.insert(key);
-    }
-
-    pub fn remove_exclusion(&mut self, key: &OverrideKey) {
-        self.excluded.remove(key);
-    }
-
-    pub fn override_fingerprint(&self) -> String {
-        use sha2::Digest;
-
-        let mut entries: Vec<&OverrideKey> = self.excluded.iter().collect();
-        entries.sort_by(|a, b| {
-            a.signal_key
-                .cmp(&b.signal_key)
-                .then(a.prompt_id.cmp(&b.prompt_id))
-                .then(a.prompt_version.cmp(&b.prompt_version))
-        });
-
-        let mut h = sha2::Sha256::new();
-        for key in entries {
-            h.update(key.signal_key.as_bytes());
-            h.update(b"|");
-            h.update(key.prompt_id.as_bytes());
-            h.update(b"|");
-            h.update(key.prompt_version.to_be_bytes());
-            h.update(b";");
-        }
-        hex_digest(h.finalize())
     }
 }
 
@@ -649,6 +655,27 @@ mod tests {
             active_prompt_version: 1,
             excluded,
         }
+    }
+
+    #[test]
+    fn override_fingerprint_is_unchanged_for_the_same_set() {
+        let keys = [
+            ("z-last", "ArticleSignalCandidate", 1),
+            ("a-first", "ArticleSignalCandidate", 256),
+            ("a-first", "ArticleSignalCandidate", 1),
+            ("a-first", "OtherPrompt", 2),
+        ]
+        .map(|(signal_key, prompt_id, prompt_version)| OverrideKey {
+            signal_key: signal_key.into(),
+            prompt_id: prompt_id.into(),
+            prompt_version,
+        });
+        let mut exclusions = SignalExclusions::default();
+        exclusions.set_excluded(keys.iter().cloned().collect());
+        let expected = "108c81148d8c5645efec81512b167edd9aac03c9bb8803569660073f807775d5";
+        assert_eq!(exclusions.override_fingerprint(), expected);
+        exclusions.set_excluded(keys.into_iter().rev().collect());
+        assert_eq!(exclusions.override_fingerprint(), expected);
     }
 
     #[test]

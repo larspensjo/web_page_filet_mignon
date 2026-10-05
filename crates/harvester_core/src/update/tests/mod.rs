@@ -93,6 +93,68 @@ fn complete_signal_candidate(state: &mut AppState, index: usize, score: u8, key:
 }
 
 #[test]
+fn exclusions_survive_scoring_session_changes() {
+    let mut state =
+        with_signal_candidate_metadata(with_summary_metadata(complete_triage_state_for_test(2)));
+    seed_summaries_for_triage_hashes(&mut state, 2);
+    complete_signal_candidate(&mut state, 0, 90, "excluded-cluster");
+    complete_signal_candidate(&mut state, 1, 80, "kept-cluster");
+    let exclusions = std::collections::HashSet::from([OverrideKey {
+        signal_key: "excluded-cluster".into(),
+        prompt_id: "ArticleSignalCandidate".into(),
+        prompt_version: 1,
+    }]);
+    let revisions = state.unfinished_revisions();
+    let (mut state, _) = update(
+        state,
+        Msg::SignalCandidateOverridesLoaded {
+            overrides: exclusions.clone(),
+        },
+    );
+    assert_eq!(state.unfinished_revisions(), revisions);
+    let selected = state.signal_candidate_selection().selected_urls;
+    assert_eq!(selected, vec!["https://triage-complete.com/1".to_string()]);
+
+    for _ in 0..2 {
+        (state, _) = update(
+            state,
+            Msg::ToggleSignalCandidateExclusion {
+                signal_key: "excluded-cluster".into(),
+            },
+        );
+        assert_eq!(state.unfinished_revisions(), revisions);
+    }
+    let assert_unchanged = |state: &AppState| {
+        assert_eq!(state.signal_exclusions().excluded(), &exclusions);
+        assert_eq!(state.signal_candidate_selection().selected_urls, selected);
+    };
+    assert_unchanged(&state);
+    let excluded_url = "https://triage-complete.com/0";
+    assert!(state
+        .signal_candidate_mut()
+        .enqueue(excluded_url.into(), "changed-input".into()));
+    assert_unchanged(&state);
+    assert_eq!(
+        state.signal_candidate_mut().withdraw_pending(),
+        vec![excluded_url.to_string()]
+    );
+    assert_unchanged(&state);
+    state
+        .signal_candidate_mut()
+        .enqueue(excluded_url.into(), "changed-input".into());
+    state.signal_candidate_mut().mark_scoring(excluded_url, 42);
+    state
+        .signal_candidate_mut()
+        .fail(excluded_url, "fixture failure");
+    assert_unchanged(&state);
+    state
+        .signal_candidate_mut()
+        .retain_urls(&Default::default());
+    assert_eq!(state.signal_candidate().observation_counts().total, 0);
+    assert_unchanged(&state);
+}
+
+#[test]
 fn archive_selection_loads_archive_final_selection() {
     init_logging();
     let mut state = complete_triage_state_for_test(2);
@@ -138,7 +200,7 @@ fn archive_selection_preserves_signal_order_and_honors_exclusions() {
     complete_signal_candidate(&mut state, 0, 70, "cluster-a");
     complete_signal_candidate(&mut state, 1, 95, "cluster-b");
     complete_signal_candidate(&mut state, 2, 85, "cluster-c");
-    state.signal_candidate_mut().add_exclusion(OverrideKey {
+    state.signal_exclusions_mut().add_exclusion(OverrideKey {
         signal_key: "cluster-b".to_string(),
         prompt_id: "ArticleSignalCandidate".to_string(),
         prompt_version: 1,

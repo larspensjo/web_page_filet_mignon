@@ -292,9 +292,12 @@ and keyed startup share prompt-model defaults and model resolution.
 Restoration uses the job lists' fetch-time rules, so an undated archive member
 does not become a selected article hidden from the remembered time-scoped tab.
 
-Archive selection and processing remain window-bound. Annotations use current-key
-results and the matching stored triage model; the priority snapshot includes every
-window article with current-key triage, including excluded and unselected articles.
+Archive selection and processing remain window-bound.
+Manual exclusions are reducer state, persisted through the reducer-emitted
+`PersistSignalCandidateOverrides` effect and cleared by a checkpoint export.
+Annotations use current-key results and the matching stored triage model; the
+priority snapshot includes every window article with current-key triage, including
+excluded and unselected articles.
 Export bodies, dialog and header summary-token estimates use the indexed newest
 summary under any key, with full article tokens when no summary resolves. The
 legacy summary accessor still prefers a live session summary before that lookup.

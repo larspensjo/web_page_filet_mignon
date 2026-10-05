@@ -177,7 +177,7 @@ fn outcome_marks_excluded_clusters() {
         .active_version_for(harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate)
         .unwrap_or_default();
     state
-        .signal_candidate_mut()
+        .signal_exclusions_mut()
         .add_exclusion(crate::signal_candidate::OverrideKey {
             signal_key: "drop-me".to_string(),
             prompt_id: harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate.to_string(),

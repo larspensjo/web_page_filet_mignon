@@ -201,13 +201,13 @@ pub(super) fn handle_dialog_submitted(
         annotations,
         priority_snapshot,
     }];
-    let had_signal_candidate_overrides = !state.signal_candidate().excluded().is_empty();
+    let had_signal_candidate_overrides = !state.signal_exclusions().excluded().is_empty();
     if set_checkpoint && had_signal_candidate_overrides {
         state
-            .signal_candidate_mut()
+            .signal_exclusions_mut()
             .set_excluded(Default::default());
         effects.push(Effect::PersistSignalCandidateOverrides {
-            overrides: state.signal_candidate().excluded().clone(),
+            overrides: state.signal_exclusions().excluded().clone(),
         });
         engine_info!(
             "[signal-overrides] cleared at archive-checkpoint request_id={}",
@@ -358,7 +358,7 @@ fn build_signal_candidate_snapshot(
     crate::signal_candidate::SignalCandidateArchiveSelection::new(
         selection.selected_urls,
         state.signal_candidate_threshold(),
-        state.signal_candidate().override_fingerprint(),
+        state.signal_exclusions().override_fingerprint(),
         cache_fingerprint,
         token_estimates,
         state.signal_candidate().in_flight_count() > 0,

@@ -1195,6 +1195,20 @@ counters, the derived indexes that only served them, `BatchObservation` and
 validation and quota mechanisms, and Msg and Effect variants left without a sender. Rewrite
 `docs/Architecture.md` around the per-article pipeline.
 
+Archive-selection and meter inputs to preserve (see `docs/plans/Plan.ArchiveCountMeter.md`):
+
+- Manual exclusions already live in reducer state outside `SignalCandidateSession`.
+- The rebuild must preserve the archive meter's inputs: saved-results entries with window
+  membership and actionability, current-key scoring results, the threshold, the active
+  scoring prompt version, the exclusion set, and the planned reducer-owned startup-readiness
+  record.
+- The rebuild's article loader must report "initial window loaded with pre-triage verdicts
+  applied", "nothing to load" and "load failed" to that record, through outcomes corresponding
+  to today's `SavedArticlesLoaded` / `TriageArticlesLoaded` / `TriageArticlesLoadFailed` replies.
+- The planned archive meter never reads session state.
+- `archive_final_selection` and `compute_dialog_default` still read session counters (failed,
+  in flight), and the rebuild must supply equivalents.
+
 Expected test counts. May be deleted wholesale (after Phase 10 ported their behaviours):
 `update/pipeline_run/wave_tests.rs`, `update/pipeline_run/tests.rs`,
 `update/model_dispatch_tests.rs`, `pre_triage_coordinator.rs`,

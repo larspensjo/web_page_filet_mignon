@@ -232,7 +232,7 @@ pub fn handle_overrides_loaded(
     state: &mut AppState,
     overrides: std::collections::HashSet<OverrideKey>,
 ) {
-    state.signal_candidate_mut().set_excluded(overrides);
+    state.signal_exclusions_mut().set_excluded(overrides);
     state.mark_dirty();
 }
 
@@ -250,14 +250,14 @@ pub fn handle_toggle_exclusion(
         prompt_version,
     };
 
-    if state.signal_candidate().excluded().contains(&key) {
-        state.signal_candidate_mut().remove_exclusion(&key);
+    if state.signal_exclusions().excluded().contains(&key) {
+        state.signal_exclusions_mut().remove_exclusion(&key);
     } else {
-        state.signal_candidate_mut().add_exclusion(key);
+        state.signal_exclusions_mut().add_exclusion(key);
     }
 
     effects.push(Effect::PersistSignalCandidateOverrides {
-        overrides: state.signal_candidate().excluded().clone(),
+        overrides: state.signal_exclusions().excluded().clone(),
     });
     state.mark_dirty();
 }

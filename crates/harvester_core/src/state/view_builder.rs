@@ -440,7 +440,7 @@ impl AppState {
             SelectionPolicy {
                 threshold,
                 active_prompt_version,
-                excluded: self.signal_candidate.excluded().clone(),
+                excluded: self.signal_exclusions().excluded().clone(),
             },
         );
 
@@ -514,7 +514,7 @@ impl AppState {
                         .cluster_size_for_signal_key(&result.signal_key)
                         .saturating_sub(1);
                     let is_excluded = is_signal_key_excluded(
-                        self.signal_candidate.excluded(),
+                        self.signal_exclusions().excluded(),
                         &result.signal_key,
                         active_prompt_version,
                     );

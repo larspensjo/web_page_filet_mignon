@@ -1205,7 +1205,7 @@ fn archive_submit_priority_snapshot_includes_manually_excluded_candidate() {
             signal_key: "excluded-event".to_string(),
         },
     );
-    assert_eq!(state.signal_candidate().excluded().len(), 1);
+    assert_eq!(state.signal_exclusions().excluded().len(), 1);
 
     let (state, _) = update(state, Msg::ArchiveClicked);
     let request_id = state.archive_request_id();
@@ -2257,7 +2257,7 @@ fn archive_dialog_submit_uses_pinned_signal_candidate_snapshot_and_clears_overri
         Effect::PersistSignalCandidateOverrides { overrides } if overrides.is_empty()
     )));
     assert!(
-        state.signal_candidate().excluded().is_empty(),
+        state.signal_exclusions().excluded().is_empty(),
         "checkpoint submit must clear signal-candidate overrides"
     );
 }

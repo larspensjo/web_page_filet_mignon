@@ -313,6 +313,7 @@ pub struct AppState {
     consecutive_rate_limit_failures: u32,
     summary_cache: SummaryCache,
     signal_candidate: crate::signal_candidate::SignalCandidateSession,
+    signal_exclusions: crate::signal_candidate::SignalExclusions,
     signal_candidate_cache: crate::signal_candidate_cache::SignalCandidateCache,
     signal_candidate_inputs:
         HashMap<String, crate::update::signal_candidate::SignalCandidateInputSnapshot>,
@@ -430,6 +431,7 @@ impl Default for AppState {
             consecutive_rate_limit_failures: 0,
             summary_cache: SummaryCache::new(),
             signal_candidate: crate::signal_candidate::SignalCandidateSession::default(),
+            signal_exclusions: crate::signal_candidate::SignalExclusions::default(),
             signal_candidate_cache: crate::signal_candidate_cache::SignalCandidateCache::default(),
             signal_candidate_inputs: HashMap::new(),
             signal_candidate_threshold: crate::signal_candidate::DEFAULT_SELECTION_THRESHOLD,

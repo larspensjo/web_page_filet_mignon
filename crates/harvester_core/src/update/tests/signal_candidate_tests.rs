@@ -748,7 +748,7 @@ fn signal_candidate_overrides_loaded_sets_exclusions() {
     );
 
     assert!(effects.is_empty());
-    assert_eq!(state.signal_candidate().excluded().len(), 1);
+    assert_eq!(state.signal_exclusions().excluded().len(), 1);
 }
 
 fn start_cached_run(mut state: AppState) -> (AppState, Vec<Effect>) {
