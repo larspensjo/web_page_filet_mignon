@@ -186,6 +186,12 @@ Done means:
   `[0, 1]`, a distribution whose keys do not match the requested options,
   non-finite probabilities or a probability mass outside tolerance are recorded
   as failures and never coerced into a priority.
+- **Fixed tag vocabulary is preferred** (user decision, 2026-09-18, after the
+  smoke run). A predefined limited tag list is acceptable and preferable to
+  OpenAI's open-ended tags because it avoids aliases for the same concept.
+  Overlap with OpenAI's free-form tags is therefore diagnostic only and is not
+  a quality concern; tag tuning targets over-selection within the vocabulary.
+  The report's tag metrics are left unchanged.
 
 ## Constraints from the repository
 

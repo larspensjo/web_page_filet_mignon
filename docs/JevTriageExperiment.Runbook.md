@@ -508,3 +508,79 @@ through the fixed tool validates both.
 | `usage` shape | `{"input_tokens": n, "output_tokens": n}`. Output tokens were 835 on both calls, so they appear fixed per question set. The cost model bills input only; recheck TypeSafe billing for output tokens. |
 | Question text billed as input | Yes. 5,433 and 7,048 input tokens against 23,236 and 30,491 request bytes imply about 3,750 tokens of fixed rubric and question overhead per call. |
 | Request-size limit | Not reached. The longest frozen article is 97,214 bytes (about 25,000 tokens with the overhead), under the assumed 32k budget but not yet exercised; the smoke run's failures will show whether the long tail fits. |
+
+### 2026-09-18 — smoke run (`jev-smoke-20260918`)
+
+Twenty development articles, concurrency 1, full question set. All 20
+succeeded on the first attempt with no retries; every HTTP status was 200.
+Jev latency was median 2.1 s and p95 4.8 s. Output tokens were 835 on every
+call, confirming a fixed output size per question set. Jev cost was 4,414
+microdollars (about $0.22 per 1,000 articles, input-only pricing) against
+recorded OpenAI cost of 9,940 microdollars (about $0.50 per 1,000). The largest
+article was 27,089 bytes (8,906 input tokens, 42,750 request bytes); the long
+tail up to 97,214 bytes has not yet been sent, so the request-size limit is
+still unobserved. The first development round over the full development half
+exercises it.
+
+Priority against the OpenAI reference: 12 of 20 exact, 19 of 20 within one
+level, mean absolute error 0.45. Of the 9 OpenAI priority 4–5 articles, Jev
+placed 8 at 4–5, and 8 of its 10 priority 4–5 placements were OpenAI 4–5. No
+severe demotions or promotions; there were no OpenAI priority-5 articles in
+this sample. Categories: Business 18 of 20, Technology 18, Finance & Markets
+13, Politics & Regulation 3, Science & Research 0 — Business and Technology are
+near-universal at the 0.5 threshold. Tags: mean Jaccard 0.086, depressed by
+design because OpenAI coins free-form tags outside the 33-tag vocabulary;
+within the vocabulary, `data-centers`, `capex`, `enterprise-ai` and
+`power-grid` matched well, while `competition`, `margins`, `pricing` and
+`supply-chain` were over-selected (5–9 selections each with at most one
+OpenAI match).
+
+### 2026-09-18 — development round 1 (`jev-dev-round-1`)
+
+First 100 development articles, template configuration unchanged (the smoke
+settings with `limit = 100`). All 100 succeeded on the first attempt.
+
+- Priority: 60% exact, 95% within one level, mean absolute error 0.45.
+  High-priority (4+5) precision 78.6% and recall 75.0% (33 of 44). Priority 5:
+  three on each side, one shared. No severe demotions or promotions.
+- Disagreement pattern: six of the eleven OpenAI 4–5 articles that Jev placed
+  at 2–3 are AI policy or political statements (US and UK politicians,
+  company conduct codes); both Rocket Lab financing filings also dropped to 2.
+  Conversely, Jev raised power and energy market analysis tied to AI
+  data-centre demand (Bloom Energy, GE Vernova, Vistra) from 3 to 4.
+- Categories: Business 93%, Technology 95%, Finance & Markets 59%, Politics &
+  Regulation 20%, Science & Research 4%. OpenAI's single category was business
+  80, policy 17, technology 3, so Politics & Regulation tracks OpenAI's policy
+  share while Business and Technology are near-universal and carry little
+  information at the 0.5 threshold.
+- Latency: Jev median 3.6 s, p95 5.6 s, slower than OpenAI's historical sync
+  median 2.0 s and p95 3.4 s (n = 44). Each request carries 40 questions.
+- Cost: Jev $0.21 per 1,000 articles against OpenAI $0.58 (sync and batch
+  mixed).
+- The largest article in this subset was 27,524 bytes, so the long tail is
+  still unsent.
+
+### 2026-09-19 — development round 2 (`jev-dev-round-2`)
+
+Same 100 development articles as round 1. The only change is the priority
+question: it now carries OpenAI's framing (triage assistant estimating
+selection value for an AI-focused portfolio analyst, rubric as the scoring
+policy, priority means selection value). Nothing targets policy or energy.
+All 100 succeeded on the first attempt.
+
+- Priority: 59% exact, 95% within one level, mean absolute error 0.46.
+  High-priority precision 76.2%, recall 72.7% (32 of 44). No severe
+  demotions or promotions. Effectively unchanged from round 1.
+- Stability: Jev gave the same priority as round 1 on 93 of 100 articles;
+  of the seven that moved, three moved towards OpenAI and four away.
+- Conclusion: the round-1 disagreements are not caused by how the question is
+  phrased. Jev genuinely reads the rubric differently on political
+  statements (still 2–3 against OpenAI's 4) and on power and energy stock
+  analysis (still 4 against OpenAI's 3).
+- The three Rocket Lab Iridium-financing articles became consistent (5, 2, 2
+  in round 1; 2, 2, 2 now) but all sit two levels below OpenAI's 4. The
+  "AI-focused" framing lowered every Rocket Lab article's high-priority
+  probability; the rubric does not mention space.
+- Near-duplicate Trump "sick conspiracy" articles received 3 and 4 from both
+  sides, so OpenAI is not consistent on that story either.
+- Latency: Jev median 3.3 s, p95 5.5 s. Cost: $0.21 per 1,000 articles.
