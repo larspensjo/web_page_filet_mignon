@@ -1,4 +1,5 @@
 use crate::pre_triage_filter::{PreTriagePolicy, PreTriageSession};
+use crate::state::InitialArticleWindowOutcome as StartupWindow;
 
 use crate::{AppState, Effect};
 use engine_logging::{engine_info, engine_warn};
@@ -66,6 +67,7 @@ pub(super) fn handle_articles_loaded(
     let job_url_pairs = state.job_url_pairs();
     state.pre_triage_mut().merge_delta(delta, &policy);
     state.pre_triage_mut().bind_job_ids(&job_url_pairs);
+    state.startup_inputs.initial_article_window = StartupWindow::LoadedAndResolved;
 
     state.mark_dirty();
     let effects = super::processing::resume(state);
@@ -100,6 +102,12 @@ pub(super) fn handle_articles_load_failed(
     // Do NOT fail the TriageSession — a background refresh error should not
     // destroy the user's active triage session.
     state.set_pre_triage(PreTriageSession::default());
+    if matches!(
+        state.startup_inputs.initial_article_window,
+        StartupWindow::Pending | StartupWindow::Failed
+    ) {
+        state.startup_inputs.initial_article_window = StartupWindow::Failed;
+    }
     state.mark_dirty();
     Vec::new()
 }

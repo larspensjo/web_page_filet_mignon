@@ -13,6 +13,23 @@ use serde::{Deserialize, Serialize};
 // This token limit is the recommended limit to be used when creating an archive.
 pub const TOKEN_LIMIT: u64 = 100_000;
 
+pub const ARCHIVE_ARTICLE_TARGET: usize = 150;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ArchiveMeterStatus {
+    Loading,
+    Unavailable,
+    NotScoredYet,
+    Scored,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArchiveMeterView {
+    pub selected_count: usize,
+    pub target: usize,
+    pub token_estimate: u64,
+    pub unsettled_count: usize,
+    pub status: ArchiveMeterStatus,
+}
+
 /// Per-model LLM token usage snapshot for rendering.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LlmModelUsageView {

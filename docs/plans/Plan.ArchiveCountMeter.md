@@ -333,16 +333,21 @@ The initial article window is a distinct state with four outcomes: `Pending`, `L
 - Otherwise `Pending` while any input is pending.
 - Otherwise `Ready`. `Empty` counts as completed.
 
-Selection restoration (`restore_desktop_selection_if_ready`) uses the same predicate and acts
-only on `Ready`. This is a deliberate, small behaviour change for restoration, reconciled here:
+Selection restoration (`restore_desktop_selection_if_ready`) uses the same record with a
+`startup_settled_with_articles()` predicate. It acts once no startup input is still pending
+and the initial window is `LoadedAndResolved`, with pre-triage verdicts applied. This follows
+the owner decision on 2026-10-05: tolerance over refusal.
 
-- It now also waits for the initial pre-triage resolution. That arrives from the same worker
-  immediately after the corpus scan, so restoration happens at most one message later.
-- On `Empty` or `Unavailable` it does nothing, exactly as today, where the flags simply never
-  become true.
-- On a contexts failure, today's condition never opens either.
+- It still waits for the initial pre-triage resolution, which arrives from the same worker
+  immediately after the corpus scan.
+- It now also restores after failed contexts, refused result stores or invalid metadata, once
+  all other replies are in. The meter keeps its stricter `startup_readiness()` rule and reads
+  `Unavailable` when any input fails.
+- On an `Empty` or `Failed` initial window it does nothing: there are no resolved loaded
+  articles to restore into.
 
-Existing restoration tests must stay green, and one new test pins the pre-triage wait.
+Existing restoration tests must stay green. New tests pin the pre-triage wait, restoration
+after those failures, and the wait while any startup input remains pending.
 
 ### The meter's projection
 
@@ -423,6 +428,10 @@ Rules, all over saved-results entries with `in_window && actionable`:
 
 ### Known divergence (recorded, not changed)
 
+- **Mid-session article reload failure.** A failed article reload after startup resets
+  pre-triage verdicts until the next successful load, so pre-triage-excluded scored articles
+  can be counted briefly, then drop. The dialog shows the same number. Readiness stays
+  startup-only by design.
 - **Results list.** Its "Selected" rows come from a selection over every saved entry
   (including Last 24h outside the window and non-actionable entries), so they can differ from
   the meter in which duplicate representative is chosen and in number. A possible follow-up is
@@ -561,8 +570,10 @@ Work:
 1. Add `StartupReadiness` (`state/startup_readiness.rs`) per Target design, set from the startup
    reply messages and hydration in `update/mod.rs`, and `startup_readiness()`. Implement the
    `Empty` outcome by the chosen mechanism (a `host_bootstrap.rs` change if needed).
-2. Point `restore_desktop_selection_if_ready` at `startup_readiness() == Ready`. This is the
-   reconciled behaviour change described in Target design.
+2. Point `restore_desktop_selection_if_ready` at `startup_settled_with_articles()`: no input
+   is still pending and the initial window is loaded with pre-triage applied. It also restores
+   after failed contexts, refused stores or invalid metadata, per the owner decision in
+   Target design.
 3. Add `ArchiveMeterView`, `ArchiveMeterStatus` and `ARCHIVE_ARTICLE_TARGET` to
    `view_model.rs` (serde-derived, not yet in `AppViewModel`), and re-export them from
    `lib.rs`.
@@ -773,8 +784,8 @@ Docs:
   - The saved-results paragraph (`:295-303`) defines the meter's count and its estimate (the
     summary-token rule unchanged, now over the counted articles).
   - It also defines the backlog and the reducer-owned startup-readiness record: pending,
-    completed, empty and failed outcomes, initial pre-triage resolution, and the record being
-    shared with selection restoration.
+    completed, empty and failed outcomes and initial pre-triage resolution. Selection
+    restoration uses the same record with a settled-with-articles predicate.
 - `docs/plans/Plan.Simplification.md` Phase 12:
   - Change step 3 to: "IPC: the snapshot shape should not change; if it does, bump to 16 (IPC
     15 is used by `docs/plans/Plan.ArchiveCountMeter.md`) and regenerate fixtures."
@@ -833,7 +844,9 @@ counts selected scored articles toward a fixed target"**.
   - Manual exclusions and startup readiness are reducer state, independent of the scoring
     session, the pre-triage coordinator and request bookkeeping, so the pipeline rebuild keeps
     the meter's inputs. Readiness requires the initial pre-triage resolution and has explicit
-    empty and failed outcomes. Selection restoration shares it.
+    empty and failed outcomes. Selection restoration uses the same record with a
+    settled-with-articles predicate, tolerating failed inputs once none is pending and the
+    initial window is loaded with pre-triage applied (owner decision, 2026-10-05).
   - Desktop IPC 15 refines the 2026-09-30 rendered-field set: `token_limit`,
     `archive_token_estimate`, `archive_filtered_count` and `raw_unprocessed_count` are replaced
     by one `archive_meter` record; `archive_partial_coverage` stays for the archive dialog.
@@ -873,9 +886,10 @@ Not affected: `docs/CorpusFormat.md` and `CORPUS_SCHEMA_VERSION` (no corpus chan
   failed outcomes are explicit, with a test each (empty folder, context failure, article-load
   failure, store refusal).
 - **Readiness change delays selection restoration.** It now waits for the initial pre-triage
-  resolution, which follows the corpus scan immediately from the same worker. Pinned by
-  `selection_restore_waits_for_initial_pre_triage_resolution`, plus the existing restoration
-  tests.
+  resolution and for every startup input to settle, tolerating failed contexts, refused stores
+  and invalid metadata (owner decision, 2026-10-05). An empty or failed initial window still
+  prevents restoration. Pinned by `selection_restore_waits_for_initial_pre_triage_resolution`,
+  the failed-input and pending-input tests, plus the existing restoration tests.
 - **The `Empty` mechanism touches hydration.** If hydration always reduces
   `RestoreCompletedJobs`, an empty list must have no other effect. Phase 2 verifies this before
   choosing it.

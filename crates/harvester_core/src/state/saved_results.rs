@@ -20,6 +20,24 @@ pub(crate) struct SavedArticleResults {
     pub signal_key: Option<SignalCandidateCacheKey>,
 }
 
+impl SavedArticleResults {
+    pub(crate) fn is_unsettled(
+        &self,
+        summary_policy: crate::briefing::TriageSelectionPolicy,
+    ) -> bool {
+        if !self.in_window || !self.actionable {
+            return false;
+        }
+        let Some((_, triage)) = &self.triage else {
+            return true;
+        };
+        triage.priority > summary_policy.cutoff_exclusive
+            && (self.summary.is_none()
+                || (triage.priority >= crate::update::signal_candidate::PRIORITY_CUTOFF_INCLUSIVE
+                    && self.signal.is_none()))
+    }
+}
+
 impl AppState {
     #[cfg(test)]
     pub(crate) fn prepare_saved_session_fixture(&mut self) {

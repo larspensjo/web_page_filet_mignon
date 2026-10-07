@@ -6,6 +6,7 @@ use crate::LlmResultKind;
 use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
 use harvester_engine::llm::prompt::PromptId;
 
+mod archive_meter_tests;
 mod support;
 use support::*;
 

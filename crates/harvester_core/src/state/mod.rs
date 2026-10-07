@@ -13,6 +13,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 mod ai_availability;
+mod archive_meter;
+mod startup_readiness;
+pub use startup_readiness::{
+    InitialArticleWindowOutcome, StartupInputOutcome, StartupReadiness, StartupReadinessStatus,
+};
 mod batch;
 mod briefing_access;
 
@@ -268,6 +273,7 @@ pub enum BatchStatus {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppState {
+    pub(crate) startup_inputs: StartupReadiness,
     session: SessionState,
     jobs: BTreeMap<JobId, JobState>,
     archive_article_tokens: batch::ArchiveArticleTokenLookup,
@@ -432,6 +438,7 @@ impl Default for AppState {
             summary_cache: SummaryCache::new(),
             signal_candidate: crate::signal_candidate::SignalCandidateSession::default(),
             signal_exclusions: crate::signal_candidate::SignalExclusions::default(),
+            startup_inputs: StartupReadiness::default(),
             signal_candidate_cache: crate::signal_candidate_cache::SignalCandidateCache::default(),
             signal_candidate_inputs: HashMap::new(),
             signal_candidate_threshold: crate::signal_candidate::DEFAULT_SELECTION_THRESHOLD,

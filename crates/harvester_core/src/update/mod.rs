@@ -1,5 +1,6 @@
 use engine_logging::{engine_info, engine_warn};
 
+use crate::state::InitialArticleWindowOutcome as StartupWindow;
 use crate::{AppState, Effect, Msg, SessionState};
 
 mod archive;
@@ -24,6 +25,7 @@ mod tests;
 
 /// Pure update function: applies a message to state and returns any effects.
 pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
+    state.record_startup_reply(&msg);
     let view_change_requested =
         matches!(&msg, Msg::JobSelected { .. } | Msg::JobListModeSet { .. });
     let previous_view_selection = (state.job_list_mode(), state.selected_job_id());
@@ -128,6 +130,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::StartupHydrationRequested => {
             state.mark_prompt_contexts_pending();
             state.mark_triage_metadata_pending();
+            state.startup_inputs = Default::default();
             vec![
                 Effect::LoadPromptContexts,
                 Effect::LoadLlmMetadata,
@@ -258,8 +261,13 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             .into_iter()
             .collect(),
         Msg::RestoreCompletedJobs(entries) => {
-            state.restore_completed_jobs(entries);
-            state.request_pre_triage_refresh_evaluation(false);
+            if entries.is_empty() {
+                state.startup_inputs.initial_article_window = StartupWindow::Empty;
+            } else {
+                state.restore_completed_jobs(entries);
+                state.startup_inputs.initial_article_window = StartupWindow::Pending;
+                state.request_pre_triage_refresh_evaluation(false);
+            }
             Vec::new()
         }
         Msg::RestorePendingIntake(urls) => {

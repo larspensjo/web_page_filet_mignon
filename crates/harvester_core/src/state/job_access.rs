@@ -181,11 +181,7 @@ impl AppState {
             self.pending_selected_article_url = None;
             return None;
         }
-        if !self.saved_articles_ready
-            || !self.restored_checkpoint_ready
-            || !self.prompt_contexts_ready
-            || !self.triage_metadata_ready()
-        {
+        if !self.startup_settled_with_articles() {
             return None;
         }
         let url = self.pending_selected_article_url.take()?;

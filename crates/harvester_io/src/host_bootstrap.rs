@@ -329,9 +329,7 @@ pub fn hydrate_state_from_disk(
     let hydration = load_runtime_hydration(&paths.state_path, &paths.output_dir);
     let completed_jobs = hydration.jobs;
     let completed_job_count = completed_jobs.len();
-    if !completed_jobs.is_empty() {
-        (state, _) = update(state, Msg::RestoreCompletedJobs(completed_jobs));
-    }
+    (state, _) = update(state, Msg::RestoreCompletedJobs(completed_jobs));
     let pending_intake = load_pending_intake(&paths.state_path);
     if !pending_intake.is_empty() {
         (state, _) = update(state, Msg::RestorePendingIntake(pending_intake));
@@ -436,6 +434,112 @@ pub fn pump_pre_triage_refresh(mut state: AppState) -> (AppState, Vec<Effect>, b
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hydrate_empty_output_folder_records_empty_article_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = RuntimePaths::with_defaults(dir.path().to_path_buf());
+        let (state, effects) = hydrate_state_from_disk(AppState::new(), &paths);
+        assert_eq!(
+            state.startup_inputs().initial_article_window,
+            harvester_core::InitialArticleWindowOutcome::Empty
+        );
+        assert_eq!(
+            state.startup_inputs().result_stores,
+            harvester_core::StartupInputOutcome::Loaded
+        );
+        assert!(state.completed_jobs_snapshot().is_empty());
+        assert!(!effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::LoadArticlesForTriage { .. })));
+        let (mut state, pump_effects, pumped) = pump_pre_triage_refresh(state);
+        assert!(!pumped);
+        assert!(pump_effects.is_empty());
+        for msg in [
+            Msg::BriefingCheckpointLoaded { since_utc: None },
+            Msg::PromptTemplateFilesLoaded,
+            Msg::PromptContextsLoaded {
+                contexts: HashMap::new(),
+            },
+            Msg::LlmMetadataLoaded {
+                active_versions: [
+                    PromptId::ArticleTriage,
+                    PromptId::ArticleSummary,
+                    PromptId::ArticleSignalCandidate,
+                ]
+                .into_iter()
+                .map(|id| (id, 1))
+                .collect(),
+                effective_models: [
+                    PromptId::ArticleTriage,
+                    PromptId::ArticleSummary,
+                    PromptId::ArticleSignalCandidate,
+                ]
+                .into_iter()
+                .map(|id| (id, "fixture-model".into()))
+                .collect(),
+            },
+        ] {
+            state = update(state, msg).0;
+        }
+        assert_eq!(
+            state.startup_readiness(),
+            harvester_core::StartupReadinessStatus::Ready
+        );
+        assert_eq!(
+            state.archive_meter_view().status,
+            harvester_core::ArchiveMeterStatus::NotScoredYet
+        );
+        assert_eq!(state.archive_meter_view().selected_count, 0);
+    }
+
+    #[test]
+    fn hydrate_state_from_disk_reduces_exclusions_before_startup_replies() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = missing_dates_fixture(dir.path());
+        let overrides = [harvester_core::OverrideKey {
+            signal_key: "saved-exclusion".into(),
+            prompt_id: PromptId::ArticleSignalCandidate.to_string(),
+            prompt_version: 1,
+        }]
+        .into_iter()
+        .collect();
+        crate::signal_candidate_overrides_store::save(
+            &paths.signal_candidate_overrides_path,
+            &overrides,
+        )
+        .unwrap();
+        let (state, effects) = hydrate_state_from_disk(AppState::new(), &paths);
+        assert_eq!(state.signal_exclusions().excluded(), &overrides);
+        let inputs = state.startup_inputs();
+        assert_eq!(
+            inputs.checkpoint,
+            harvester_core::StartupInputOutcome::Pending
+        );
+        assert_eq!(
+            inputs.prompt_metadata,
+            harvester_core::StartupInputOutcome::Pending
+        );
+        assert_eq!(
+            inputs.prompt_contexts,
+            harvester_core::StartupInputOutcome::Pending
+        );
+        assert_eq!(
+            inputs.initial_article_window,
+            harvester_core::InitialArticleWindowOutcome::Pending
+        );
+        for required in [
+            Effect::LoadBriefingCheckpoint,
+            Effect::LoadLlmMetadata,
+            Effect::LoadPromptContexts,
+            Effect::LoadPromptTemplateFiles,
+        ] {
+            assert!(effects.contains(&required));
+        }
+        let (state, _, pumped) = pump_pre_triage_refresh(state);
+        assert!(pumped);
+        assert_eq!(state.signal_exclusions().excluded(), &overrides);
+    }
 
     fn missing_dates_fixture(output: &std::path::Path) -> RuntimePaths {
         let paths = RuntimePaths::with_defaults(output.to_path_buf());

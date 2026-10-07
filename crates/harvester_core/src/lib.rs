@@ -84,10 +84,11 @@ pub use triage::{
 pub use triage_cache::{TriageCache, TriageCacheEntry, TriageCacheKey, TriageCacheKeyError};
 pub use update::update;
 pub use view_model::{
-    AppViewModel, ArchivePartialCoverageView, DesktopJobListView, JobFilterStatus, JobListRowView,
-    JobRowView, LinkRowView, LlmModelUsageView, ReprocessNoticeView, RightPaneView, ScoreBand,
-    SelectedJobView, SelectedJobVisibility, SignalCandidateOutcome, SignalCandidateRow,
-    SignalCandidateRowState, StopFinishButtonState, TriageAnnotationView, DEFAULT_WINDOW_HEIGHT,
+    AppViewModel, ArchiveMeterStatus, ArchiveMeterView, ArchivePartialCoverageView,
+    DesktopJobListView, JobFilterStatus, JobListRowView, JobRowView, LinkRowView,
+    LlmModelUsageView, ReprocessNoticeView, RightPaneView, ScoreBand, SelectedJobView,
+    SelectedJobVisibility, SignalCandidateOutcome, SignalCandidateRow, SignalCandidateRowState,
+    StopFinishButtonState, TriageAnnotationView, ARCHIVE_ARTICLE_TARGET, DEFAULT_WINDOW_HEIGHT,
     DEFAULT_WINDOW_WIDTH, DESKTOP_JOB_LIST_MAX_ROWS, DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS,
     TOKEN_LIMIT,
 };
@@ -102,3 +103,7 @@ pub use result_store::{ResultStore, SavedResult};
 pub use tabs::JobListMode;
 
 pub use preview::format_summary_for_preview;
+
+pub use state::{
+    InitialArticleWindowOutcome, StartupInputOutcome, StartupReadiness, StartupReadinessStatus,
+};
