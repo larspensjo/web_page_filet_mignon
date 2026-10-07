@@ -293,8 +293,8 @@ export function RunSurface({ view }: { view: RunView }) {
 						<span className="run-state">Running</span>
 					) : (
 						<span className="run-state">
-							Idle · {view.job_count} articles · {view.archive_filtered_count}{" "}
-							ready to archive
+							Idle · {view.job_count} articles ·{" "}
+							{view.archive_meter.selected_count} ready to archive
 						</span>
 					)}
 				</div>

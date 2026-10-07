@@ -6,7 +6,7 @@
     "archive_enabled": true,
     "archive_meter": {
       "selected_count": 0,
-      "status": "Loading",
+      "status": "NotScoredYet",
       "target": 150,
       "token_estimate": 0,
       "unsettled_count": 0
@@ -26,14 +26,14 @@
     "job_count": 0,
     "last_paste_stats": null,
     "llm_quota": {
-      "label": "LLM calls unavailable",
+      "label": "LLM calls 0 / unlimited",
       "limit": null,
       "percent": null,
-      "severity": "Unavailable",
+      "severity": "Normal",
       "used": 0
     },
     "reprocess_notice": null,
-    "resume_disabled_reason": "Unfinished work is not known yet.",
+    "resume_disabled_reason": "There is no unfinished work to process.",
     "resume_enabled": false,
     "right_pane": {
       "summary_markdown": null
@@ -48,7 +48,18 @@
     "run_state": "Idle",
     "signal_candidate_rows": [],
     "stop_finish_button": "Disabled",
-    "unfinished_work": "Unknown"
+    "unfinished_work": {
+      "Known": {
+        "articles_with_work": 0,
+        "complete": 0,
+        "estimated_calls": 0,
+        "in_progress": 0,
+        "needs_scoring": 0,
+        "needs_summary": 0,
+        "needs_triage": 0,
+        "not_eligible": 0
+      }
+    }
   },
   "fatal_message": null
 }

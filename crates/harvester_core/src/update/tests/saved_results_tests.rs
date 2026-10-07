@@ -278,9 +278,14 @@ fn restart_without_run_restores_current_priority_order_summary_results_and_meter
         ["high", "old-summary", "raw", "low", "stale"].map(|name| article(name).url)
     );
     assert_eq!(view.signal_candidate_rows.len(), 2);
-    assert_eq!(view.archive_filtered_count, 1);
-    assert_eq!(view.archive_token_estimate, 20);
-    assert_eq!(view.raw_unprocessed_count, 1);
+    assert_eq!(
+        state.startup_readiness(),
+        crate::StartupReadinessStatus::Ready
+    );
+    assert_eq!(view.archive_meter.selected_count, 1);
+    assert_eq!(view.archive_meter.token_estimate, 20);
+    assert_eq!(view.archive_meter.status, crate::ArchiveMeterStatus::Scored);
+    assert_eq!(view.archive_meter.unsettled_count, 3);
     assert!(view.archive_enabled);
     let id = view.desktop_job_list.rows[0].job_id;
     let state = update(state, Msg::JobSelected { job_id: id }).0;
@@ -580,8 +585,14 @@ fn restart_estimate_matches_post_run_summary_tokens_and_full_article_fallback() 
         }
     );
     assert_eq!(
-        state.view().archive_token_estimate,
-        estimates.summary_tokens
+        state.startup_readiness(),
+        crate::StartupReadinessStatus::Ready
+    );
+    assert_eq!(state.view().archive_meter.selected_count, 0);
+    assert_eq!(state.view().archive_meter.token_estimate, 0);
+    assert_eq!(
+        state.view().archive_meter.status,
+        crate::ArchiveMeterStatus::NotScoredYet
     );
     let mut post_run = state;
     let mut triages = crate::TriageSession::new_loading(None);
@@ -784,10 +795,32 @@ fn undated_window_articles_keep_archive_selection_annotations_priority_and_cover
             }]),
         )
         .0;
-        let state = loaded(state, std::slice::from_ref(&a));
+        let mut state = loaded(state, std::slice::from_ref(&a));
+        assert_eq!(state.view().archive_meter.selected_count, 0);
+        assert_eq!(
+            state.view().archive_meter.status,
+            crate::ArchiveMeterStatus::NotScoredYet
+        );
+        // Changing the frontmatter invalidates the scoring input; score the undated
+        // article under its actual current key before asserting selection membership.
+        let key = state
+            .saved_results_for_url(&a.url)
+            .unwrap()
+            .signal_key
+            .clone()
+            .unwrap();
+        state.store_signal_candidate_result(key, score("high", 90), "2026-10-03T11:00:00Z".into());
         assert!(state.briefing_since_utc().is_some());
         assert_eq!(state.archive_corpus().ordered_urls(), &[a.url.clone()]);
-        assert_eq!(state.view().archive_filtered_count, 1);
+        assert_eq!(
+            state.startup_readiness(),
+            crate::StartupReadinessStatus::Ready
+        );
+        assert_eq!(state.view().archive_meter.selected_count, 1);
+        assert_eq!(
+            state.view().archive_meter.status,
+            crate::ArchiveMeterStatus::Scored
+        );
         assert!(state.view().desktop_job_list.rows.is_empty());
         assert_eq!(state.view().desktop_job_list.hidden_without_fetch_time, 1);
         let restored = update(

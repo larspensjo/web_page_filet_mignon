@@ -2544,7 +2544,7 @@ fn summaries_can_start_false_when_briefing_active() {
 }
 
 #[test]
-fn view_exposes_archive_token_estimate_and_article_counts() {
+fn view_exposes_selected_meter_without_triage_or_download_fallback() {
     use crate::briefing::ArticleSummaryResult;
     use crate::summary_cache::SummaryCacheKey;
     use crate::{JobResultKind, Stage};
@@ -2569,8 +2569,8 @@ fn view_exposes_archive_token_estimate_and_article_counts() {
         (state, job_id)
     }
 
-    // (1) One article in the completed triage corpus, downloaded (500 raw tokens)
-    //     and summarized (42 output tokens). In the archive corpus; NOT raw.
+    // (1) One article in the completed triage corpus, downloaded (500 tokens)
+    //     and summarized (42 output tokens), but not scored.
     let triaged_url = "https://triage-complete.com/0".to_string();
     let state = complete_triage_state_for_test(1);
     let mut state = add_completed_job_with_tokens_for_test(state, &triaged_url, 500);
@@ -2593,8 +2593,8 @@ fn view_exposes_archive_token_estimate_and_article_counts() {
         "2026-04-01T00:00:00Z".to_string(),
     );
 
-    // (2) A successful downloaded job that is NOT in the archive corpus.
-    //     With the correct implementation this must NOT count as raw.
+    // (2) A successful download outside the triaged archive corpus. Neither
+    //     download can count toward the meter without a saved current-key score.
     let state = add_completed_job_with_tokens_for_test(state, "https://fresh.example.com/new", 300);
 
     // (3) A FAILED job that still carries tokens (apply_done does not clear them).
@@ -2636,157 +2636,21 @@ fn view_exposes_archive_token_estimate_and_article_counts() {
     // (5) A QUEUED job: enqueued only, no tokens, not done.
     let (state, _queued_id) = enqueue(state, "https://queued.example.com/x");
 
+    let state = crate::fixture_support::complete_archive_meter_startup(state);
     let view = state.view();
 
-    // Estimate = summary-mode archive size over the filtered corpus only.
-    assert_eq!(view.archive_token_estimate, 42);
-    // Filtered corpus has exactly the one triaged article.
-    assert_eq!(view.archive_filtered_count, 1);
-    // The single archive article (1) is fully summarized. Job (2) has no summary
-    // but is outside the archive corpus — it must not be counted as raw.
-    assert_eq!(view.raw_unprocessed_count, 0);
-}
-
-#[test]
-fn raw_unprocessed_count_is_archive_corpus_articles_without_summary() {
-    use crate::briefing::ArticleSummaryResult;
-    use crate::summary_cache::SummaryCacheKey;
-    use harvester_engine::llm::dto::SummaryEntities;
-    use harvester_engine::llm::prompt::PromptId;
-
-    init_logging();
-
-    // Two archive-corpus articles: one summarized, one not.
-    let url_summarized = "https://triage-complete.com/0".to_string();
-    let url_raw = "https://triage-complete.com/1".to_string();
-    let state = complete_triage_state_for_test(2);
-    let state = add_completed_job_with_tokens_for_test(state, &url_summarized, 400);
-    let mut state = add_completed_job_with_tokens_for_test(state, &url_raw, 600);
-
-    state.store_summary_result(
-        SummaryCacheKey {
-            content_hash: "hash-tc-0".to_string(),
-            prompt_id: PromptId::ArticleSummary,
-            prompt_version: 4,
-            model_id: "model".to_string(),
-            context_hash: "ctx".to_string(),
-        },
-        ArticleSummaryResult {
-            title: "Summarized".to_string(),
-            summary: "s".to_string(),
-            key_points: vec![],
-            input_tokens: 100,
-            output_tokens: 30,
-            entities: SummaryEntities::default(),
-        },
-        "2026-04-01T00:00:00Z".to_string(),
-    );
-
-    let view = state.view();
-
-    assert_eq!(view.archive_filtered_count, 2);
-    // url_raw is in the archive corpus but has no summary → counts as 1 raw.
-    assert_eq!(view.raw_unprocessed_count, 1);
-}
-
-#[test]
-fn signal_candidate_mode_keeps_raw_count_over_full_archive_corpus() {
-    use crate::briefing::ArticleSummaryResult;
-    use crate::summary_cache::SummaryCacheKey;
-    use harvester_engine::llm::dto::{
-        Confidence, SignalCandidateResult, SourceTier, SummaryEntities,
-    };
-    use harvester_engine::llm::prompt::PromptId;
-
-    init_logging();
-
-    // Three triaged articles in the archive corpus. Only article /0 is summarized
-    // and promoted to a settled signal candidate; /1 and /2 remain unsummarized.
-    let url_candidate = "https://triage-complete.com/0".to_string();
-    let state = complete_triage_state_for_test(3);
-    let state = add_completed_job_with_tokens_for_test(state, &url_candidate, 400);
-    let state = add_completed_job_with_tokens_for_test(state, "https://triage-complete.com/1", 500);
-    let mut state =
-        add_completed_job_with_tokens_for_test(state, "https://triage-complete.com/2", 600);
-
-    state.store_summary_result(
-        SummaryCacheKey {
-            content_hash: "hash-tc-0".to_string(),
-            prompt_id: PromptId::ArticleSummary,
-            prompt_version: 4,
-            model_id: "model".to_string(),
-            context_hash: "ctx".to_string(),
-        },
-        ArticleSummaryResult {
-            title: "Candidate".to_string(),
-            summary: "s".to_string(),
-            key_points: vec![],
-            input_tokens: 100,
-            output_tokens: 30,
-            entities: SummaryEntities::default(),
-        },
-        "2026-04-01T00:00:00Z".to_string(),
-    );
-
-    // Settle a single signal candidate (article /0). All scoring done, none in flight,
-    // so the meter switches to the signal-candidate export subset.
-    state
-        .signal_candidate_mut()
-        .enqueue(url_candidate.clone(), "fixture-input".to_string());
-    state.signal_candidate_mut().mark_scoring(&url_candidate, 1);
-    state.signal_candidate_mut().complete(
-        &url_candidate,
-        SignalCandidateResult {
-            signal_score: 90,
-            signal_key: "cluster-a".to_string(),
-            themes: vec!["theme".to_string()],
-            draft_gist: "gist".to_string(),
-            source_tier: SourceTier::Tier1,
-            confidence: Confidence::High,
-            reasoning: "reason".to_string(),
-            input_tokens: 10,
-            output_tokens: 2,
-        },
-    );
-
-    // A changed digest replaces only the settled score. The view must return
-    // to the signal-filtered estimate after the replacement settles.
-    assert!(state
-        .signal_candidate_mut()
-        .enqueue(url_candidate.clone(), "changed-input".to_string()));
-    state.signal_candidate_mut().mark_scoring(&url_candidate, 2);
-    state.signal_candidate_mut().complete(
-        &url_candidate,
-        SignalCandidateResult {
-            signal_score: 90,
-            signal_key: "cluster-a".to_string(),
-            themes: vec!["theme".to_string()],
-            draft_gist: "gist".to_string(),
-            source_tier: SourceTier::Tier1,
-            confidence: Confidence::High,
-            reasoning: "reason".to_string(),
-            input_tokens: 10,
-            output_tokens: 2,
-        },
-    );
+    assert_eq!(view.archive_meter.selected_count, 0);
+    assert_eq!(view.archive_meter.token_estimate, 0);
     assert_eq!(
-        state
-            .signal_candidate()
-            .observation_counts()
-            .pending_or_in_flight,
-        0
+        view.archive_meter.status,
+        crate::ArchiveMeterStatus::NotScoredYet
     );
-    assert_eq!(state.signal_candidate().enqueued_count(), 2);
-    assert_eq!(state.signal_candidate().completed_count(), 2);
-
-    crate::fixture_support::save_session_results(&mut state);
-    let view = state.view();
-
-    // Bar/filtered reflect the export subset: the single selected candidate.
-    assert_eq!(view.archive_filtered_count, 1);
-    assert_eq!(view.archive_token_estimate, 30);
-    // Raw stays the full-corpus backlog: /1 and /2 have no summary → 2 raw.
-    assert_eq!(view.raw_unprocessed_count, 2);
+    let (_, effects) = update(state, Msg::ArchiveClicked);
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, Effect::OpenArchiveDialog {
+        article_count: 1, token_estimates, ..
+    } if token_estimates.summary_tokens == 42)));
 }
 
 /// Seed the persisted triage cache with a completed result for each URL, keyed
@@ -2809,7 +2673,7 @@ fn seed_triage_cache_for_urls(state: &mut AppState, urls: &[&str], priority: u8)
 }
 
 #[test]
-fn archive_counts_derive_from_triage_cache_at_startup_without_running_triage() {
+fn startup_triage_coverage_does_not_fall_back_into_meter_selection() {
     init_logging();
     // Reproduces the startup state: completed jobs restored, pre-triage rebuilt to
     // ReadyToTriage, triage metadata + a fully-covering triage cache hydrated — but
@@ -2819,15 +2683,23 @@ fn archive_counts_derive_from_triage_cache_at_startup_without_running_triage() {
     state = prime_llm_metadata(state);
     seed_triage_cache_for_urls(&mut state, urls, 3);
 
+    let state = crate::fixture_support::complete_archive_meter_startup(state);
     let view = state.view();
+    assert_eq!(view.archive_meter.selected_count, 0);
     assert_eq!(
-        view.archive_filtered_count, 2,
-        "archive counts must reflect the cached triage results at startup, not 0"
+        view.archive_meter.status,
+        crate::ArchiveMeterStatus::NotScoredYet
     );
-    assert_eq!(
-        view.raw_unprocessed_count, 2,
-        "both cached-triaged articles lack a summary → both are raw backlog"
-    );
+    assert_eq!(view.archive_meter.unsettled_count, 2);
+    assert_eq!(view.archive_partial_coverage, None);
+    let (_, effects) = update(state, Msg::ArchiveClicked);
+    assert!(effects.iter().any(|e| matches!(
+        e,
+        Effect::OpenArchiveDialog {
+            article_count: 2,
+            ..
+        }
+    )));
 }
 
 #[test]
@@ -2864,7 +2736,15 @@ fn cache_derived_archive_estimates_use_pre_triage_content_hash_for_summaries() {
     let estimates = state.archive_token_estimates(&[url.to_string()]);
     assert_eq!(estimates.summary_coverage, 1);
     assert_eq!(estimates.summary_tokens, 42);
-    assert_eq!(state.view().raw_unprocessed_count, 0);
+    let state = crate::fixture_support::complete_archive_meter_startup(state);
+    assert_eq!(state.view().archive_meter.selected_count, 0);
+    assert_eq!(state.view().archive_meter.token_estimate, 0);
+    assert_eq!(
+        state.view().archive_meter.status,
+        crate::ArchiveMeterStatus::NotScoredYet
+    );
+    let (_, effects) = update(state, Msg::ArchiveClicked);
+    assert!(effects.iter().any(|e| matches!(e, Effect::OpenArchiveDialog { token_estimates, .. } if *token_estimates == estimates)));
 }
 
 #[test]
@@ -2878,6 +2758,12 @@ fn saved_startup_counts_reach_full_archive_export() {
     state = prime_llm_metadata(state);
     seed_triage_cache_for_urls(&mut state, urls, 3);
 
+    let state = crate::fixture_support::complete_archive_meter_startup(state);
+    assert_eq!(state.view().archive_meter.selected_count, 0);
+    assert_eq!(
+        state.view().archive_meter.status,
+        crate::ArchiveMeterStatus::NotScoredYet
+    );
     let (state, effects) = update(state, Msg::ArchiveClicked);
     let open = effects
         .iter()
@@ -2945,6 +2831,12 @@ fn saved_startup_counts_hide_signal_results_without_current_upstream_keys() {
         },
     );
 
+    let state = crate::fixture_support::complete_archive_meter_startup(state);
+    assert_eq!(state.view().archive_meter.selected_count, 0);
+    assert_eq!(
+        state.view().archive_meter.status,
+        crate::ArchiveMeterStatus::NotScoredYet
+    );
     let (state, effects) = update(state, Msg::ArchiveClicked);
     let (signal_candidate_count, signal_candidate_default) = effects
         .iter()
@@ -3027,21 +2919,39 @@ fn cache_derived_archive_corpus_counts_the_covered_subset_under_partial_coverage
     init_logging();
     // Only one of two ready articles has a cached triage result — the common real
     // case, where some articles were triaged under a superseded prompt/model or are
-    // newly polled. The count must reflect the triaged subset (1), not collapse to 0.
+    // newly polled. Dialog coverage keeps the triaged subset; the meter stays unscored.
     let urls = &["https://partial.com/1", "https://partial.com/2"];
     let mut state = ready_pre_triage_state(urls);
     state = prime_llm_metadata(state);
     seed_triage_cache_for_urls(&mut state, &urls[..1], 3);
 
+    let state = crate::fixture_support::complete_archive_meter_startup(state);
     let view = state.view();
     assert_eq!(
-        view.archive_filtered_count, 1,
-        "partial cache coverage must count the already-triaged subset, not 0"
+        view.archive_partial_coverage,
+        Some(crate::ArchivePartialCoverageView {
+            triaged: 1,
+            actionable_total: 2
+        })
     );
+    assert_eq!(view.archive_meter.selected_count, 0);
+    assert_eq!(
+        view.archive_meter.status,
+        crate::ArchiveMeterStatus::NotScoredYet
+    );
+    assert_eq!(view.archive_meter.unsettled_count, 2);
+    let (_, effects) = update(state, Msg::ArchiveClicked);
+    assert!(effects.iter().any(|e| matches!(
+        e,
+        Effect::OpenArchiveDialog {
+            article_count: 1,
+            ..
+        }
+    )));
 }
 
 #[test]
-fn cache_derived_view_counts_ignore_settled_signal_candidate_override() {
+fn cache_derived_meter_applies_exclusions_to_saved_selection() {
     use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
 
     init_logging();
@@ -3071,9 +2981,35 @@ fn cache_derived_view_counts_ignore_settled_signal_candidate_override() {
         },
     );
 
-    let view = state.view();
-    assert_eq!(view.archive_filtered_count, 2);
-    assert_eq!(view.archive_token_estimate, 0);
+    crate::fixture_support::save_session_results(&mut state);
+    let state = crate::fixture_support::complete_archive_meter_startup(state);
+    assert_eq!(state.view().archive_meter.selected_count, 1);
+    assert_eq!(
+        state.view().archive_meter.status,
+        crate::ArchiveMeterStatus::Scored
+    );
+    let (state, _) = update(
+        state,
+        Msg::ToggleSignalCandidateExclusion {
+            signal_key: "cache-view-cluster".into(),
+        },
+    );
+    assert_eq!(state.view().archive_meter.selected_count, 0);
+    assert_eq!(state.view().archive_meter.token_estimate, 0);
+    assert_eq!(
+        state.view().archive_meter.status,
+        crate::ArchiveMeterStatus::Scored
+    );
+    assert_eq!(state.view().archive_partial_coverage, None);
+    let (_, effects) = update(state, Msg::ArchiveClicked);
+    assert!(effects.iter().any(|e| matches!(
+        e,
+        Effect::OpenArchiveDialog {
+            article_count: 2,
+            signal_candidate_count: 0,
+            ..
+        }
+    )));
 }
 
 #[test]
@@ -3126,11 +3062,21 @@ fn cache_derived_archive_counts_populate_while_pre_triage_is_reviewing() {
     state = prime_llm_metadata(state);
     seed_triage_cache_for_urls(&mut state, &[url1, url2], 3);
 
+    let state = crate::fixture_support::complete_archive_meter_startup(state);
+    assert_eq!(state.view().archive_partial_coverage, None);
+    assert_eq!(state.view().archive_meter.selected_count, 0);
     assert_eq!(
-        state.view().archive_filtered_count,
-        2,
-        "archive counts must derive from the cache even while pre-triage is Reviewing"
+        state.view().archive_meter.status,
+        crate::ArchiveMeterStatus::NotScoredYet
     );
+    let (state, effects) = update(state, Msg::ArchiveClicked);
+    assert!(effects.iter().any(|e| matches!(
+        e,
+        Effect::OpenArchiveDialog {
+            article_count: 2,
+            ..
+        }
+    )));
     assert!(
         matches!(state.triage().phase(), crate::triage::TriagePhase::Idle),
         "live triage session must stay Idle — the derived corpus is display-only"

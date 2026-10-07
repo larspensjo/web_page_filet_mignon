@@ -146,6 +146,13 @@ pub fn synthetic_view(case: ProbeCase, generation: u64) -> AppViewModel {
     };
     let results = matches!(case, ProbeCase::PopulatedResults);
     AppViewModel {
+        archive_meter: harvester_core::ArchiveMeterView {
+            selected_count: 110,
+            target: harvester_core::ARCHIVE_ARTICLE_TARGET,
+            token_estimate: 60_000,
+            unsettled_count: 40,
+            status: harvester_core::ArchiveMeterStatus::Scored,
+        },
         job_count: PROBE_CORPUS_JOBS,
         desktop_job_list: DesktopJobListView {
             mode: if results {

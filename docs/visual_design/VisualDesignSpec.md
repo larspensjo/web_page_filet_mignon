@@ -262,9 +262,15 @@ Status information should remain visible without dominating the screen.
 
 Use:
 
-- A single clearly labeled token or budget meter.
+- Two clearly labeled header meters: archive articles toward the core-supplied target,
+  and the LLM-call budget.
 - Muted default presentation using Text Tertiary.
-- Color escalation to Accent Primary or Accent Warning only near important thresholds.
+- The archive-count bar fills toward 150 articles, capped at full. It uses Accent Primary
+  once the target is reached and never Accent Warning. Short hints explain loading saved
+  results, unavailable results, unscored articles and an empty selection; a non-empty
+  selection shows its estimated tokens. A positive backlog reads “still processing” while
+  Active or Stopping and “unfinished” while Idle, except during loading or unavailability.
+- The LLM-call budget keeps its existing escalation to Accent Primary and Accent Warning.
 
 Avoid:
 

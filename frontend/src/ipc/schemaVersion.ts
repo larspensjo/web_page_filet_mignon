@@ -1,1 +1,1 @@
-export const IPC_SCHEMA_VERSION = 14;
+export const IPC_SCHEMA_VERSION = 15;

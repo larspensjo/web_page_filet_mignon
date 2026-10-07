@@ -104,7 +104,21 @@ fn production_scale_included_window_view_cost() {
     assert_eq!(unfinished.needs_triage, 450);
     assert_eq!(unfinished.needs_scoring, 3_334);
 
+    // A target-sized saved selection over the full 10,450-article window exercises
+    // selection and summary estimation without inventing thousands of desktop Results rows.
+    let state = harvester_core::fixture_support::save_host_drain_scores(state, 150);
+    assert_eq!(
+        state.startup_readiness(),
+        harvester_core::StartupReadinessStatus::Ready
+    );
     let previous = state.view();
+    assert_eq!(
+        previous.archive_meter.status,
+        harvester_core::ArchiveMeterStatus::Scored
+    );
+    assert_eq!(previous.archive_meter.selected_count, 150);
+    assert_eq!(previous.archive_meter.token_estimate, 150 * 80);
+    assert_eq!(previous.archive_meter.unsettled_count, 3_784 - 150);
     let measured = median_drain_cost(&state, &previous);
     println!("production-scale included view cost: measured_ms={} view_us={} compare_us={} project_us={}", measured.total_ms, measured.view_us, measured.compare_us, measured.project_us);
     assert!(
@@ -142,7 +156,17 @@ fn production_scale_loaded_complete_view_cost() {
     assert_eq!(observation.triage_failed, 450);
     assert_eq!(observation.jobs_done, PRODUCTION_SCALE_WINDOW_ARTICLES);
     let previous = state.view();
-    assert_eq!(previous.archive_filtered_count, 3_334);
+    assert_eq!(
+        state.startup_readiness(),
+        harvester_core::StartupReadinessStatus::Ready
+    );
+    assert_eq!(previous.archive_meter.selected_count, 0);
+    assert_eq!(
+        previous.archive_meter.status,
+        harvester_core::ArchiveMeterStatus::NotScoredYet
+    );
+    // The old filtered count omitted 450 articles without current-key triage.
+    assert_eq!(previous.archive_meter.unsettled_count, 3_784);
     let measured = median_drain_cost(&state, &previous);
     println!("production-scale loaded complete view cost: measured_ms={} view_us={} compare_us={} project_us={}", measured.total_ms, measured.view_us, measured.compare_us, measured.project_us);
     assert!(measured.total_ms <= HOST_DRAIN_BUDGET_MS);
@@ -482,6 +506,7 @@ fn seed_summary_titles_through_cache(mut state: AppState) -> (AppState, usize) {
 
 fn load_production_scale_window() -> AppState {
     let mut state = AppState::new();
+    state = update(state, Msg::BriefingCheckpointLoaded { since_utc: None }).0;
     let (active_versions, effective_models) = production_metadata();
     let contexts = production_contexts();
     state = update(
@@ -610,6 +635,22 @@ fn load_production_scale_window() -> AppState {
     let articles = (0..PRODUCTION_SCALE_WINDOW_ARTICLES)
         .map(production_loaded_article)
         .collect::<Vec<_>>();
+    state = update(
+        state,
+        Msg::SavedArticlesLoaded {
+            request_id,
+            articles: articles
+                .iter()
+                .map(|a| harvester_engine::WindowArticle {
+                    url: a.url.clone(),
+                    content_hash: a.content_hash.clone(),
+                    source_title: a.source_title.clone(),
+                    fetched_utc: a.fetched_utc.clone(),
+                })
+                .collect(),
+        },
+    )
+    .0;
     update(
         state,
         Msg::TriageArticlesLoaded {

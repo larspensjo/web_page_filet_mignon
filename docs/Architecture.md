@@ -291,6 +291,16 @@ once a run is active, so late hydration never navigates during a run. Keyless
 and keyed startup share prompt-model defaults and model resolution.
 Restoration uses the job lists' fetch-time rules, so an undated archive member
 does not become a selected article hidden from the remembered time-scoped tab.
+One reducer-owned `StartupReadiness` record tracks checkpoint, prompt metadata,
+prompt contexts, all three result stores and the initial article window. Inputs have
+pending, loaded and failed outcomes; the window distinguishes pending, loaded with
+pre-triage verdicts applied, empty (no completed jobs to load) and failed. The corpus
+scan alone does not resolve that window. Any failure makes the meter unavailable;
+otherwise it waits while an input is pending and becomes ready once all complete.
+Selection restoration uses the same record's settled-with-articles predicate: no
+input remains pending and the initial window is loaded with pre-triage applied.
+It tolerates failed contexts, metadata or stores, but never restores into an empty
+or failed window.
 
 Archive selection and processing remain window-bound.
 Manual exclusions are reducer state, persisted through the reducer-emitted
@@ -301,6 +311,19 @@ excluded and unselected articles.
 Export bodies, dialog and header summary-token estimates use the indexed newest
 summary under any key, with full article tokens when no summary resolves. The
 legacy summary accessor still prefers a live session summary before that lookup.
+The grouped `archive_meter` counts only selected saved current-key scored articles
+that are actionable and in the checkpoint window, applying the score threshold,
+duplicate-cluster representatives and manual exclusions. It never falls back to
+the triage corpus. Its fixed article target is 150; its summary-token estimate uses
+the same newest-summary-for-content-hash rule over just those selected articles.
+Its backlog counts actionable window articles missing current-key triage, summary
+above the summary cutoff, or scoring at or above the scoring cutoff. Failed attempts
+remain unfinished; settled articles below the cutoffs do not count. Pending startup
+reads Loading with zero count, estimate and backlog; failed startup reads Unavailable
+with the same zeros. Ready startup reads NotScoredYet when no actionable window
+article has a current score, otherwise Scored even when none is selected. The Run
+idle line uses the meter's selected count. Archive-dialog coverage and export
+defaults retain their own corpus counts and fallbacks.
 Global configuration and checkpoint changes rebuild membership and current keys;
 saved completions refresh affected entries, and clock movement expires Last 24h
 entries outside the window. The index is derived state, never persisted.
@@ -339,8 +362,9 @@ unfinished count. A host prints the reducer-recorded notice after initial admiss
 ## Crates and purposes
 - **harvester_batch:** command-line and scheduled batch host orchestration.
 - **harvester_core:** domain state, update logic, and the single desktop view
-  projection. `AppState::view()` emits the 23 top-level fields consumed by the page,
-  including AI availability, run controls and meters. It builds the scoped, capped
+  projection. `AppState::view()` emits the 20 top-level fields consumed by the page,
+  including AI availability, run controls and the grouped five-field archive meter
+  (selected count, target, token estimate, unsettled count and status). It builds the scoped, capped
   desktop job list and one selected-job record with extracted links directly.
   Summary bodies use the single `SummaryMarkdown` body key. Workspace navigation,
   trends, the entity index, article previews and link download controls are removed.

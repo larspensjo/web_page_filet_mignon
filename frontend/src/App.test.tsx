@@ -1,6 +1,7 @@
 import aiUnavailable from "@fixtures/snapshots/ai_unavailable.json";
 import exportUnavailable from "@fixtures/snapshots/export_unavailable_during_run.json";
 import emptyCorpus from "@fixtures/snapshots/idle_empty_corpus.json";
+import emptyOutputFolderStarted from "@fixtures/snapshots/idle_empty_output_folder_started.json";
 import last24Hours from "@fixtures/snapshots/idle_last_24_hours.json";
 import withCorpus from "@fixtures/snapshots/idle_with_corpus.json";
 import withSelection from "@fixtures/snapshots/idle_with_selection.json";
@@ -40,6 +41,7 @@ const last24 = last24Hours as unknown as SnapshotEnvelope;
 const selected = withSelection as unknown as SnapshotEnvelope;
 const reviewFixtures = [
 	["idle empty corpus", emptyCorpus],
+	["idle empty output folder started", emptyOutputFolderStarted],
 	["idle last 24 hours", last24Hours],
 	["idle with corpus", withCorpus],
 	["run in progress with failures", runInProgressWithFailures],
@@ -125,16 +127,13 @@ describe("job list", () => {
 		}
 	});
 
-	it("pins the reduced IPC 14 snapshot in every bridge fixture", () => {
+	it("pins the reduced IPC 15 snapshot in every bridge fixture", () => {
 		const fields = [
 			"job_count",
 			"desktop_job_list",
 			"last_paste_stats",
-			"token_limit",
-			"archive_token_estimate",
-			"archive_filtered_count",
+			"archive_meter",
 			"archive_partial_coverage",
-			"raw_unprocessed_count",
 			"stop_finish_button",
 			"signal_candidate_rows",
 			"ai_unavailable_message",
@@ -151,9 +150,19 @@ describe("job list", () => {
 			"llm_quota",
 			"right_pane",
 		].sort();
+		expect(fields).toHaveLength(20);
 		for (const [, fixture] of reviewFixtures) {
-			expect(fixture.schema_version).toBe(14);
+			expect(fixture.schema_version).toBe(15);
 			expect(Object.keys(fixture.view).sort()).toEqual(fields);
+			expect(Object.keys(fixture.view.archive_meter).sort()).toEqual(
+				[
+					"selected_count",
+					"target",
+					"token_estimate",
+					"unsettled_count",
+					"status",
+				].sort(),
+			);
 			expect(Object.keys(fixture.view.right_pane)).toEqual([
 				"summary_markdown",
 			]);
@@ -1214,16 +1223,14 @@ describe("modals and chrome", () => {
 		]);
 	});
 
-	it("renders the archive token meter, quota meter and checkpoint status in the header", async () => {
+	it("renders the archive article meter, quota meter and checkpoint status in the header", async () => {
 		snapshot = {
 			...corpus,
 			view: { ...corpus.view, checkpoint_status_message: "Saving checkpoint…" },
 		};
 		await renderWithCommands();
 		const header = document.querySelector("header") as HTMLElement;
-		expect(
-			within(header).getByText("Archive 84 / 100k tokens"),
-		).toBeInTheDocument();
+		expect(within(header).getByText("0 / 150 articles")).toBeInTheDocument();
 		expect(
 			within(header).getByText("LLM calls 0 / unlimited"),
 		).toBeInTheDocument();

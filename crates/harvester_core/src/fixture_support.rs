@@ -79,6 +79,165 @@ pub fn complete_processing_start(
 #[doc(hidden)]
 pub use crate::pre_triage_filter::test_support::ManualPreTriageDecisions;
 
+/// Model hydration without discarding results a fixture has already produced.
+#[doc(hidden)]
+pub fn hydrate_fixture_result_stores(mut state: AppState) -> AppState {
+    let replies = [
+        Msg::TriageCacheHydrated {
+            cache: state.triage_cache().clone(),
+        },
+        Msg::SummaryCacheHydrated {
+            cache: state.summary_cache().clone(),
+        },
+        Msg::SignalCandidateCacheLoaded {
+            cache: state.signal_candidate_cache().clone(),
+        },
+    ];
+    for reply in replies {
+        state = crate::update(state, reply).0;
+    }
+    state
+}
+
+/// Deliver missing startup replies without discarding a fixture's saved results or keys.
+#[cfg(test)]
+pub fn complete_archive_meter_startup(mut state: AppState) -> AppState {
+    let ids = [
+        PromptId::ArticleTriage,
+        PromptId::ArticleSummary,
+        PromptId::ArticleSignalCandidate,
+    ];
+    let active_versions = ids
+        .iter()
+        .map(|&id| (id, state.active_version_for(id).unwrap_or(1)))
+        .collect();
+    let effective_models = ids
+        .iter()
+        .map(|&id| {
+            (
+                id,
+                state
+                    .effective_model_for(id)
+                    .unwrap_or("fixture-model")
+                    .to_owned(),
+            )
+        })
+        .collect();
+    let contexts = ids
+        .iter()
+        .map(|&id| (id, state.context_for(id).to_vec()))
+        .collect();
+    let replies = [
+        Msg::LlmMetadataLoaded {
+            active_versions,
+            effective_models,
+        },
+        Msg::PromptContextsLoaded { contexts },
+        Msg::BriefingCheckpointLoaded {
+            since_utc: state.briefing_since_utc().map(|since| since.to_rfc3339()),
+        },
+        Msg::TriageCacheHydrated {
+            cache: state.triage_cache().clone(),
+        },
+        Msg::SummaryCacheHydrated {
+            cache: state.summary_cache().clone(),
+        },
+        Msg::SignalCandidateCacheLoaded {
+            cache: state.signal_candidate_cache().clone(),
+        },
+    ];
+    for reply in replies {
+        state = crate::update(state, reply).0;
+    }
+    if state.startup_inputs().initial_article_window == crate::InitialArticleWindowOutcome::Pending
+    {
+        // Hand-built sessions can omit the prepared body; preserve their admitted population.
+        let articles = state
+            .triage()
+            .articles()
+            .iter()
+            .map(|a| crate::LoadedArticle {
+                url: a.url.clone(),
+                content_hash: a.content_hash.clone(),
+                source_title: a.source_title.clone(),
+                fetched_utc: a.fetched_utc.clone(),
+                prepared_text: "fixture article content ".repeat(220),
+            })
+            .collect::<Vec<_>>();
+        state = crate::update(
+            state,
+            Msg::EvaluatePreTriageRefresh {
+                ordered_urls: articles.iter().map(|a| a.url.clone()).collect(),
+                triggered_by_job_done: false,
+            },
+        )
+        .0;
+        let mut request_id = None;
+        for tick in 0..200 {
+            let (next, effects) = crate::update(
+                state,
+                Msg::tick_at(chrono::DateTime::from_timestamp(1_780_000_000 + tick, 0).unwrap()),
+            );
+            state = next;
+            request_id = effects.iter().find_map(|effect| match effect {
+                Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+                _ => None,
+            });
+            if request_id.is_some() {
+                break;
+            }
+        }
+        let request_id = request_id.expect("fixture startup article request");
+        let delta = harvester_engine::TriageArticleDelta::full_window(articles, 100_000);
+        state = crate::update(
+            state,
+            Msg::SavedArticlesLoaded {
+                request_id,
+                articles: delta.members.clone(),
+            },
+        )
+        .0;
+        state = crate::update(state, Msg::TriageArticlesLoaded { request_id, delta }).0;
+    }
+    assert_eq!(
+        state.startup_readiness(),
+        crate::StartupReadinessStatus::Ready
+    );
+    state
+}
+
+/// Seed current-key scores across the production-scale index for keyless view-cost checks.
+#[cfg(feature = "host-drain-fixture")]
+#[doc(hidden)]
+pub fn save_host_drain_scores(state: AppState, scored_articles: usize) -> AppState {
+    use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
+    let mut cache = crate::SignalCandidateCache::default();
+    for key in state
+        .saved_results_entries()
+        .filter_map(|entry| entry.signal_key.as_ref())
+        .take(scored_articles)
+    {
+        cache.insert(
+            key.clone(),
+            crate::SignalCandidateCacheEntry {
+                result: SignalCandidateResult {
+                    signal_key: key.signal_input_hash.clone(),
+                    signal_score: 90,
+                    themes: vec!["topic".into()],
+                    draft_gist: "Representative scored article".into(),
+                    source_tier: SourceTier::Tier1,
+                    confidence: Confidence::High,
+                    reasoning: "cost fixture".into(),
+                    input_tokens: 100,
+                    output_tokens: 20,
+                },
+                created_at_utc: "2026-09-06T12:00:00Z".into(),
+            },
+        );
+    }
+    crate::update(state, Msg::SignalCandidateCacheLoaded { cache }).0
+}
+
 /// Persist explicitly hand-built session fixtures as current-key results, as a
 /// real completion does. This adapter is for fixtures, never executable hosts.
 #[doc(hidden)]

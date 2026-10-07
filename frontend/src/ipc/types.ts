@@ -241,16 +241,27 @@ export type ArchiveDialogRequest = {
 
 export type UiCommand = { ShowArchiveDialog: ArchiveDialogRequest };
 
+export type ArchiveMeterStatus =
+	| "Loading"
+	| "Unavailable"
+	| "NotScoredYet"
+	| "Scored";
+
+export type ArchiveMeterView = {
+	selected_count: number;
+	target: number;
+	token_estimate: number;
+	unsettled_count: number;
+	status: ArchiveMeterStatus;
+};
+
 export type SnapshotEnvelope = {
 	generation: number;
 	schema_version: number;
 	view: {
 		job_count: number;
-		archive_filtered_count: number;
-		archive_token_estimate: number;
-		token_limit: number;
+		archive_meter: ArchiveMeterView;
 		archive_partial_coverage: ArchivePartialCoverageView | null;
-		raw_unprocessed_count: number;
 		llm_quota: LlmQuotaView;
 		last_paste_stats: LastPasteStats | null;
 		checkpoint_status_message: string | null;

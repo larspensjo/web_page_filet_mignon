@@ -1,12 +1,17 @@
 {
   "generation": 1,
-  "schema_version": 14,
+  "schema_version": 15,
   "view": {
     "ai_unavailable_message": "AI features unavailable: OPENAI_API_KEY is not set",
     "archive_enabled": true,
-    "archive_filtered_count": 0,
+    "archive_meter": {
+      "selected_count": 0,
+      "status": "Loading",
+      "target": 150,
+      "token_estimate": 0,
+      "unsettled_count": 0
+    },
     "archive_partial_coverage": null,
-    "archive_token_estimate": 0,
     "checkpoint_status_message": null,
     "desktop_job_list": {
       "hidden_without_fetch_time": 0,
@@ -27,7 +32,6 @@
       "severity": "Unavailable",
       "used": 0
     },
-    "raw_unprocessed_count": 0,
     "reprocess_notice": null,
     "resume_disabled_reason": "AI features unavailable: OPENAI_API_KEY is not set",
     "resume_enabled": false,
@@ -44,7 +48,6 @@
     "run_state": "Idle",
     "signal_candidate_rows": [],
     "stop_finish_button": "Disabled",
-    "token_limit": 100000,
     "unfinished_work": "Unknown"
   },
   "fatal_message": null

@@ -981,7 +981,7 @@ describe("RunSurface", () => {
 		const view = {
 			...finished.view,
 			job_count: 312,
-			archive_filtered_count: 47,
+			archive_meter: { ...finished.view.archive_meter, selected_count: 47 },
 			run_completion_notice: null,
 			run_progress: { stages: [], run_active: false, activity: [] },
 		};

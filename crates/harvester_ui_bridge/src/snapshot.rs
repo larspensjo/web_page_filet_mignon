@@ -236,11 +236,8 @@ mod desktop_shape_tests {
             "job_count",
             "desktop_job_list",
             "last_paste_stats",
-            "token_limit",
-            "archive_token_estimate",
-            "archive_filtered_count",
+            "archive_meter",
             "archive_partial_coverage",
-            "raw_unprocessed_count",
             "stop_finish_button",
             "signal_candidate_rows",
             "ai_unavailable_message",
@@ -260,6 +257,31 @@ mod desktop_shape_tests {
         .into_iter()
         .collect();
         assert_eq!(actual, expected);
+        assert_eq!(actual.len(), 20);
+        assert_eq!(
+            snapshot.view["archive_meter"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<_>>(),
+            [
+                "selected_count",
+                "target",
+                "token_estimate",
+                "unsettled_count",
+                "status"
+            ]
+            .into_iter()
+            .collect()
+        );
+        assert_eq!(
+            snapshot.view["archive_meter"],
+            serde_json::json!({
+                "selected_count": 0, "target": 150, "token_estimate": 0,
+                "unsettled_count": 0, "status": "Loading"
+            })
+        );
         assert_eq!(
             snapshot.view["right_pane"],
             serde_json::json!({"summary_markdown": null})

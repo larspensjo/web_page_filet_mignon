@@ -1163,7 +1163,11 @@ Work:
      per-stage loading backlog in the snapshot, so the Loading articles row, which has no bar
      today, can regain a remaining-work bar.
    - Reprocess notice computed at run start with the same thresholds.
-3. IPC: the snapshot shape should not change; if it does, bump to 15 and regenerate fixtures.
+   - The archive meter keeps its selected-count, token-estimate, backlog, status and
+     startup-readiness semantics from `docs/plans/Plan.ArchiveCountMeter.md`, including
+     no triage-corpus fallback. The per-article stage table can supply the backlog.
+3. IPC: the snapshot shape should not change; if it does, bump to 16 (IPC 15 is used by
+   `docs/plans/Plan.ArchiveCountMeter.md`) and regenerate fixtures.
 
 Regression tests: ordering switches exactly when the run has no triage work left; Last 24h
 removes an article after the minute refresh that follows its 24-hour mark; progress wording and

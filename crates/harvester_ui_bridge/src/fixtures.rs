@@ -13,6 +13,16 @@ const FIXTURE_TIME: i64 = 1_700_000_000;
 
 pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
     let empty = reduce(AppState::new(), Msg::tick_at(time(0)));
+    let hydrated_empty =
+        add_llm_metadata(reduce(empty.clone(), Msg::RestoreCompletedJobs(Vec::new())));
+    assert_eq!(
+        hydrated_empty.startup_inputs().initial_article_window,
+        harvester_core::InitialArticleWindowOutcome::Empty
+    );
+    assert_eq!(
+        hydrated_empty.startup_readiness(),
+        harvester_core::StartupReadinessStatus::Ready
+    );
     let with_corpus = idle_with_corpus(&empty);
     let last_24_hours = idle_last_24_hours(&empty);
     let with_selection = selected_fixture_state(&empty);
@@ -51,6 +61,7 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
     );
     let states = [
         ("idle_empty_corpus", empty),
+        ("idle_empty_output_folder_started", hydrated_empty),
         ("idle_with_corpus", with_corpus),
         ("idle_last_24_hours", last_24_hours),
         ("idle_with_selection", with_selection),
@@ -76,7 +87,40 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
     ];
     states
         .into_iter()
-        .map(|(name, state)| (name, project(&state.view()).0.with_generation(1)))
+        .map(|(name, state)| {
+            use harvester_core::ArchiveMeterStatus as Status;
+            let expected = match name {
+                "idle_empty_corpus"
+                | "idle_last_24_hours"
+                | "idle_with_selection"
+                | "ai_unavailable" => Status::Loading,
+                "run_finished_with_notice" | "run_in_progress_with_reused_results" => {
+                    Status::Scored
+                }
+                "idle_empty_output_folder_started"
+                | "idle_with_corpus"
+                | "run_in_progress_with_failures"
+                | "overlapping_active_stages"
+                | "unfinished_work_available"
+                | "stopping_with_in_flight_work"
+                | "stopped_with_unfinished_work_export_enabled"
+                | "export_unavailable_during_run"
+                | "reprocess_notice" => Status::NotScoredYet,
+                _ => unreachable!("every named fixture must pin its meter status"),
+            };
+            let view = state.view();
+            assert_eq!(view.archive_meter.status, expected, "{name}");
+            if name == "idle_empty_output_folder_started" {
+                assert_eq!(view.archive_meter.selected_count, 0, "{name}");
+                assert_eq!(view.archive_meter.token_estimate, 0, "{name}");
+                assert_eq!(view.archive_meter.unsettled_count, 0, "{name}");
+            }
+            if expected == Status::Scored {
+                assert_eq!(view.archive_meter.selected_count, 1, "{name}");
+                assert_eq!(view.archive_meter.token_estimate, 5, "{name}");
+            }
+            (name, project(&view).0.with_generation(1))
+        })
         .collect()
 }
 
@@ -266,6 +310,7 @@ fn idle_last_24_hours(empty: &AppState) -> AppState {
 }
 
 fn selected_fixture_state(empty: &AppState) -> AppState {
+    // Early startup: restored jobs can be selected before the initial article window resolves.
     let state = reduce(
         empty.clone(),
         Msg::RestoreCompletedJobs(vec![
@@ -716,6 +761,9 @@ fn triage_load_request(mut state: AppState) -> (AppState, u64) {
 }
 
 fn add_llm_metadata(state: AppState) -> AppState {
+    // These fixtures model completed startup hydration, preserving their existing stores.
+    let state = harvester_core::fixture_support::hydrate_fixture_result_stores(state);
+    let state = reduce(state, Msg::BriefingCheckpointLoaded { since_utc: None });
     let active_versions = HashMap::from([
         (PromptId::ArticleTriage, 1),
         (PromptId::ArticleSummary, 1),

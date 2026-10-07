@@ -13,12 +13,12 @@ pub enum ArchiveCoverage {
     },
 }
 
-/// Display-only archive counts and the ordered URLs used for token estimation.
+/// Display-only archive coverage; eligibility remains available to its contract tests.
 ///
 /// This is intentionally a distinct type from [`CurrentWorkingCorpus`]. It must
 /// not be used by action paths such as archive export.
-/// `filtered` is the count of archive-eligible URLs; cache-derived coverage is
-/// the separate triage-cache-hit count used for the partial-coverage indicator.
+/// Cache-derived coverage counts current-key triage hits separately from archive
+/// eligibility for the partial-coverage indicator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArchiveDisplayCounts {
     urls: ArchiveDisplayUrls,
@@ -87,6 +87,7 @@ impl ArchiveDisplayCounts {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn ordered_urls(&self) -> &[String] {
         match &self.urls {
             ArchiveDisplayUrls::Live(corpus) => corpus.ordered_urls(),
@@ -94,6 +95,7 @@ impl ArchiveDisplayCounts {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn filtered_count(&self) -> usize {
         self.ordered_urls().len()
     }

@@ -90,7 +90,6 @@ pub use view_model::{
     SelectedJobVisibility, SignalCandidateOutcome, SignalCandidateRow, SignalCandidateRowState,
     StopFinishButtonState, TriageAnnotationView, ARCHIVE_ARTICLE_TARGET, DEFAULT_WINDOW_HEIGHT,
     DEFAULT_WINDOW_WIDTH, DESKTOP_JOB_LIST_MAX_ROWS, DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS,
-    TOKEN_LIMIT,
 };
 pub use working_corpus::{CurrentWorkingCorpus, CurrentWorkingCorpusSource};
 

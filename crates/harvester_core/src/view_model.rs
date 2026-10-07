@@ -10,9 +10,6 @@ use harvester_engine::llm::dto::SourceTier;
 use harvester_engine::LinkKind;
 use serde::{Deserialize, Serialize};
 
-// This token limit is the recommended limit to be used when creating an archive.
-pub const TOKEN_LIMIT: u64 = 100_000;
-
 pub const ARCHIVE_ARTICLE_TARGET: usize = 150;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ArchiveMeterStatus {
@@ -28,6 +25,18 @@ pub struct ArchiveMeterView {
     pub token_estimate: u64,
     pub unsettled_count: usize,
     pub status: ArchiveMeterStatus,
+}
+
+impl Default for ArchiveMeterView {
+    fn default() -> Self {
+        Self {
+            selected_count: 0,
+            target: ARCHIVE_ARTICLE_TARGET,
+            token_estimate: 0,
+            unsettled_count: 0,
+            status: ArchiveMeterStatus::Loading,
+        }
+    }
 }
 
 /// Per-model LLM token usage snapshot for rendering.
@@ -143,17 +152,9 @@ pub struct AppViewModel {
     pub job_count: usize,
     pub desktop_job_list: DesktopJobListView,
     pub last_paste_stats: Option<LastPasteStats>,
-    pub token_limit: u64,
-    /// Summary-mode archive size over the filtered corpus: cached summary tokens
-    /// where available, raw article tokens otherwise. Drives the token meter bar.
-    pub archive_token_estimate: u64,
-    /// Number of articles in the filtered archive corpus.
-    pub archive_filtered_count: usize,
-    /// Cache-derived triage coverage shown alongside the archive count meter.
+    pub archive_meter: ArchiveMeterView,
+    /// Cache-derived triage coverage rendered by the archive dialog.
     pub archive_partial_coverage: Option<ArchivePartialCoverageView>,
-    /// Archive-eligible articles that lack a cached summary (`filtered` minus
-    /// the summary-coverage count).
-    pub raw_unprocessed_count: usize,
     pub stop_finish_button: StopFinishButtonState,
     pub signal_candidate_rows: Vec<SignalCandidateRow>,
     pub ai_unavailable_message: Option<String>,
@@ -182,11 +183,8 @@ impl Default for AppViewModel {
             job_count: 0,
             desktop_job_list: DesktopJobListView::default(),
             last_paste_stats: None,
-            token_limit: TOKEN_LIMIT,
-            archive_token_estimate: 0,
-            archive_filtered_count: 0,
+            archive_meter: ArchiveMeterView::default(),
             archive_partial_coverage: None,
-            raw_unprocessed_count: 0,
             stop_finish_button: StopFinishButtonState::Disabled,
             signal_candidate_rows: Vec::new(),
             ai_unavailable_message: None,

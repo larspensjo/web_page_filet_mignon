@@ -1,4 +1,3 @@
-use super::batch::archive_token_estimates_from_parts;
 use super::signal_candidate_access::SignalCandidateDisplayState as SignalCandidateState;
 use super::{map_job_filter_status, AppState, JobState};
 use crate::archive_display::ArchiveCoverage;
@@ -15,7 +14,7 @@ use crate::view_model::{
     AppViewModel, DesktopJobListView, JobFilterStatus, JobListRowView, JobRowView, RightPaneView,
     ScoreBand, SelectedJobView, SelectedJobVisibility, SignalCandidateOutcome, SignalCandidateRow,
     SignalCandidateRowState, TriageAnnotationView, DESKTOP_JOB_LIST_MAX_ROWS,
-    DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS, TOKEN_LIMIT,
+    DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS,
 };
 use chrono::{DateTime, Duration, Utc};
 use harvester_engine::llm::dto::SourceTier;
@@ -54,10 +53,6 @@ impl AppState {
 
         let stop_finish_button = self.stop_finish_button_state();
         let archive_display = self.archive_display_counts();
-        let full_filtered_count = archive_display.filtered_count();
-        let archive_estimates =
-            self.archive_token_estimates_for_view(archive_display.ordered_urls(), &summary_lookup);
-
         let archive_partial_coverage = match archive_display.coverage() {
             ArchiveCoverage::CacheDerived {
                 triaged,
@@ -69,27 +64,7 @@ impl AppState {
             ArchiveCoverage::LiveComplete | ArchiveCoverage::CacheDerived { .. } => None,
         };
 
-        // "raw" is a backlog indicator over the whole archive corpus: triaged articles
-        // that do not yet have a cached summary. It is independent of which subset the
-        // token meter is currently estimating.
-        let raw_unprocessed_count = full_filtered_count - archive_estimates.summary_coverage;
-
-        // The token meter bar and its "filtered" count reflect the archive export target.
-        // When all signal candidates are settled and the selection is non-empty, the export
-        // defaults to that subset — show those numbers on the bar instead of the full corpus.
-        let selection = self.signal_candidate_selection();
-        let (archive_token_estimate, archive_filtered_count) = if self
-            .signal_candidate()
-            .observation_counts()
-            .pending_or_in_flight
-            == 0
-            && !selection.selected_urls.is_empty()
-        {
-            let estimates = self.archive_token_estimates(&selection.selected_urls);
-            (estimates.summary_tokens, selection.selected_urls.len())
-        } else {
-            (archive_estimates.summary_tokens, full_filtered_count)
-        };
+        let archive_meter = self.archive_meter_view();
         let run_state = self.run_state();
         let run_enabled = matches!(run_state, crate::RunState::Idle);
         let unfinished_work = self.unfinished_work().clone();
@@ -132,11 +107,8 @@ impl AppState {
             job_count: self.jobs.len(),
             desktop_job_list,
             last_paste_stats: self.last_paste_stats.clone(),
-            token_limit: TOKEN_LIMIT,
-            archive_token_estimate,
-            archive_filtered_count,
+            archive_meter,
             archive_partial_coverage,
-            raw_unprocessed_count,
             stop_finish_button,
             signal_candidate_rows,
             ai_unavailable_message,
@@ -223,23 +195,6 @@ impl AppState {
 
     fn build_summary_lookup(&self) -> SummaryLookup<'_> {
         SummaryLookup { state: self }
-    }
-
-    fn archive_token_estimates_for_view(
-        &self,
-        urls: &[String],
-        summary_lookup: &SummaryLookup,
-    ) -> crate::ArchiveTokenEstimates {
-        if urls.is_empty() {
-            return crate::ArchiveTokenEstimates::default();
-        }
-        let url_tokens = self.archive_article_token_lookup();
-        archive_token_estimates_from_parts(urls, url_tokens, |url| {
-            summary_lookup
-                .state
-                .newest_summary_for_url(url)
-                .map(|summary| summary.output_tokens)
-        })
     }
 
     fn select_desktop_job_rows(
@@ -753,13 +708,24 @@ mod tests {
         );
         state.rebuild_archive_job_tokens();
         crate::fixture_support::save_session_results(&mut state);
+        state = crate::fixture_support::complete_archive_meter_startup(state);
         assert_archive_view_matches_full_lookup(&state);
-        assert_eq!(state.view().archive_token_estimate, 1_200);
+        assert_eq!(
+            state
+                .archive_token_estimates(state.archive_corpus().ordered_urls())
+                .summary_tokens,
+            1_200
+        );
 
         state.jobs.get_mut(&1).expect("fixture job").tokens = Some(2_400);
         state.rebuild_archive_job_tokens();
         assert_archive_view_matches_full_lookup(&state);
-        assert_eq!(state.view().archive_token_estimate, 2_400);
+        assert_eq!(
+            state
+                .archive_token_estimates(state.archive_corpus().ordered_urls())
+                .summary_tokens,
+            2_400
+        );
 
         state
             .jobs
@@ -768,7 +734,12 @@ mod tests {
             .set_url(format!("{url}#section"));
         state.rebuild_archive_job_tokens();
         assert_archive_view_matches_full_lookup(&state);
-        assert_eq!(state.view().archive_token_estimate, 2_400);
+        assert_eq!(
+            state
+                .archive_token_estimates(state.archive_corpus().ordered_urls())
+                .summary_tokens,
+            2_400
+        );
 
         state.jobs.insert(
             2,
@@ -784,7 +755,12 @@ mod tests {
         );
         state.rebuild_archive_job_tokens();
         assert_archive_view_matches_full_lookup(&state);
-        assert_eq!(state.view().archive_token_estimate, 3_600);
+        assert_eq!(
+            state
+                .archive_token_estimates(state.archive_corpus().ordered_urls())
+                .summary_tokens,
+            3_600
+        );
 
         let summary_key = SummaryCacheKey::try_new(
             content_hash,
@@ -811,7 +787,12 @@ mod tests {
         );
         state.set_summary_cache(cache.clone());
         assert_archive_view_matches_full_lookup(&state);
-        assert_eq!(state.view().archive_token_estimate, 700);
+        assert_eq!(
+            state
+                .archive_token_estimates(state.archive_corpus().ordered_urls())
+                .summary_tokens,
+            700
+        );
 
         cache.insert(
             summary_key,
@@ -829,7 +810,63 @@ mod tests {
         );
         state.set_summary_cache(cache);
         assert_archive_view_matches_full_lookup(&state);
-        assert_eq!(state.view().archive_token_estimate, 880);
+        assert_eq!(
+            state
+                .archive_token_estimates(state.archive_corpus().ordered_urls())
+                .summary_tokens,
+            880
+        );
+
+        let mut versions = std::collections::HashMap::new();
+        let mut models = std::collections::HashMap::new();
+        for (id, model) in [
+            (PromptId::ArticleTriage, "fixture-triage"),
+            (PromptId::ArticleSummary, "summary-model"),
+            (PromptId::ArticleSignalCandidate, "fixture-scoring"),
+        ] {
+            versions.insert(id, 1);
+            models.insert(id, model.to_owned());
+        }
+        state = crate::update(
+            state,
+            crate::Msg::LlmMetadataLoaded {
+                active_versions: versions,
+                effective_models: models,
+            },
+        )
+        .0;
+        let key = state
+            .saved_results_for_url(url)
+            .unwrap()
+            .signal_key
+            .clone()
+            .expect("current summary permits scoring");
+        state.store_signal_candidate_result(
+            key,
+            harvester_engine::llm::dto::SignalCandidateResult {
+                signal_key: "view-cost-cluster".into(),
+                signal_score: 90,
+                themes: vec![],
+                draft_gist: "fixture".into(),
+                source_tier: SourceTier::Tier1,
+                confidence: harvester_engine::llm::dto::Confidence::High,
+                reasoning: "fixture".into(),
+                input_tokens: 1,
+                output_tokens: 1,
+            },
+            "2026-09-25T12:02:00Z".into(),
+        );
+        assert_eq!(
+            state.startup_readiness(),
+            crate::StartupReadinessStatus::Ready
+        );
+        assert_eq!(state.view().archive_meter.selected_count, 1);
+        assert_eq!(
+            state.view().archive_meter.status,
+            crate::ArchiveMeterStatus::Scored
+        );
+        assert_eq!(state.view().archive_meter.token_estimate, 880);
+        assert_archive_view_matches_full_lookup(&state);
 
         state.briefing_since_utc = Some(
             chrono::DateTime::parse_from_rfc3339("2026-09-02T00:00:00Z")
@@ -855,13 +892,14 @@ mod tests {
     fn assert_archive_view_matches_full_lookup(state: &AppState) {
         let corpus = state.archive_corpus();
         let expected = state.archive_token_estimates(corpus.ordered_urls());
+        let (_, effects) = crate::update(state.clone(), crate::Msg::ArchiveClicked);
+        assert!(effects
+            .iter()
+            .any(|e| matches!(e, crate::Effect::OpenArchiveDialog {
+            article_count, token_estimates, ..
+        } if *article_count == corpus.count() && *token_estimates == expected)));
         let view = state.view();
-        assert_eq!(view.archive_filtered_count, corpus.count());
-        assert_eq!(view.archive_token_estimate, expected.summary_tokens);
-        assert_eq!(
-            view.raw_unprocessed_count,
-            corpus.count() - expected.summary_coverage
-        );
+        assert_eq!(view.archive_meter, state.archive_meter_view());
         assert_eq!(view.archive_partial_coverage, None);
     }
 
