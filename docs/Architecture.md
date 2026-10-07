@@ -391,8 +391,10 @@ unfinished count. A host prints the reducer-recorded notice after initial admiss
   unknown-field skipping is prohibitively slow at corpus scale. Already-slim saves
   neither verify backups nor enumerate article-link files.
   job_list_mode and selected_article_url are optional serde-default fields: old files
-  load and older readers ignore the additions. Startup restores selection only after
-  metadata and results hydrate and only if the article belongs to the restored tab.
+  load and older readers ignore the additions. Startup restores selection after no
+  startup input remains pending and the initial article window is loaded with
+  pre-triage applied; settled failures are tolerated, and the article must belong to
+  the restored tab.
   Search and scroll are not persisted. Tab or selection changes emit PersistRuntimeState;
   the existing 350 ms debounce and 2 s maximum interval coalesce writes, and close
   flushes the worker. Geometry saves preserve the remembered view.
@@ -402,7 +404,8 @@ unfinished count. A host prints the reducer-recorded notice after initial admiss
   ArticleLinksLoaded fills only the still-selected matching successful job.
   Error replies are logged with job and URL context and ignored; empty replies
   never replace non-empty resident links.
-  The selected-job IPC 13 shape and reducer-resolved browser opening are unchanged.
+  The selected-job record shape in IPC 15 remains unchanged, and browser opening
+  stays reducer-resolved.
   Successful downloads with links emit StoreArticleLinks before PersistRuntimeState.
   The persistence worker publishes queued link effects in order before the associated
   slim runtime snapshot, off the reducer loop. Empty lists create no link files.
@@ -441,7 +444,7 @@ unfinished count. A host prints the reducer-recorded notice after initial admiss
   window work without fetching pending-intake URLs.
 - **harvester_ui_bridge:** Tauri-free IPC projection, intent decoding, asset
   confinement, and the core-thread boundary for the desktop host. Its snapshot
-  IPC 13 projection carries only fields and rows the page consumes; removed
+  IPC 15 projection carries only fields and rows the page consumes; removed
   intents and body keys fail decoding. The driver does not capture
   state for I/O. `ShowArchiveDialog` is intercepted for the host and never
   reaches the effect runner.

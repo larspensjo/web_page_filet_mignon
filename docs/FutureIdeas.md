@@ -2463,6 +2463,25 @@ SuccessCriteria:
 - The persisted override format is re-implemented rather than re-enabled from the retired format.
 - Reducer and persistence contracts cover the new workflow.
 
+#### [FI-UX-TriageUi-0004] Results list marks the articles the archive meter counts
+Status: Candidate
+TopLevel: UX
+SubLevel: TriageUi
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: docs/plans/Plan.ArchiveCountMeter.md
+- SourceSection: Known divergence (recorded, not changed)
+- Captured: 2026-10-07
+Tags: [ux, triage, archive, results]
+Summary: Mark the Results-list articles that contribute to the archive meter's selected count.
+Rationale: Results "Selected" rows are computed over every saved entry, including Last 24h entries outside the checkpoint window and non-actionable entries. Those entries can change which duplicate representative is selected and the total, so the Results list can disagree with the meter.
+SuccessCriteria:
+- The Results list visibly identifies articles included in the archive meter's count.
+- The marker follows the meter's checkpoint-window, actionable, current-key selection, including its threshold, duplicate and manual-exclusion rules.
+- Articles selected only by the wider Results-list scope are distinguishable from articles counted by the meter.
+
 ### WorkflowAutomation
 
 #### [FI-UX-WorkflowAutomation-0001] One-click triage + briefing workflow
