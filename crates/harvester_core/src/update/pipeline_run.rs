@@ -1,17 +1,14 @@
-use crate::run_progress::ACTIVITY_REASON_MAX_CHARS;
+use crate::run_progress::{StageCounts, ACTIVITY_REASON_MAX_CHARS};
 use crate::state::PollPipelineJobSnapshot;
 use crate::{
-    ActivityOutcome, AppState, BatchNextAction, Effect, JobResultKind, LlmRequestState,
-    LlmResultKind, Msg, PipelineRunPhase, PipelineStage, RunCompletionNotice, RunProgress,
-    StageStatus,
+    ActivityOutcome, AppState, Effect, JobResultKind, LlmRequestState, LlmResultKind, Msg,
+    PipelineRunPhase, PipelineStage, RunCompletionNotice, RunProgress, StageStatus,
 };
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::truncate_to_char_boundary;
 
 pub(super) struct ProgressBefore {
-    counts_as_work_message: bool,
     event: ProgressEvent,
-    signal_enqueued_before: u32,
 }
 
 enum ProgressEvent {
@@ -31,21 +28,8 @@ enum ProgressEvent {
         snapshot: PollPipelineJobSnapshot,
         outcome: ActivityOutcome,
     },
-    LoadingProgress {
-        completed: u32,
-        total: u32,
-    },
-    LoadingDone {
-        total: u32,
-    },
+    Loading,
     LoadingFailed,
-    TriageRequested {
-        can_start: bool,
-    },
-    SummariesLoaded {
-        was_loading: bool,
-    },
-    AiStateChanged,
     LlmCompleted {
         stage: Option<PipelineStage>,
         activity: Option<LlmActivity>,
@@ -59,12 +43,9 @@ struct LlmActivity {
 }
 
 pub(super) fn progress_before(state: &AppState, msg: &Msg) -> ProgressBefore {
-    let counts_as_work_message = !matches!(msg, Msg::NoOp | Msg::PipelineRunAdvance);
     if !state.run_progress_is_active() {
         return ProgressBefore {
-            counts_as_work_message,
             event: ProgressEvent::None,
-            signal_enqueued_before: 0,
         };
     }
 
@@ -94,43 +75,13 @@ pub(super) fn progress_before(state: &AppState, msg: &Msg) -> ProgressBefore {
                 snapshot,
                 outcome: job_outcome(result),
             }),
-        Msg::TriageArticlesLoadProgress {
-            request_id,
-            files_scanned,
-            files_total,
-        } if state.triage_in_flight_request_id() == Some(*request_id) => {
-            ProgressEvent::LoadingProgress {
-                completed: *files_scanned as u32,
-                total: *files_total as u32,
-            }
-        }
-        Msg::TriageArticlesLoaded {
-            request_id,
-            articles,
-        } if state.triage_in_flight_request_id() == Some(*request_id) => {
-            ProgressEvent::LoadingDone {
-                total: articles.len() as u32,
-            }
+        Msg::TriageArticlesLoadProgress { .. } | Msg::TriageArticlesLoaded { .. } => {
+            ProgressEvent::Loading
         }
         Msg::TriageArticlesLoadFailed { request_id, .. }
             if state.triage_in_flight_request_id() == Some(*request_id) =>
         {
             ProgressEvent::LoadingFailed
-        }
-        Msg::TriageClicked => ProgressEvent::TriageRequested {
-            can_start: state.triage_ai_available()
-                && state.triage().can_start()
-                && state.can_start_triage_from_pre_triage()
-                && state.triage_metadata_ready(),
-        },
-        Msg::ArticlesLoaded { .. } => ProgressEvent::SummariesLoaded {
-            was_loading: matches!(
-                state.briefing().phase(),
-                crate::BriefingPhase::LoadingArticles
-            ),
-        },
-        Msg::BatchResultsCollected { .. } | Msg::RearmDeferredBatchStages => {
-            ProgressEvent::AiStateChanged
         }
         Msg::LlmCompleted {
             request_id, result, ..
@@ -138,11 +89,7 @@ pub(super) fn progress_before(state: &AppState, msg: &Msg) -> ProgressBefore {
         _ => ProgressEvent::None,
     };
 
-    ProgressBefore {
-        counts_as_work_message,
-        event,
-        signal_enqueued_before: state.signal_candidate().enqueued_count(),
-    }
+    ProgressBefore { event }
 }
 
 pub(super) fn begin_run_if_needed(state: &mut AppState) {
@@ -158,100 +105,245 @@ pub(super) fn begin_run_if_needed(state: &mut AppState) {
         signal.failed_count(),
         signal.enqueued_count(),
     );
+    state.pipeline_admission = None;
     state.replace_run_progress(progress);
     state.clear_run_completion_notice();
     state.mark_dirty();
 }
 
-pub(super) fn handle_pipeline_requested(state: &mut AppState) {
-    if !matches!(state.pipeline_run_phase(), PipelineRunPhase::Idle) {
-        return;
+pub(super) fn handle_pipeline_requested(
+    state: &mut AppState,
+    scope: crate::PipelineRunScope,
+) -> Vec<Effect> {
+    if state.pipeline_run_phase() == PipelineRunPhase::Stopping
+        || state.session() == crate::SessionState::Finishing
+    {
+        engine_logging::engine_info!(
+            "[run-request] run_id={} scope={scope:?} ignored=stopping",
+            state.run_progress().map_or(0, |run| run.run_id)
+        );
+        return Vec::new();
     }
-    begin_run_if_needed(state);
-    state.set_pipeline_run_phase(PipelineRunPhase::Requested);
-    state.mark_dirty();
-}
-
-pub(super) fn handle_pipeline_advance(state: &mut AppState) -> Vec<Effect> {
-    match state.pipeline_run_phase() {
-        PipelineRunPhase::Idle => Vec::new(),
-        PipelineRunPhase::Stopping => {
-            state.set_pipeline_run_phase(PipelineRunPhase::Idle);
-            state.mark_dirty();
-            Vec::new()
-        }
-        PipelineRunPhase::Requested => dispatch_or_await(state),
-        PipelineRunPhase::Dispatched { since_seq } => {
-            if state.reduced_message_seq() > since_seq {
-                state.set_pipeline_run_phase(PipelineRunPhase::AwaitingSettle);
-                state.mark_dirty();
+    if state.run_progress_is_active() && state.pipeline_admission.is_some() {
+        if scope == crate::PipelineRunScope::Full || state.is_poll_in_progress() {
+            if let Some(run) = state.pipeline_admission.as_mut() {
+                run.scope = crate::PipelineRunScope::Full;
             }
-            Vec::new()
         }
-        PipelineRunPhase::AwaitingSettle => {
-            if pipeline_run_is_settled(state) {
-                settle_run(state);
-            } else if !matches!(state.batch_next_action(), BatchNextAction::None) {
-                return dispatch_or_await(state);
-            }
-            Vec::new()
-        }
+        return Vec::new();
     }
-}
-
-fn dispatch_or_await(state: &mut AppState) -> Vec<Effect> {
-    let action = state.batch_next_action();
-    let effects = match action {
-        BatchNextAction::DispatchTriage => {
-            let effects = super::triage::handle_triage_clicked(state);
-            if !state.can_start_triage_from_pre_triage() {
-                record_triage(state, true);
-                record_signal_scoring(state);
-            }
-            effects
-        }
-        BatchNextAction::DispatchSummaries => {
-            super::briefing::handle_prepare_summaries_clicked(state)
-        }
-        BatchNextAction::None => {
-            state.set_pipeline_run_phase(PipelineRunPhase::AwaitingSettle);
-            state.mark_dirty();
-            return Vec::new();
-        }
+    if !state.run_progress_is_active() {
+        begin_run_if_needed(state);
+    }
+    let polling = state.is_poll_in_progress() || state.batch_observation().jobs_in_flight > 0;
+    let scope = if scope == crate::PipelineRunScope::Resume && polling {
+        crate::PipelineRunScope::Full
+    } else {
+        scope
     };
-    state.set_pipeline_run_phase(PipelineRunPhase::Dispatched {
-        since_seq: state.reduced_message_seq(),
-    });
-    state.mark_dirty();
+    let previous = state
+        .pre_triage()
+        .window_articles()
+        .map(|(_, article)| (article.url.clone(), article.content_hash.clone()))
+        .collect();
+    state.pipeline_admission = Some(crate::pipeline_waves::PipelineAdmission::new(
+        scope,
+        state.triage_ai_available(),
+        previous,
+    ));
+    state.set_pipeline_run_phase(PipelineRunPhase::Requested);
+    let mut effects = Vec::new();
+    if scope == crate::PipelineRunScope::Full {
+        let pending_urls = state.take_pending_intake_urls();
+        if !pending_urls.is_empty() {
+            let retryable = state.pending_intake_for_reingest(pending_urls);
+            let intake = state.ingest_urls(retryable, chrono::Utc::now());
+            engine_logging::engine_info!(
+                "[pending-intake] run_id={} ingested={} skipped={}",
+                state.run_progress().map_or(0, |run| run.run_id),
+                intake.enqueued,
+                intake.skipped
+            );
+            effects.extend(intake.effects);
+        }
+    }
+    if scope == crate::PipelineRunScope::Full && !polling {
+        effects.extend(super::polling::handle_poll_sources_clicked(state));
+    }
+    if state.pipeline_run_armed() {
+        effects.extend(super::processing::begin(state));
+    }
     effects
 }
 
+pub(super) fn handle_pipeline_advance(state: &mut AppState) -> Vec<Effect> {
+    // Every reducer step advances the lifecycle; hosts may also request an
+    // explicit advance while waiting for effects to complete.
+    if state.pipeline_run_phase() == PipelineRunPhase::Stopping {
+        Vec::new()
+    } else {
+        super::processing::resume(state)
+    }
+}
+
+pub(super) fn finish_if_settled(state: &mut AppState) {
+    if state.pipeline_run_phase() == PipelineRunPhase::Stopping {
+        super::waves::record_progress(state);
+        if state.pipeline_activity().is_settled() {
+            settle_stopped_run(state);
+        }
+        return;
+    }
+    if !state.run_progress_is_active() {
+        if state.session() == crate::SessionState::Finishing
+            && state.pipeline_activity().is_settled()
+        {
+            state.reset_session_to_idle();
+        }
+        return;
+    }
+    let activity = state.pipeline_activity();
+    let intake_done = activity.poll_in_progress == 0
+        && activity.jobs_pending_or_in_flight == 0
+        && !activity.intake_refresh_pending
+        && activity.import_in_flight == 0;
+    let mut can_finish = true;
+    if let Some(run) = state.pipeline_admission.as_mut() {
+        can_finish = (!run.fresh_load || !run.armed) && (!run.armed || run.configured);
+        if intake_done && can_finish {
+            run.intake_open = false;
+        }
+        can_finish &= !run.intake_open;
+    }
+    super::waves::record_progress(state);
+    if can_finish && activity.is_settled() {
+        settle_run(state);
+    }
+}
 fn settle_run(state: &mut AppState) {
     let now = state.last_observed_utc();
     let completed_at_utc = now.unwrap_or_default();
     let completed_count = state.signal_candidate().completed_count() as usize;
+    let reused_count = state
+        .pipeline_admission
+        .as_ref()
+        .map_or(0, |admission| admission.reused[2].len());
+    log_scoring_reuse(state);
     let Some(run) = state.run_progress_mut() else {
         return;
     };
-    let new_result_count = completed_count.saturating_sub(run.signal_completed_at_reset);
-    run.stop(now);
+    let run_id = run.run_id;
+    let new_result_count = completed_count
+        .saturating_sub(run.signal_completed_at_reset)
+        .saturating_sub(reused_count);
+    run.settle(now);
+    if let Some(admission) = state.pipeline_admission.as_mut() {
+        admission.armed = false;
+    }
+    state.finalize_summary_cache_run();
     state.set_run_completion_notice(RunCompletionNotice {
         new_result_count,
         completed_at_utc,
     });
     state.set_pipeline_run_phase(PipelineRunPhase::Idle);
+    clear_export_unavailable_status(state);
+    engine_logging::engine_info!("[run-terminal] run_id={run_id} outcome=completed");
     state.mark_dirty();
 }
 
-pub(super) fn handle_stop_for_pipeline(state: &mut AppState) {
-    if !matches!(state.pipeline_run_phase(), PipelineRunPhase::Idle) {
-        state.set_pipeline_run_phase(PipelineRunPhase::Stopping);
-    }
+fn settle_stopped_run(state: &mut AppState) {
+    log_scoring_reuse(state);
     let now = state.last_observed_utc();
+    let run_id = state.run_progress().map(|run| run.run_id);
     if let Some(run) = state.run_progress_mut() {
-        run.stop(now);
+        if !run.terminal {
+            run.settle(now);
+        }
+    }
+    if let Some(admission) = state.pipeline_admission.as_mut() {
+        admission.armed = false;
+        admission.intake_open = false;
+    }
+    state.finalize_summary_cache_run();
+    state.reset_session_to_idle();
+    state.set_pipeline_run_phase(PipelineRunPhase::Idle);
+    clear_export_unavailable_status(state);
+    if let Some(run_id) = run_id {
+        engine_logging::engine_info!("[run-terminal] run_id={run_id} outcome=stopped");
     }
     state.mark_dirty();
+}
+
+fn log_scoring_reuse(state: &AppState) {
+    let Some(admission) = state.pipeline_admission.as_ref() else {
+        return;
+    };
+    let reused = admission.reused[2].len();
+    super::waves::log_reused(
+        state,
+        PipelineStage::ScoringSignals,
+        admission.admitted[2].len(),
+        reused,
+    );
+}
+
+pub(super) fn handle_stop_for_pipeline(state: &mut AppState) {
+    let preserved_downloads = state.preserve_unstarted_downloads_for_retry();
+    if state.run_progress_is_active() {
+        state.set_pipeline_run_phase(PipelineRunPhase::Stopping);
+        if let Some(run) = state.run_progress_mut() {
+            run.begin_stopping();
+        }
+    }
+    let in_flight_llm = state.article_model_requests_in_flight();
+    let in_flight_download = state.run_progress().map_or(0, |run| {
+        run.download_started_job_ids
+            .difference(&run.download_finished_job_ids)
+            .count()
+    });
+    let triage = state.triage_mut().withdraw_pending();
+    let summary = state.briefing_mut().withdraw_pending();
+    let scoring = state.signal_candidate_mut().withdraw_pending();
+    for url in &scoring {
+        state.clear_signal_candidate_input_snapshot(url);
+    }
+    for queue in &mut state.pipeline_waves.pending {
+        queue.clear();
+    }
+    state.processing_start = None;
+    state.pre_triage_coordinator.close_intake();
+    let _ = state.take_pre_triage_refresh_evaluation_request();
+    if let Some(run) = state.pipeline_admission.as_mut() {
+        run.armed = false;
+        run.intake_open = false;
+    }
+    engine_logging::engine_info!(
+        "[run-stop] run_id={} withdrawn_triage={} withdrawn_summary={} withdrawn_scoring={} in_flight_llm={} in_flight_download={}",
+        run_id_for_stop(state),
+        triage,
+        summary,
+        scoring.len(),
+        in_flight_llm,
+        in_flight_download
+    );
+    if preserved_downloads > 0 {
+        engine_logging::engine_info!(
+            "[pending-intake] operation=stop preserved_unstarted_downloads={preserved_downloads}"
+        );
+    }
+    state.mark_dirty();
+}
+
+fn run_id_for_stop(state: &AppState) -> u64 {
+    state.run_progress().map_or(0, |run| run.run_id)
+}
+
+fn clear_export_unavailable_status(state: &mut AppState) {
+    if state.briefing_checkpoint_status_message()
+        == Some(crate::state::EXPORT_UNAVAILABLE_STATUS_MESSAGE)
+    {
+        state.set_briefing_checkpoint_status_message(None);
+    }
 }
 
 pub(super) fn dismiss_run_notice(state: &mut AppState) {
@@ -261,9 +353,6 @@ pub(super) fn dismiss_run_notice(state: &mut AppState) {
 }
 
 pub(super) fn record_progress_after(state: &mut AppState, before: ProgressBefore) {
-    if before.counts_as_work_message {
-        state.note_reduced_work_message();
-    }
     if !state.run_progress_is_active() {
         return;
     }
@@ -351,41 +440,21 @@ pub(super) fn record_progress_after(state: &mut AppState, before: ProgressBefore
                 run.push_activity(url, None, PipelineStage::DownloadingArticles, outcome);
             }
         }
-        ProgressEvent::LoadingProgress { completed, total } => state
-            .run_progress_mut()
-            .expect("active run")
-            .counts(PipelineStage::LoadingArticles, completed, 0, total, now),
-        ProgressEvent::LoadingDone { total } => {
-            let run = state.run_progress_mut().expect("active run");
-            run.counts(PipelineStage::LoadingArticles, total, 0, total, now);
-            run.finish(PipelineStage::LoadingArticles, now);
-        }
+        ProgressEvent::Loading => {}
         ProgressEvent::LoadingFailed => {
             let run = state.run_progress_mut().expect("active run");
-            run.counts(PipelineStage::LoadingArticles, 0, 1, 1, now);
+            run.counts(
+                PipelineStage::LoadingArticles,
+                StageCounts {
+                    failed: 1,
+                    total: 1,
+                    ..StageCounts::default()
+                },
+                now,
+            );
             run.finish(PipelineStage::LoadingArticles, now);
         }
-        ProgressEvent::TriageRequested { can_start } => {
-            if can_start && !state.can_start_triage_from_pre_triage() {
-                record_triage(state, true);
-            }
-        }
-        ProgressEvent::SummariesLoaded { was_loading } => {
-            if was_loading {
-                record_summaries(state, true);
-            }
-        }
-        ProgressEvent::AiStateChanged => {
-            record_triage(state, false);
-            record_summaries(state, false);
-        }
         ProgressEvent::LlmCompleted { stage, activity } => {
-            match stage {
-                Some(PipelineStage::Triaging) => record_triage(state, false),
-                Some(PipelineStage::Summarizing) => record_summaries(state, false),
-                Some(PipelineStage::ScoringSignals) | None => {}
-                Some(_) => {}
-            }
             if let (Some(stage), Some(activity)) = (stage, activity) {
                 let outcome =
                     activity_outcome_after(state, stage, &activity.url).unwrap_or(activity.outcome);
@@ -399,12 +468,6 @@ pub(super) fn record_progress_after(state: &mut AppState, before: ProgressBefore
         }
     }
 
-    if state.signal_candidate().enqueued_count() > before.signal_enqueued_before
-        || stage_is_active(state, PipelineStage::ScoringSignals)
-    {
-        record_signal_scoring(state);
-    }
-
     if may_settle_poll_only_run
         && matches!(state.pipeline_run_phase(), PipelineRunPhase::Idle)
         && state.pipeline_activity().is_settled()
@@ -413,105 +476,15 @@ pub(super) fn record_progress_after(state: &mut AppState, before: ProgressBefore
     }
 }
 
-fn record_triage(state: &mut AppState, allow_activation: bool) {
-    if !allow_activation && !stage_is_active(state, PipelineStage::Triaging) {
-        return;
-    }
-    let (total, _, _, completed, failed) = state.triage().observation_counts();
-    let terminal = matches!(
-        state.triage().phase(),
-        crate::TriagePhase::Complete | crate::TriagePhase::Failed { .. }
-    );
-    if total == 0 && !matches!(state.triage().phase(), crate::TriagePhase::Triaging) {
-        return;
-    }
-    let now = state.last_observed_utc();
-    let run = state.run_progress_mut().expect("active run");
-    run.counts(
-        PipelineStage::Triaging,
-        completed as u32,
-        failed as u32,
-        total as u32,
-        now,
-    );
-    if terminal {
-        run.finish(PipelineStage::Triaging, now);
-    }
-}
-
-fn record_summaries(state: &mut AppState, allow_activation: bool) {
-    if !allow_activation && !stage_is_active(state, PipelineStage::Summarizing) {
-        return;
-    }
-    let total = state.briefing().articles().len();
-    let completed = state.briefing().completed_summary_count();
-    let failed = state.briefing().failed_summary_count();
-    let terminal = matches!(
-        state.briefing().phase(),
-        crate::BriefingPhase::Complete | crate::BriefingPhase::Failed { .. }
-    );
-    if total == 0 && !matches!(state.briefing().phase(), crate::BriefingPhase::Summarizing) {
-        return;
-    }
-    let now = state.last_observed_utc();
-    let run = state.run_progress_mut().expect("active run");
-    run.counts(
-        PipelineStage::Summarizing,
-        completed as u32,
-        failed as u32,
-        total as u32,
-        now,
-    );
-    if terminal {
-        run.finish(PipelineStage::Summarizing, now);
-    }
-}
-
-fn record_signal_scoring(state: &mut AppState) {
-    let enqueued = state.signal_candidate().enqueued_count();
-    let completed = state.signal_candidate().completed_count();
-    let failed = state.signal_candidate().failed_count();
-    let now = state.last_observed_utc();
-    let run = state.run_progress_mut().expect("active run");
-    let total = enqueued.saturating_sub(run.signal_enqueued_at_reset);
-    if total == 0 {
-        return;
-    }
-    run.counts(
-        PipelineStage::ScoringSignals,
-        completed.saturating_sub(run.signal_completed_at_reset as u32),
-        failed.saturating_sub(run.signal_failed_at_reset),
-        total,
-        now,
-    );
-    // Triage, summaries, and deferred batch rearming can enqueue signal work in
-    // waves. Only settle_run terminalizes this stage, after the run driver has
-    // applied its full completion rule; until then counts continue accumulating.
-}
-
-fn pipeline_run_is_settled(state: &AppState) -> bool {
-    matches!(state.batch_next_action(), BatchNextAction::None)
-        && state.pipeline_activity().is_settled()
-}
-
-fn stage_is_active(state: &AppState, stage: PipelineStage) -> bool {
-    state
-        .run_progress()
-        .is_some_and(|run| matches!(run.stages[stage.index()].status, StageStatus::Active))
-}
-
 fn llm_event(state: &AppState, request_id: u64, result: &LlmResultKind) -> ProgressEvent {
     let stage = state
         .llm_request_state(request_id)
         .and_then(|entry| match entry {
-            LlmRequestState::Pending { prompt_id } | LlmRequestState::Deferred { prompt_id } => {
-                match prompt_id {
-                    PromptId::ArticleTriage => Some(PipelineStage::Triaging),
-                    PromptId::ArticleSummary => Some(PipelineStage::Summarizing),
-                    PromptId::ArticleSignalCandidate => Some(PipelineStage::ScoringSignals),
-                    _ => None,
-                }
-            }
+            LlmRequestState::Pending { prompt_id } => match prompt_id {
+                PromptId::ArticleTriage => Some(PipelineStage::Triaging),
+                PromptId::ArticleSummary => Some(PipelineStage::Summarizing),
+                PromptId::ArticleSignalCandidate => Some(PipelineStage::ScoringSignals),
+            },
             LlmRequestState::Completed { .. } | LlmRequestState::Failed { .. } => None,
         });
     let activity = stage.and_then(|stage| {
@@ -577,9 +550,6 @@ fn activity_outcome_after(
                         reason: bounded_reason(reason),
                     })
                 }
-                crate::triage::ArticleTriageState::Deferred => Some(ActivityOutcome::Skipped {
-                    reason: "deferred to batch".into(),
-                }),
                 crate::triage::ArticleTriageState::Pending
                 | crate::triage::ArticleTriageState::InProgress { .. } => None,
             }),
@@ -597,9 +567,6 @@ fn activity_outcome_after(
                         reason: bounded_reason(reason),
                     })
                 }
-                crate::briefing::ArticleSummaryState::Deferred => Some(ActivityOutcome::Skipped {
-                    reason: "deferred to batch".into(),
-                }),
                 crate::briefing::ArticleSummaryState::Pending
                 | crate::briefing::ArticleSummaryState::InProgress { .. } => None,
             }),
@@ -607,9 +574,6 @@ fn activity_outcome_after(
             crate::SignalCandidateState::Completed { .. } => Some(ActivityOutcome::Succeeded),
             crate::SignalCandidateState::Failed { reason } => Some(ActivityOutcome::Failed {
                 reason: bounded_reason(reason),
-            }),
-            crate::SignalCandidateState::Deferred => Some(ActivityOutcome::Skipped {
-                reason: "deferred to batch".into(),
             }),
             crate::SignalCandidateState::Pending | crate::SignalCandidateState::Scoring { .. } => {
                 None
@@ -631,9 +595,6 @@ fn job_outcome(result: &JobResultKind) -> ActivityOutcome {
 fn llm_outcome(result: &LlmResultKind) -> ActivityOutcome {
     match result {
         LlmResultKind::Success { .. } => ActivityOutcome::Succeeded,
-        LlmResultKind::DeferredToBatch => ActivityOutcome::Skipped {
-            reason: "deferred to batch".into(),
-        },
         LlmResultKind::ValidationFailed { reason, .. }
         | LlmResultKind::QuotaExhausted { reason, .. }
         | LlmResultKind::RateLimited { reason }

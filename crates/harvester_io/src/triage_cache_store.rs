@@ -1,14 +1,15 @@
-use std::fs;
-use std::path::{Path, PathBuf};
-
-use engine_logging::{engine_info, engine_warn};
-use harvester_core::{ArticleTriageResult, TriageCache, TriageCacheEntry, TriageCacheKey};
+#[cfg(test)]
+use harvester_core::ArticleTriageResult;
+use harvester_core::{TriageCache, TriageCacheEntry, TriageCacheKey};
+#[cfg(test)]
 use harvester_engine::llm::prompt::PromptId;
-use harvester_engine::{ensure_output_dir, AtomicFileWriter, PersistError};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::fs;
+use std::{io, path::Path};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct PersistedTriageCacheKey {
+pub(crate) struct PersistedTriageCacheKey {
     content_hash: String,
     prompt_id: String,
     prompt_version: u32,
@@ -27,153 +28,52 @@ struct PersistedTriageResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct PersistedTriageEntry {
+pub(crate) struct PersistedTriageEntry {
     result: PersistedTriageResult,
     created_at_utc: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PersistedTriageCache {
-    #[serde(default = "default_version")]
-    version: u32,
-    entries: Vec<(PersistedTriageCacheKey, PersistedTriageEntry)>,
+pub(crate) fn legacy(path: &Path) -> io::Result<Vec<(TriageCacheKey, TriageCacheEntry)>> {
+    crate::result_store::read_ron::<
+        TriageCacheKey,
+        TriageCacheEntry,
+        PersistedTriageCacheKey,
+        PersistedTriageEntry,
+    >(path)
 }
 
-fn default_version() -> u32 {
-    1
-}
-
-pub fn load_triage_cache(path: &Path) -> TriageCache {
-    let text = match fs::read_to_string(path) {
-        Ok(value) => value,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            engine_info!("[triage-cache] No persisted cache found at {:?}", path);
-            return TriageCache::new();
-        }
-        Err(err) => {
-            engine_warn!(
-                "[triage-cache] Failed to read cache from {:?}: {}",
-                path,
-                err
-            );
-            return TriageCache::new();
-        }
-    };
-
-    let persisted: PersistedTriageCache = match ron::from_str(&text) {
-        Ok(cache) => cache,
-        Err(err) => {
-            engine_warn!(
-                "[triage-cache] Failed to parse cache from {:?}: {}",
-                path,
-                err
-            );
-            return TriageCache::new();
-        }
-    };
-
-    let mut cache = TriageCache::new();
-    for (persisted_key, persisted_entry) in persisted.entries {
-        let prompt_id = match persisted_key.prompt_id.as_str() {
-            "ArticleTriage" => PromptId::ArticleTriage,
-            unknown => {
-                engine_warn!(
-                    "[triage-cache] Unknown prompt_id '{}' in persisted cache, skipping entry",
-                    unknown
-                );
-                continue;
-            }
-        };
-
-        let key = match TriageCacheKey::try_new_with_context_hash(
-            &persisted_key.content_hash,
-            prompt_id,
-            Some(persisted_key.prompt_version),
-            Some(persisted_key.model_id.as_str()),
-            &persisted_key.context_hash,
-        ) {
-            Ok(key) => key,
-            Err(err) => {
-                engine_warn!(
-                    "[triage-cache] Skipping entry due to invalid metadata: {:?}",
-                    err
-                );
-                continue;
-            }
-        };
-
-        let entry = TriageCacheEntry {
-            result: ArticleTriageResult {
-                category: persisted_entry.result.category,
-                priority: persisted_entry.result.priority,
-                tags: persisted_entry.result.tags,
-                rationale: persisted_entry.result.rationale,
-                input_tokens: persisted_entry.result.input_tokens,
-                output_tokens: persisted_entry.result.output_tokens,
-            },
-            created_at_utc: persisted_entry.created_at_utc,
-        };
-
+pub fn load_triage_cache(path: &Path) -> io::Result<TriageCache> {
+    let records = crate::result_store::load::<
+        TriageCacheKey,
+        TriageCacheEntry,
+        PersistedTriageCacheKey,
+        PersistedTriageEntry,
+    >(path, legacy)?;
+    let mut cache = TriageCache::default();
+    for (key, entry) in records {
         cache.insert_entry(key, entry);
     }
-
-    engine_info!(
-        "[triage-cache] Loaded {} entries from {:?}",
-        cache.len(),
-        path
-    );
-    cache
+    Ok(cache)
 }
 
-pub fn persist_triage_cache(cache: &TriageCache, path: &Path) -> Result<(), PersistError> {
-    if let Some(parent) = path.parent() {
-        ensure_output_dir(parent)?;
-    }
+/// Append the supplied entries. Production completions use the runner's ordered sink.
+#[cfg(test)]
+pub(crate) fn persist_triage_cache(cache: &TriageCache, path: &Path) -> io::Result<()> {
+    let records: Vec<_> = cache.iter().collect();
+    crate::result_store::AppendFile::open::<
+        TriageCacheKey,
+        TriageCacheEntry,
+        PersistedTriageCacheKey,
+        PersistedTriageEntry,
+    >(path, legacy)?
+    .append::<_, _, PersistedTriageCacheKey, PersistedTriageEntry>(&records)
+}
 
-    let entries: Vec<(PersistedTriageCacheKey, PersistedTriageEntry)> = cache
-        .iter()
-        .map(|(key, entry)| {
-            (
-                PersistedTriageCacheKey {
-                    content_hash: key.content_hash.clone(),
-                    prompt_id: format!("{:?}", key.prompt_id),
-                    prompt_version: key.prompt_version,
-                    model_id: key.model_id.clone(),
-                    context_hash: key.context_hash.clone(),
-                },
-                PersistedTriageEntry {
-                    result: PersistedTriageResult {
-                        category: entry.result.category.clone(),
-                        priority: entry.result.priority,
-                        tags: entry.result.tags.clone(),
-                        rationale: entry.result.rationale.clone(),
-                        input_tokens: entry.result.input_tokens,
-                        output_tokens: entry.result.output_tokens,
-                    },
-                    created_at_utc: entry.created_at_utc.clone(),
-                },
-            )
-        })
-        .collect();
-
-    let persisted = PersistedTriageCache {
-        version: 1,
-        entries,
-    };
-
-    let serialized = ron::ser::to_string_pretty(&persisted, ron::ser::PrettyConfig::default())
-        .map_err(|err| std::io::Error::other(format!("Failed to serialize cache: {}", err)))?;
-
-    let parent_dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let writer = AtomicFileWriter::new(PathBuf::from(parent_dir));
-    let filename = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(".triage_cache.ron");
-    writer.write(filename, &serialized)?;
-
-    engine_info!("[triage-cache] Saved {} entries to {:?}", cache.len(), path);
-    Ok(())
+#[cfg(test)]
+#[derive(Serialize)]
+struct PersistedTriageCache {
+    version: u32,
+    entries: Vec<(PersistedTriageCacheKey, PersistedTriageEntry)>,
 }
 
 #[cfg(test)]
@@ -187,7 +87,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("missing_cache.ron");
 
-        let cache = load_triage_cache(&path);
+        let cache = load_triage_cache(&path).unwrap();
         assert_eq!(cache.len(), 0);
     }
 
@@ -216,9 +116,9 @@ mod tests {
         cache.insert(key.clone(), result.clone());
 
         persist_triage_cache(&cache, &path).unwrap();
-        let loaded = load_triage_cache(&path);
+        let loaded = load_triage_cache(&path).unwrap();
         assert_eq!(loaded.len(), 1);
-        let loaded_entry = loaded.lookup(&key).unwrap();
+        let (_, loaded_entry) = loaded.lookup(&key).unwrap();
         assert_eq!(loaded_entry.category, result.category);
         assert_eq!(loaded_entry.priority, result.priority);
     }
@@ -229,15 +129,18 @@ mod tests {
         let path = dir.path().join("corrupt_cache.ron");
         fs::write(&path, "not valid ron").unwrap();
 
-        let cache = load_triage_cache(&path);
-        assert_eq!(cache.len(), 0);
+        let before = fs::read(&path).unwrap();
+        let error = load_triage_cache(&path).unwrap_err().to_string();
+        assert!(error.contains("corrupt_cache.ron"));
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert!(!path.with_extension("jsonl").exists());
     }
 
     #[test]
     fn unknown_prompt_id_entry_is_skipped_with_warning() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("unknown_prompt.ron");
-        let persisted = PersistedTriageCache {
+        let mut persisted = PersistedTriageCache {
             version: 1,
             entries: vec![(
                 PersistedTriageCacheKey {
@@ -260,11 +163,23 @@ mod tests {
                 },
             )],
         };
+        let mut valid = persisted.entries[0].clone();
+        valid.0.prompt_id = "ArticleTriage".to_string();
+        valid.0.content_hash = "valid-hash".to_string();
+        persisted.entries.push(valid);
         let serialized =
             ron::ser::to_string_pretty(&persisted, ron::ser::PrettyConfig::default()).unwrap();
         fs::write(&path, serialized).unwrap();
 
-        let cache = load_triage_cache(&path);
-        assert!(cache.is_empty());
+        let loaded = load_triage_cache(&path).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded.iter().next().unwrap().0.content_hash, "valid-hash");
+        assert_eq!(
+            fs::read_to_string(path.with_extension("jsonl"))
+                .unwrap()
+                .lines()
+                .count(),
+            1
+        );
     }
 }

@@ -1,0 +1,88 @@
+===== DOC START =====
+url: https://example.com/triaged
+title: triaged
+tokens: 2
+fetched_utc: 2026-09-01T00:00:00Z
+filename: 0-triaged.md
+content: full
+export_schema: 2
+doc: 1
+priority: 4
+tags: []
+triage_model: triage-v1
+
+Body triaged.
+===== DOC END =====
+
+===== DOC START =====
+url: https://example.com/untriaged
+title: untriaged
+tokens: 2
+fetched_utc: 2026-09-02T00:00:00Z
+filename: 1-untriaged.md
+content: full
+export_schema: 2
+doc: 2
+
+Body untriaged.
+===== DOC END =====
+
+===== DOC START =====
+url: https://example.com/scored
+title: scored
+tokens: 2
+fetched_utc: 2026-09-03T00:00:00Z
+filename: 2-scored.md
+content: full
+export_schema: 2
+doc: 3
+signal_key: scored-event
+signal_score: 77
+themes: ["AI","chips"]
+
+Body scored.
+===== DOC END =====
+
+===== DOC START =====
+url: https://example.com/score-zero
+title: score zero
+tokens: 2
+fetched_utc: 2026-09-04T00:00:00Z
+filename: 3-score-zero.md
+content: full
+export_schema: 2
+doc: 4
+signal_key: zero-event
+signal_score: 0
+themes: []
+
+Body score-zero.
+===== DOC END =====
+
+===== DOC START =====
+url: https://example.com/no-model
+title: no model
+tokens: 2
+fetched_utc: 2026-09-05T00:00:00Z
+filename: 4-no-model.md
+content: full
+export_schema: 2
+doc: 5
+priority: 2
+tags: ["alpha","zeta"]
+
+Body no-model.
+===== DOC END =====
+
+===== ARCHIVE INDEX =====
+export_schema: 2
+doc_count: 5
+fetched_from: 2026-09-01T00:00:00Z
+fetched_to: 2026-09-05T00:00:00Z
+doc | line | fetched_utc | priority | signal_key | title
+1 | 1 | 2026-09-01T00:00:00Z | 4 | - | triaged
+2 | 17 | 2026-09-02T00:00:00Z | - | - | untriaged
+3 | 30 | 2026-09-03T00:00:00Z | - | scored-event | scored
+4 | 46 | 2026-09-04T00:00:00Z | - | zero-event | score zero
+5 | 62 | 2026-09-05T00:00:00Z | 2 | - | no model
+===== INDEX END =====

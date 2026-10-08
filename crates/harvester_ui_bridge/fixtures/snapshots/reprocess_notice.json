@@ -1,0 +1,139 @@
+{
+  "generation": 1,
+  "schema_version": 15,
+  "view": {
+    "ai_unavailable_message": null,
+    "archive_enabled": false,
+    "archive_meter": {
+      "selected_count": 0,
+      "status": "NotScoredYet",
+      "target": 150,
+      "token_estimate": 0,
+      "unsettled_count": 151
+    },
+    "archive_partial_coverage": null,
+    "checkpoint_status_message": null,
+    "desktop_job_list": {
+      "hidden_without_fetch_time": 0,
+      "mode": "SinceCheckpoint",
+      "query": "",
+      "rows": [],
+      "scoped_count": 0,
+      "selected_job": null,
+      "truncated": false,
+      "visible_count": 0
+    },
+    "job_count": 0,
+    "last_paste_stats": null,
+    "llm_quota": {
+      "label": "LLM calls 0 / unlimited",
+      "limit": null,
+      "percent": null,
+      "severity": "Normal",
+      "used": 0
+    },
+    "reprocess_notice": {
+      "articles": 151,
+      "estimated_calls": 453
+    },
+    "resume_disabled_reason": "A run is already in progress.",
+    "resume_enabled": false,
+    "right_pane": {
+      "summary_markdown": null
+    },
+    "run_completion_notice": null,
+    "run_enabled": false,
+    "run_progress": {
+      "activity": [],
+      "run_active": true,
+      "stages": [
+        {
+          "completed": 0,
+          "ended_at_utc": null,
+          "failed": 0,
+          "reused": 0,
+          "stage": "ScanningSources",
+          "started_at_utc": null,
+          "status": "Pending",
+          "total": 0,
+          "total_is_final": false
+        },
+        {
+          "completed": 0,
+          "ended_at_utc": null,
+          "failed": 0,
+          "reused": 0,
+          "stage": "DownloadingArticles",
+          "started_at_utc": null,
+          "status": "Pending",
+          "total": 0,
+          "total_is_final": false
+        },
+        {
+          "completed": 151,
+          "ended_at_utc": "2023-11-14T22:13:24Z",
+          "failed": 0,
+          "reused": 0,
+          "stage": "LoadingArticles",
+          "started_at_utc": "2023-11-14T22:13:24Z",
+          "status": "Done",
+          "total": 151,
+          "total_is_final": true
+        },
+        {
+          "completed": 0,
+          "ended_at_utc": null,
+          "failed": 0,
+          "reused": 0,
+          "stage": "Triaging",
+          "started_at_utc": "2023-11-14T22:13:24Z",
+          "status": "Active",
+          "total": 151,
+          "total_is_final": true
+        },
+        {
+          "completed": 0,
+          "ended_at_utc": null,
+          "failed": 0,
+          "reused": 0,
+          "stage": "Summarizing",
+          "started_at_utc": null,
+          "status": "Active",
+          "total": 0,
+          "total_is_final": false
+        },
+        {
+          "completed": 0,
+          "ended_at_utc": null,
+          "failed": 0,
+          "reused": 0,
+          "stage": "ScoringSignals",
+          "started_at_utc": null,
+          "status": "Active",
+          "total": 0,
+          "total_is_final": false
+        }
+      ]
+    },
+    "run_state": "Active",
+    "signal_candidate_rows": [],
+    "stop_finish_button": {
+      "Enabled": {
+        "policy": "Finish"
+      }
+    },
+    "unfinished_work": {
+      "Known": {
+        "articles_with_work": 0,
+        "complete": 0,
+        "estimated_calls": 0,
+        "in_progress": 151,
+        "needs_scoring": 0,
+        "needs_summary": 0,
+        "needs_triage": 0,
+        "not_eligible": 0
+      }
+    }
+  },
+  "fatal_message": null
+}

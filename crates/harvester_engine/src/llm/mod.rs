@@ -23,11 +23,12 @@ pub const OPENAI_MODEL_GPT_5_4_PRO: &str = "gpt-5.4-pro";
 
 pub const DEFAULT_TRIAGE_MODEL: &str = OPENAI_MODEL_GPT_5_4_NANO;
 pub const DEFAULT_SUMMARY_MODEL: &str = OPENAI_MODEL_GPT_5_4_MINI;
-pub const DEFAULT_BRIEFING_MODEL: &str = OPENAI_MODEL_GPT_5_4_MINI;
+
+/// Shared upper bound for synchronous model requests.
+pub const MAX_LLM_CONCURRENT_REQUESTS: usize = 10;
 
 pub use dto::{
-    AggregateBriefing, ArticleSummary, BriefingExecutiveSummaryResult, BriefingNextItem,
-    BriefingStory, Confidence, SignalCandidateResult, SourceTier, SummaryEntities, TriagePriority,
+    ArticleSummary, Confidence, SignalCandidateResult, SourceTier, SummaryEntities, TriagePriority,
     TriageResult,
 };
 pub use handle::{
@@ -49,7 +50,7 @@ pub use providers::OpenAiProvider;
 pub use quota::{LlmQuotaTracker, LlmQuotas, LlmUsageTotals};
 pub use replay::{
     content_hash, load_replay_record, persist_replay_record, replay_filename_request_id,
-    sanitize_replay_request_id, ReplayProvider, ReplayRecord,
+    sanitize_replay_request_id, ReplayRecord,
 };
 pub use run_metadata::{CacheStatus, LlmFailureMetadata, LlmRunMetadata};
 pub use template_validation::{validate_template, TemplateField, TemplateValidationError};
@@ -58,6 +59,5 @@ pub use types::{
     ResponseFormat, TokenUsage,
 };
 pub use validation::{
-    validate_briefing, validate_briefing_executive_summary, validate_briefing_next_item,
     validate_signal_candidate, validate_summary, validate_triage, ValidationError,
 };

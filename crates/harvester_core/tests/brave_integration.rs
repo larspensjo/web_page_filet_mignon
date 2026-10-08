@@ -6,7 +6,12 @@ fn brave_source_poll_completed_enqueues_urls() {
     let state = AppState::new();
 
     // Start a poll
-    let (state, effects) = update(state, Msg::PollSourcesClicked);
+    let (state, effects) = harvester_core::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Full,
+        },
+    );
     assert!(effects.contains(&Effect::PollAllSources));
 
     // Simulate SourcePollCompleted from a Brave source
@@ -39,7 +44,12 @@ fn brave_source_poll_completed_enqueues_urls() {
 #[test]
 fn brave_source_dedup_skips_already_seen_urls() {
     let state = AppState::new();
-    let (state, _) = update(state, Msg::PollSourcesClicked);
+    let (state, _) = harvester_core::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Full,
+        },
+    );
 
     // First batch — URL is new, should be enqueued
     let (state, effects1) = update(

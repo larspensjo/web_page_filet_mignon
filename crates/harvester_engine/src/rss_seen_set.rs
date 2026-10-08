@@ -26,6 +26,25 @@ impl RssSeenSet {
             .unwrap_or(false)
     }
 
+    /// Enumerate persisted GUIDs for a canned poll through the normal filter.
+    pub fn entries(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.map.iter().flat_map(|(source, guids)| {
+            guids
+                .guids
+                .iter()
+                .map(move |guid| (source.as_str(), guid.as_str()))
+        })
+    }
+
+    /// Forget a replayed URL across feeds in a private benchmark copy.
+    pub fn forget_guid_everywhere(&mut self, guid: &str) {
+        for guids in self.map.values_mut() {
+            if guids.lookup.remove(guid) {
+                guids.guids.retain(|existing| existing != guid);
+            }
+        }
+    }
+
     /// Marks a GUID as seen for `source_id`. Returns true when the GUID was new.
     pub fn mark_seen(&mut self, source_id: &str, guid: &str) -> bool {
         self.map
@@ -50,6 +69,32 @@ impl RssSeenSet {
         }
 
         unseen
+    }
+
+    /// Select unseen entries up to the emission limit. Entries without a URL
+    /// remain marked seen, while URL-bearing entries beyond the limit remain
+    /// unseen for the next poll.
+    pub fn filter_unseen_entries_limited(
+        &mut self,
+        source_id: &str,
+        entries: Vec<crate::rss_parse::FeedEntry>,
+        limit: usize,
+    ) -> (Vec<crate::rss_parse::FeedEntry>, usize) {
+        let mut selected = Vec::new();
+        let mut dedup_filtered = 0;
+
+        for entry in entries {
+            if self.is_seen(source_id, &entry.guid) {
+                dedup_filtered += 1;
+            } else if entry.url.is_none() {
+                self.mark_seen(source_id, &entry.guid);
+            } else if selected.len() < limit {
+                self.mark_seen(source_id, &entry.guid);
+                selected.push(entry);
+            }
+        }
+
+        (selected, dedup_filtered)
     }
 }
 
@@ -207,5 +252,37 @@ mod tests {
         let _ = set.filter_unseen_entries("source-a", vec![entry_a]);
         let unseen = set.filter_unseen_entries("source-b", vec![entry_b]);
         assert_eq!(unseen.len(), 1);
+    }
+
+    #[test]
+    fn limited_poll_leaves_entries_after_the_limit_for_the_next_poll() {
+        let mut set = RssSeenSet::new();
+        let entries = || {
+            vec![
+                feed_entry("guid-1", Some("https://example.com/1")),
+                feed_entry("guid-2", Some("https://example.com/2")),
+                feed_entry("guid-3", Some("https://example.com/3")),
+            ]
+        };
+
+        let (first, first_dedup) = set.filter_unseen_entries_limited("source", entries(), 1);
+        assert_eq!(
+            first
+                .iter()
+                .map(|entry| entry.guid.as_str())
+                .collect::<Vec<_>>(),
+            ["guid-1"]
+        );
+        assert_eq!(first_dedup, 0);
+
+        let (second, second_dedup) = set.filter_unseen_entries_limited("source", entries(), 1);
+        assert_eq!(
+            second
+                .iter()
+                .map(|entry| entry.guid.as_str())
+                .collect::<Vec<_>>(),
+            ["guid-2"]
+        );
+        assert_eq!(second_dedup, 1);
     }
 }

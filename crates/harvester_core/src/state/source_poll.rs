@@ -80,25 +80,6 @@ impl AppState {
         self.source_states.is_poll_in_progress()
     }
 
-    pub(super) fn poll_pipeline_article_progress(&self) -> Option<(usize, usize)> {
-        let tracker = self.poll_pipeline.as_ref()?;
-        if !tracker.source_scan_done || tracker.job_ids.is_empty() {
-            return None;
-        }
-        let total = tracker.job_ids.len();
-        let settled = tracker
-            .job_ids
-            .iter()
-            .filter(|job_id| {
-                self.jobs
-                    .get(job_id)
-                    .and_then(|job| job.outcome.as_ref())
-                    .is_some()
-            })
-            .count();
-        (settled < total).then_some((settled, total))
-    }
-
     pub(super) fn clear_settled_poll_pipeline_if_complete(&mut self) {
         let Some(tracker) = self.poll_pipeline.as_ref() else {
             return;
@@ -115,18 +96,6 @@ impl AppState {
         if all_settled {
             self.poll_pipeline = None;
             self.dirty = true;
-        }
-    }
-
-    pub(super) fn pre_triage_loading_operation_label(&self) -> String {
-        match self.pre_triage_load_context.map(|context| context.reason) {
-            Some(crate::pre_triage_coordinator::PreTriageRefreshReason::RestoreCompletedJobs) => {
-                "Preparing triage list".to_string()
-            }
-            Some(crate::pre_triage_coordinator::PreTriageRefreshReason::JobDone) => {
-                "Updating triage candidates".to_string()
-            }
-            None => "Preparing triage list".to_string(),
         }
     }
 }

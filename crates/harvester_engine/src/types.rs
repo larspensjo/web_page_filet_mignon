@@ -21,7 +21,6 @@ pub struct JobProgress {
     pub stage: Stage,
     pub bytes: Option<u64>,
     pub tokens: Option<u32>,
-    pub content_preview: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,7 +43,7 @@ pub struct JobOutcome {
     pub final_url: String,
     pub tokens: Option<u32>,
     pub bytes_written: Option<u64>,
-    pub content_preview: Option<String>,
+
     pub extracted_links: Vec<ExtractedLink>,
     pub fetched_utc: Option<String>,
 }

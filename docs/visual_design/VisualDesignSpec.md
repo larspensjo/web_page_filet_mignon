@@ -167,6 +167,22 @@ Buttons should clearly express priority and intent.
 - Support clear visual treatment for default, hover, focus, active, selected, and disabled states.
 - State changes should be visible through tone, accent, or fill changes rather than through heavy animation or dramatic shadow shifts.
 
+### Desktop run surface
+
+- Run is the single Accent Primary action. Process unfinished is a secondary outlined action.
+- Stop stays visually separate and uses Accent Warning. While in-flight work drains, it is disabled
+  and reads “Stopping…”.
+- Pipeline stages may be active together and remain separate rows. A stage with an open total has
+  no ETA; when it has no admitted work it reads “Waiting for articles.”
+- Bars show remaining new work; work resolved as reused at admission is excluded from their
+  length and count text. Results that appear only after admission remain new work. While
+  Stopping, bars are empty, statuses are plain labels with no ETA, and counts show new work
+  done (Loading articles keeps its full count).
+- On article rows, the bar compares queue sizes on one shared scale while the text gives that
+  stage's own “N of M to do” fraction. They carry different information by design.
+- A large reprocess notice is muted run-surface text, not a modal or confirmation step.
+- The existing `ai_unavailable_message` is visible below the Run controls. API-key and ordinary AI-unavailable notices use muted status text. A saved-result store refusal uses the reserved warning red, names its file, explains the reason and recovery action, and leaves intake available.
+
 ## Links
 
 Links should feel clearly interactive without introducing a second accent system or adding visual noise to dense reading surfaces.
@@ -246,9 +262,15 @@ Status information should remain visible without dominating the screen.
 
 Use:
 
-- A single clearly labeled token or budget meter.
+- Two clearly labeled header meters: archive articles toward the core-supplied target,
+  and the LLM-call budget.
 - Muted default presentation using Text Tertiary.
-- Color escalation to Accent Primary or Accent Warning only near important thresholds.
+- The archive-count bar fills toward 150 articles, capped at full. It uses Accent Primary
+  once the target is reached and never Accent Warning. Short hints explain loading saved
+  results, unavailable results, unscored articles and an empty selection; a non-empty
+  selection shows its estimated tokens. A positive backlog reads “still processing” while
+  Active or Stopping and “unfinished” while Idle, except during loading or unavailability.
+- The LLM-call budget keeps its existing escalation to Accent Primary and Accent Warning.
 
 Avoid:
 

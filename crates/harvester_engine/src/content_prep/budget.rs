@@ -66,6 +66,21 @@ pub fn compute_prompt_overhead(
     document_key: &str,
     context_vars: &[(String, String)],
 ) -> usize {
+    compute_template_overhead(
+        template.system_template,
+        template.user_template,
+        document_key,
+        context_vars,
+    )
+}
+
+/// Computes overhead for either built-in or owned template overlays.
+pub fn compute_template_overhead(
+    system_template: &str,
+    user_template: &str,
+    document_key: &str,
+    context_vars: &[(String, String)],
+) -> usize {
     let mut vars = TemplateVars::new();
     vars.set_document(document_key, "");
 
@@ -85,12 +100,12 @@ pub fn compute_prompt_overhead(
         vars.insert(key.clone(), value.clone());
     }
     let rendered = vars.to_map();
-    let system = render_template(template.system_template, &rendered).unwrap_or_else(|e| {
+    let system = render_template(system_template, &rendered).unwrap_or_else(|e| {
         // If template rendering fails, use conservative estimate
         format!("ERROR: {}", e)
     });
-    let user = render_template(template.user_template, &rendered)
-        .unwrap_or_else(|e| format!("ERROR: {}", e));
+    let user =
+        render_template(user_template, &rendered).unwrap_or_else(|e| format!("ERROR: {}", e));
     system.len() + user.len() + NONCE_OVERHEAD_BYTES
 }
 

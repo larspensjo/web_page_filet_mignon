@@ -54,8 +54,7 @@ export function App() {
 		return cancelPendingSearchDispatch;
 	}, [mode, query, cancelPendingSearchDispatch]);
 
-	// Focus is frontend-local: after RevealJobsSearch is dispatched, the
-	// search box is focused once it exists in the DOM.
+	// Search focus stays local to the frontend and waits for the input to mount.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: mode re-runs the focus once the input mounts.
 	useEffect(() => {
 		if (searchFocusRequests === 0) return;
@@ -88,7 +87,6 @@ export function App() {
 				setAddUrlOpen(true);
 			} else if (isShortcut(event, "f")) {
 				event.preventDefault();
-				void dispatchIntent({ type: "RevealJobsSearch" });
 				setSearchFocusRequests((count) => count + 1);
 			}
 		};
@@ -159,7 +157,7 @@ export function App() {
 						</button>
 						<button
 							type="button"
-							disabled={!snapshot}
+							disabled={!snapshot?.view.archive_enabled}
 							onClick={() => void dispatchIntent({ type: "OpenArchiveDialog" })}
 						>
 							Archive…
@@ -188,6 +186,7 @@ export function App() {
 				<ReadingPane
 					selected={selected}
 					summary={snapshot?.view.right_pane.summary_markdown}
+					aiUnavailableMessage={snapshot?.view.ai_unavailable_message}
 					candidate={selectedCandidate}
 					onToggleExclusion={(signalKey) =>
 						void dispatchIntent({
@@ -202,6 +201,7 @@ export function App() {
 					key={archiveRequest.request_id}
 					request={archiveRequest}
 					partialCoverage={snapshot?.view.archive_partial_coverage}
+					archiveEnabled={snapshot?.view.archive_enabled ?? false}
 					onClose={() => setArchiveRequest(null)}
 				/>
 			)}

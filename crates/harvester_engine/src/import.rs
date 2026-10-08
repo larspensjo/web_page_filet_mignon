@@ -1068,10 +1068,7 @@ mod tests {
     // --- path-based loading ---
 
     #[test]
-    fn path_based_loading_preserves_same_url_duplicate_entries() {
-        use crate::briefing::load_and_prepare_articles_by_path;
-        use crate::llm::PromptRegistry;
-
+    fn imported_same_url_duplicate_entries_remain_separate_files() {
         let dir = TempDir::new().unwrap();
         let archive_dir = TempDir::new().unwrap();
         let html = make_html_with_meta(
@@ -1102,12 +1099,15 @@ mod tests {
             .map(|r| r.persisted_path.clone())
             .collect();
 
-        let registry = PromptRegistry::with_defaults();
-        let (articles, _) =
-            load_and_prepare_articles_by_path(&paths, 256 * 1024, &registry).unwrap();
-
-        // Both entries should load (same URL, different paths).
-        assert_eq!(articles.len(), 2);
+        assert_ne!(paths[0], paths[1]);
+        for path in paths {
+            let markdown = fs::read_to_string(path).unwrap();
+            let fields = crate::frontmatter::parse_frontmatter(&markdown).unwrap();
+            assert_eq!(
+                fields.url.as_deref(),
+                Some("https://dup2.example.com/story")
+            );
+        }
     }
 
     // --- format timestamp ---

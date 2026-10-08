@@ -267,7 +267,6 @@ impl ReqwestFetcher {
             stage: Stage::Downloading,
             bytes: Some(0),
             tokens: None,
-            content_preview: None,
         }));
         engine_info!(
             "[fetch] Fetch start job_id={} url_len={} url={}",
@@ -306,7 +305,6 @@ impl ReqwestFetcher {
                 stage: Stage::Downloading,
                 bytes: Some(bytes.len() as u64),
                 tokens: None,
-                content_preview: None,
             }));
         }
 

@@ -1,9 +1,7 @@
-use crate::SourcePollStat;
 use serde::{Deserialize, Serialize};
 
 pub const WARNING_PERCENT: u8 = 70;
 pub const DANGER_PERCENT: u8 = 90;
-pub const POLL_WARNING_REMAINING_PERCENT: u8 = 80;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LlmQuotaLimits {
@@ -44,14 +42,6 @@ pub enum LlmQuotaSeverity {
     Danger,
     Exhausted,
     Unavailable,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PollQuotaWarning {
-    pub severity: LlmQuotaSeverity,
-    pub estimated_triage_calls: u64,
-    pub remaining_calls: u64,
-    pub max_calls: u64,
 }
 
 pub fn build_llm_quota_view(quota: &LlmQuotaState) -> LlmQuotaView {
@@ -100,43 +90,6 @@ pub fn build_llm_quota_view(quota: &LlmQuotaState) -> LlmQuotaView {
     }
 }
 
-pub fn build_poll_quota_warning(
-    stats: &[SourcePollStat],
-    quota: &LlmQuotaState,
-) -> Option<PollQuotaWarning> {
-    if !quota.ai_available {
-        return None;
-    }
-    let estimated_triage_calls: u64 = stats.iter().map(|stat| stat.emitted as u64).sum::<u64>();
-    if estimated_triage_calls == 0 {
-        return None;
-    }
-    let max_calls = quota
-        .limits
-        .as_ref()
-        .and_then(|limits| limits.max_calls_per_session)?;
-    let remaining_calls = max_calls.saturating_sub(quota.usage.calls);
-    let current_percent = usage_percent(quota.usage.calls, max_calls);
-
-    let severity = if estimated_triage_calls > remaining_calls {
-        LlmQuotaSeverity::Danger
-    } else if estimated_triage_calls.saturating_mul(100)
-        >= remaining_calls.saturating_mul(u64::from(POLL_WARNING_REMAINING_PERCENT))
-        || current_percent >= DANGER_PERCENT
-    {
-        LlmQuotaSeverity::Warning
-    } else {
-        return None;
-    };
-
-    Some(PollQuotaWarning {
-        severity,
-        estimated_triage_calls,
-        remaining_calls,
-        max_calls,
-    })
-}
-
 fn usage_percent(used: u64, limit: u64) -> u8 {
     if limit == 0 {
         return 100;
@@ -148,7 +101,6 @@ fn usage_percent(used: u64, limit: u64) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harvester_engine::{SourceId, SourceKind};
 
     fn quota(used: u64, limit: Option<u64>) -> LlmQuotaState {
         LlmQuotaState {
@@ -163,16 +115,6 @@ mod tests {
                 ..Default::default()
             },
             ai_available: true,
-        }
-    }
-
-    fn stat(emitted: usize) -> SourcePollStat {
-        SourcePollStat {
-            source_id: SourceId::new("source").expect("valid"),
-            kind: SourceKind::Rss,
-            parsed: emitted,
-            dedup_filtered: 0,
-            emitted,
         }
     }
 
@@ -210,23 +152,5 @@ mod tests {
         assert_eq!(view.label, "LLM calls unavailable");
         assert_eq!(view.limit, None);
         assert_eq!(view.severity, LlmQuotaSeverity::Unavailable);
-    }
-
-    #[test]
-    fn poll_warning_rules_follow_remaining_quota() {
-        assert!(build_poll_quota_warning(&[stat(10)], &quota(0, None)).is_none());
-        assert!(build_poll_quota_warning(&[stat(10)], &quota(0, Some(100))).is_none());
-        assert_eq!(
-            build_poll_quota_warning(&[stat(80)], &quota(0, Some(100)))
-                .expect("warning")
-                .severity,
-            LlmQuotaSeverity::Warning
-        );
-        assert_eq!(
-            build_poll_quota_warning(&[stat(101)], &quota(0, Some(100)))
-                .expect("danger")
-                .severity,
-            LlmQuotaSeverity::Danger
-        );
     }
 }

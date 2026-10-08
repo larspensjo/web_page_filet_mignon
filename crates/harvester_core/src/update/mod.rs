@@ -1,36 +1,99 @@
 use engine_logging::{engine_info, engine_warn};
 
-use crate::tabs::{AppTab, JobListScope, LeftTab};
-use crate::{
-    calc_left_width, AppState, Effect, Msg, SessionState, INPUT_PANEL_FIXED_WIDTH,
-    MIN_JOBS_PANEL_WIDTH,
-};
+use crate::state::InitialArticleWindowOutcome as StartupWindow;
+use crate::{AppState, Effect, Msg, SessionState};
 
 mod archive;
-mod batch_results;
 mod briefing;
 mod import;
 mod llm_completed;
+mod model_dispatch;
 mod pipeline_run;
 mod polling;
-mod prompt_lab;
+pub(crate) mod processing;
+mod reuse;
 pub(crate) mod signal_candidate;
 mod summary_cache_support;
 mod triage;
 mod url_input;
+mod waves;
 
-// Left side is split into a fixed-width input panel plus a resizable jobs panel.
-// Minimum width for the left region (PANEL_INPUT + PANEL_JOBS).
-const MIN_LEFT_WIDTH: i32 = INPUT_PANEL_FIXED_WIDTH + MIN_JOBS_PANEL_WIDTH;
-// Minimum width for the preview panel
-const MIN_PREVIEW_WIDTH: i32 = 200;
-// Total width occupied by splitter (width + margins)
-const SPLITTER_TOTAL_WIDTH: i32 = 16; // 4px bar + 6px margin each side
+#[cfg(test)]
+pub(crate) mod test_support;
+#[cfg(test)]
+mod tests;
 
 /// Pure update function: applies a message to state and returns any effects.
 pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
+    state.record_startup_reply(&msg);
+    let view_change_requested =
+        matches!(&msg, Msg::JobSelected { .. } | Msg::JobListModeSet { .. });
+    let previous_view_selection = (state.job_list_mode(), state.selected_job_id());
+    let run_was_active = state.run_progress_is_active();
+    let stop_requested = matches!(&msg, Msg::StopFinishClicked)
+        && state.stop_finish_button_state().policy().is_some();
+    let pending_before_stop = stop_requested.then(|| state.pending_intake_urls().len());
     let progress_before = pipeline_run::progress_before(&state, &msg);
-    let effects = match msg {
+    let unfinished_revisions = state.unfinished_revisions();
+    let completed_identity = match &msg {
+        Msg::LlmCompleted { request_id, .. } => state
+            .signal_candidate()
+            .url_for_request(*request_id)
+            .and_then(|url| {
+                state
+                    .pre_triage()
+                    .article_content_hash(url)
+                    .map(|hash| (url.to_string(), hash.to_string()))
+            })
+            .or_else(|| {
+                state
+                    .briefing()
+                    .find_article_by_request_id(*request_id)
+                    .and_then(|index| state.briefing().articles().get(index))
+                    .map(|article| (article.url.clone(), article.content_hash.clone()))
+            })
+            .or_else(|| {
+                state
+                    .triage()
+                    .find_article_by_request_id(*request_id)
+                    .and_then(|index| state.triage().articles().get(index))
+                    .map(|article| (article.url.clone(), article.content_hash.clone()))
+            }),
+        _ => None,
+    };
+    let persist_runtime_state = matches!(
+        &msg,
+        Msg::FetchTimeRecoveryCompleted
+            | Msg::JobDone {
+                result: crate::JobResultKind::Success,
+                ..
+            }
+            | Msg::FetchOutcomeClassified {
+                class: harvester_engine::FetchOutcomeClass::PermanentBlock
+                    | harvester_engine::FetchOutcomeClass::Success,
+                ..
+            }
+    ) || (matches!(&msg, Msg::SourcePollCompleted { .. })
+        && !state.pipeline_intake_open());
+    let mut effects = match msg {
+        Msg::ValidatedResultReceived { record } => {
+            match *record {
+                crate::SavedResult::Summary(key, entry) => {
+                    state.store_summary_result(key, entry.result, entry.created_at_utc)
+                }
+                crate::SavedResult::Triage(key, entry) => {
+                    state.store_frozen_triage_result(key, entry.result, entry.created_at_utc)
+                }
+                crate::SavedResult::SignalCandidate(key, entry) => {
+                    state.store_signal_candidate_result(key, entry.result, entry.created_at_utc)
+                }
+            }
+            Vec::new()
+        }
+        Msg::ResultStoreUnavailable { reason } => {
+            state.refuse_result_store(reason);
+            Vec::new()
+        }
         Msg::InputChanged(text) => {
             state.set_input_buffer(text);
             Vec::new()
@@ -43,17 +106,34 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.clear_jobs_search_query();
             Vec::new()
         }
-        Msg::FocusJobsSearchRequested => {
-            state.set_left_tab(LeftTab::Jobs);
+        Msg::RestoreDesktopView {
+            mode,
+            selected_article_url,
+            now,
+        } => {
+            if let Some(mode) = mode {
+                state.set_job_list_mode(mode);
+            }
+            state.pending_selected_article_url = selected_article_url;
+            state.observe_utc(now);
+            Vec::new()
+        }
+        Msg::SavedArticlesLoaded {
+            request_id,
+            articles,
+        } => {
+            if state.triage_in_flight_request_id() == Some(request_id) {
+                state.saved_articles_loaded(articles);
+            }
             Vec::new()
         }
         Msg::StartupHydrationRequested => {
+            state.mark_prompt_contexts_pending();
             state.mark_triage_metadata_pending();
+            state.startup_inputs = Default::default();
             vec![
                 Effect::LoadPromptContexts,
                 Effect::LoadLlmMetadata,
-                Effect::LoadPromptLabModelCatalog,
-                Effect::LoadBriefingHistory,
                 Effect::LoadBriefingCheckpoint,
             ]
         }
@@ -87,160 +167,92 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
         }
         Msg::ArchiveClicked => archive::handle_archive_clicked(&mut state),
-        Msg::ToggleInputPanel => {
-            let opening = !state.input_panel_visible();
-            let desired_left_width_px = if opening {
-                state.left_panel_width() + INPUT_PANEL_FIXED_WIDTH
-            } else {
-                state.left_panel_width() - INPUT_PANEL_FIXED_WIDTH
-            };
-            state.set_input_panel_visible(opening);
-            let min_left = if opening {
-                MIN_LEFT_WIDTH
-            } else {
-                MIN_JOBS_PANEL_WIDTH
-            };
-            let clamped = calc_left_width(
-                desired_left_width_px,
-                state.window_width(),
-                min_left,
-                MIN_PREVIEW_WIDTH,
-                SPLITTER_TOTAL_WIDTH,
-            );
-            state.set_left_panel_width(clamped);
-            state.mark_dirty();
-            Vec::new()
-        }
         Msg::JobProgress {
             job_id,
             stage,
             tokens,
             bytes,
-            content_preview,
         } => {
-            state.apply_progress(job_id, stage, tokens, bytes, content_preview);
+            state.apply_progress(job_id, stage, tokens, bytes);
             Vec::new()
         }
         Msg::JobDone {
             job_id,
             result,
-            content_preview,
             extracted_links,
             fetched_utc,
         } => {
-            state.apply_done(
-                job_id,
-                result,
-                content_preview,
-                extracted_links,
-                fetched_utc,
-            );
-            state.request_pre_triage_refresh_evaluation(true);
-            Vec::new()
-        }
-        Msg::LinkToggleRequested {
-            job_id,
-            link_index,
-            checked,
-        } => {
-            let mut effects = Vec::new();
-            if let Some((url, downloaded_path)) = state.link_metadata(job_id, link_index) {
-                if checked && state.mark_link_download_requested(job_id, link_index) {
-                    effects.push(Effect::DownloadLinkedPage {
-                        job_id,
-                        link_index,
-                        url,
-                    });
-                } else if !checked && state.mark_link_deleted(job_id, link_index) {
-                    if let Some(path) = downloaded_path {
-                        effects.push(Effect::DeleteLinkedPage {
-                            job_id,
-                            link_index,
-                            path,
-                        });
-                    }
+            let successful = matches!(result, crate::JobResultKind::Success);
+            let stopped_drain = state.pipeline_run_phase() == crate::PipelineRunPhase::Stopping
+                || state.session() == SessionState::Finishing;
+            let link_effect = (successful && !extracted_links.is_empty())
+                .then(|| {
+                    state.job_url(job_id).map(|url| Effect::StoreArticleLinks {
+                        url: url.to_owned(),
+                        links: extracted_links.clone(),
+                    })
+                })
+                .flatten();
+            state.apply_done(job_id, result, extracted_links, fetched_utc);
+            if successful {
+                if let Some(url) = state.job_url(job_id).map(str::to_owned) {
+                    state.remove_pending_intake_url(&url);
                 }
             }
-            effects
-        }
-        Msg::LinkDownloadStarted { job_id, link_index } => {
-            state.mark_link_download_requested(job_id, link_index);
-            Vec::new()
-        }
-        Msg::LinkDownloadCompleted {
-            job_id,
-            link_index,
-            path,
-        } => {
-            state.mark_link_download_completed(job_id, link_index, path);
-            Vec::new()
-        }
-        Msg::LinkDownloadFailed {
-            job_id,
-            link_index,
-            error,
-        } => {
-            state.mark_link_download_failed(job_id, link_index, error);
-            Vec::new()
-        }
-        Msg::LinkDeleted { job_id, link_index } => {
-            state.mark_link_deleted(job_id, link_index);
-            Vec::new()
-        }
-        Msg::JobSelected { job_id } => {
-            state.select_job(job_id);
-            let Some(url) = state.selected_job_url() else {
-                return (state, Vec::new());
-            };
-            let selected_tab = if state.selected_job_has_summary() {
-                crate::tabs::AppTab::Summary
-            } else {
-                crate::tabs::AppTab::Triage
-            };
-            state.select_tab(selected_tab);
-            let url_changed = state.prompt_lab().url_input() != url;
-            if url_changed {
-                state.prompt_lab_mut().set_url_input(url.clone());
-                state.mark_dirty();
+            if !stopped_drain || successful {
+                state.request_pre_triage_refresh_evaluation(true);
             }
-            let should_resolve = state.prompt_lab().pending_resolve_id().is_none()
-                && (url_changed || state.prompt_lab().resolved_url_snapshot().is_none());
-            if should_resolve {
-                let resolve_id = state.allocate_next_prompt_lab_resolve_id();
-                state.prompt_lab_mut().begin_url_resolution(resolve_id);
-                state.mark_dirty();
-                vec![Effect::ResolvePromptLabInputFromUrl { resolve_id, url }]
+            link_effect.into_iter().collect()
+        }
+
+        Msg::JobSelected { job_id } => {
+            state.pending_selected_article_url = None;
+            let previous = state.selected_job_id();
+            state.select_job(job_id);
+            if state.selected_job_id() == Some(job_id) && previous != Some(job_id) {
+                state
+                    .article_links_load_url(job_id)
+                    .map(|url| Effect::LoadArticleLinks {
+                        job_id,
+                        url: url.to_owned(),
+                    })
+                    .into_iter()
+                    .collect()
             } else {
                 Vec::new()
             }
         }
-        Msg::WorkspaceViewSet { view } => {
-            state.set_workspace_view(view);
+        Msg::ArticleLinksLoaded { job_id, url, links } => {
+            match links {
+                Ok(links) => state.article_links_loaded(job_id, &url, links),
+                Err(error) => engine_warn!(
+                    "[article-links] load job_id={} url={} error={}",
+                    job_id,
+                    url,
+                    error
+                ),
+            }
+            Vec::new()
+        }
+        Msg::RuntimeStateNotice { message } => {
+            state.set_runtime_state_notice(message);
+            Vec::new()
+        }
+        Msg::FetchTimeRecoveryCompleted => {
+            state.fetch_time_recovery_done = true;
             Vec::new()
         }
         Msg::JobListModeSet { mode } => {
+            state.pending_selected_article_url = None;
             state.set_job_list_mode(mode);
             Vec::new()
         }
-        Msg::JobsSearchRevealRequested => {
-            state.set_workspace_view(crate::WorkspaceView::Review);
-            Vec::new()
-        }
-        Msg::TrendsViewOpened => {
-            state.set_workspace_view(crate::WorkspaceView::Trends);
-            vec![Effect::LoadEntityIndex]
-        }
-        Msg::PipelineRunRequested => {
-            pipeline_run::handle_pipeline_requested(&mut state);
-            Vec::new()
+        Msg::PipelineRunRequested { scope } => {
+            pipeline_run::handle_pipeline_requested(&mut state, scope)
         }
         Msg::PipelineRunAdvance => pipeline_run::handle_pipeline_advance(&mut state),
         Msg::RunFinishedNoticeDismissed => {
             pipeline_run::dismiss_run_notice(&mut state);
-            Vec::new()
-        }
-        Msg::ReadingPaneModeSet { mode } => {
-            state.set_reading_pane_mode(mode);
             Vec::new()
         }
         Msg::ExtractedLinkOpenRequested { job_id, link_index } => state
@@ -249,8 +261,17 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             .into_iter()
             .collect(),
         Msg::RestoreCompletedJobs(entries) => {
-            state.restore_completed_jobs(entries);
-            state.request_pre_triage_refresh_evaluation(false);
+            if entries.is_empty() {
+                state.startup_inputs.initial_article_window = StartupWindow::Empty;
+            } else {
+                state.restore_completed_jobs(entries);
+                state.startup_inputs.initial_article_window = StartupWindow::Pending;
+                state.request_pre_triage_refresh_evaluation(false);
+            }
+            Vec::new()
+        }
+        Msg::RestorePendingIntake(urls) => {
+            state.restore_pending_intake(urls);
             Vec::new()
         }
         Msg::EvaluatePreTriageRefresh {
@@ -261,43 +282,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             ordered_urls,
             triggered_by_job_done,
         ),
-        Msg::SplitterMoved {
-            desired_left_width_px,
-        } => {
-            let clamped = calc_left_width(
-                desired_left_width_px,
-                state.window_width(),
-                MIN_LEFT_WIDTH,
-                MIN_PREVIEW_WIDTH,
-                SPLITTER_TOTAL_WIDTH,
-            );
-            state.set_left_panel_width(clamped);
-            state.mark_dirty();
-            Vec::new()
-        }
-        Msg::WindowResized { window_width } => {
-            state.set_window_width(window_width);
-            // Re-clamp the left panel width based on new window width
-            let clamped = calc_left_width(
-                state.left_panel_width(),
-                window_width,
-                MIN_LEFT_WIDTH,
-                MIN_PREVIEW_WIDTH,
-                SPLITTER_TOTAL_WIDTH,
-            );
-            state.set_left_panel_width(clamped);
-            state.mark_dirty();
-            Vec::new()
-        }
-        Msg::WindowResizeCompleted {
-            outer_width,
-            outer_height,
-        } => {
-            vec![Effect::PersistWindowSize {
-                width: outer_width,
-                height: outer_height,
-            }]
-        }
         Msg::DesktopWindowResizeCompleted {
             inner_width,
             inner_height,
@@ -307,51 +291,13 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 height: inner_height,
             }]
         }
-        Msg::RequestLlmCompletion {
-            prompt_id,
-            prompt_version,
-            model_override,
-            input_content,
-            context,
-            template_override,
-        } => {
-            let request_id = state.allocate_next_llm_request_id();
-            state.record_pending_llm_request(request_id, prompt_id);
-            vec![Effect::RequestLlmCompletion {
-                request_id,
-                prompt_id,
-                prompt_version,
-                model_override,
-                input_content,
-                context,
-                template_override,
-                extra_template_vars: vec![],
-            }]
-        }
+
         Msg::LlmCompleted {
             request_id,
             result,
             metadata,
         } => llm_completed::handle(&mut state, request_id, result, metadata),
-        Msg::RearmDeferredBatchStages => {
-            let deferred_signal_urls = state.signal_candidate().deferred_urls();
-            state.triage_mut().rearm_deferred();
-            state.briefing_mut().rearm_deferred();
-            state.signal_candidate_mut().rearm_deferred();
-            let mut effects = Vec::new();
-            if matches!(state.triage().phase(), crate::TriagePhase::Triaging) {
-                triage::dispatch_next_triage_step(&mut state, &mut effects);
-            }
-            if matches!(state.briefing().phase(), crate::BriefingPhase::Summarizing) {
-                briefing::dispatch_next_briefing_step(&mut state, &mut effects);
-            }
-            for url in deferred_signal_urls {
-                signal_candidate::try_enqueue(&mut state, &url, &mut effects);
-            }
-            state.mark_dirty();
-            effects
-        }
-        Msg::BatchResultsCollected { entries } => batch_results::handle(&mut state, entries),
+
         Msg::LlmQuotaConfigured { limits } => {
             state.set_llm_quota_limits(limits);
             state.mark_dirty();
@@ -362,13 +308,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             Vec::new()
         }
-        Msg::GenerateBriefingClicked => briefing::handle_generate_clicked(&mut state),
-        Msg::NextBriefingItemClicked => briefing::handle_next_item_clicked(&mut state),
-        Msg::PrepareSummariesClicked => briefing::handle_prepare_summaries_clicked(&mut state),
-        Msg::BriefingHistoryLoaded { entries } => {
-            briefing::handle_history_loaded(&mut state, entries)
-        }
+
         Msg::BriefingCheckpointLoaded { since_utc } => {
+            state.restored_checkpoint_ready = true;
             briefing::handle_checkpoint_loaded(&mut state, since_utc)
         }
         Msg::BriefingCheckpointSaveSucceeded { save_id } => {
@@ -439,43 +381,69 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             signal_candidate::handle_toggle_exclusion(&mut state, signal_key, &mut effects);
             effects
         }
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text,
-        } => briefing::handle_articles_loaded(&mut state, articles, collection_text),
-        Msg::ArticlesLoadFailed { reason } => {
-            briefing::handle_articles_load_failed(&mut state, reason)
+
+        Msg::TriageArticlesLoaded { request_id, delta } => {
+            triage::handle_articles_loaded(&mut state, request_id, delta)
         }
-        Msg::TriageClicked => triage::handle_triage_clicked(&mut state),
-        Msg::TriageArticlesLoaded {
-            request_id,
-            articles,
-        } => triage::handle_articles_loaded(&mut state, request_id, articles),
-        Msg::TriageArticlesLoadProgress {
-            request_id,
-            files_scanned,
-            files_total,
-        } => triage::handle_articles_load_progress(
-            &mut state,
-            request_id,
-            files_scanned,
-            files_total,
-        ),
+        Msg::TriageArticlesLoadProgress { .. } => Vec::new(),
         Msg::TriageArticlesLoadFailed { request_id, reason } => {
             triage::handle_articles_load_failed(&mut state, request_id, reason)
         }
-        Msg::PreTriageDecisionSet { key, decision } => {
-            triage::handle_pre_triage_decision_set(&mut state, key, decision)
+        Msg::ProcessingConfigurationLoaded {
+            request_id,
+            contexts,
+            active_versions,
+            effective_models,
+            preparation_budget,
+        } => {
+            if state
+                .processing_start
+                .as_ref()
+                .is_some_and(|p| p.configuration_request == Some(request_id))
+            {
+                state.set_prompt_contexts(contexts);
+                state.mark_prompt_template_files_loaded();
+                state.set_llm_metadata(active_versions, effective_models);
+                state.mark_triage_metadata_ready();
+                state.mark_briefing_metadata_ready();
+                state.processing_budget = Some(preparation_budget);
+                if let Some(run) = state.pipeline_admission.as_mut() {
+                    run.configured = true;
+                }
+                state
+                    .processing_start
+                    .as_mut()
+                    .unwrap()
+                    .configuration_request = None;
+                processing::resume(&mut state)
+            } else {
+                Vec::new()
+            }
         }
-        Msg::PreTriageApplyClicked => triage::handle_pre_triage_apply_clicked(&mut state),
-        Msg::PreTriageResetClicked => triage::handle_pre_triage_reset_clicked(&mut state),
+        Msg::ProcessingConfigurationFailed { request_id, reason } => {
+            if state
+                .processing_start
+                .as_ref()
+                .is_some_and(|p| p.configuration_request == Some(request_id))
+            {
+                processing::fail(&mut state, reason);
+            }
+            Vec::new()
+        }
+        Msg::PromptContextsLoaded { .. }
+        | Msg::PromptContextsLoadFailed { .. }
+        | Msg::PromptTemplateFilesLoaded
+        | Msg::LlmMetadataLoaded { .. }
+            if state.pipeline_ready() =>
+        {
+            Vec::new()
+        }
         Msg::PromptContextsLoaded { contexts } => {
             engine_info!("[PromptContext] Loaded {} context(s)", contexts.len());
-            state.prompt_lab_mut().clear_context_overlays();
             state.set_prompt_contexts(contexts);
             state.mark_triage_metadata_ready();
             state.mark_dirty();
-            briefing::resume_deferred_exec_dispatch(&mut state)
+            Vec::new()
         }
         Msg::PromptContextsLoadFailed { reason } => {
             engine_warn!("[PromptContext] Failed to load contexts: {}", reason);
@@ -485,35 +453,25 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             Vec::new()
         }
         Msg::PromptTemplateFilesLoaded => {
-            engine_info!("[prompt-lab-template] Saved template overlays loaded");
+            engine_info!("[prompt-template] Saved template overlays loaded");
             state.mark_prompt_template_files_loaded();
             state.mark_dirty();
-            let mut effects = Vec::new();
-            if state.briefing().exec_dispatch_deferred() && !state.llm_metadata_loaded() {
-                effects.push(Effect::LoadLlmMetadata);
-            }
-            effects.extend(briefing::resume_deferred_exec_dispatch(&mut state));
-            effects
+            Vec::new()
         }
         Msg::LlmMetadataLoaded {
             active_versions,
             effective_models,
-            templates,
         } => {
             engine_info!(
                 "[LlmMetadata] Loaded {} active version(s)",
                 active_versions.len()
             );
-            state.set_llm_metadata(active_versions, effective_models, templates);
+            state.set_llm_metadata(active_versions, effective_models);
             state.reconcile_ai_availability_from_metadata();
             state.mark_briefing_metadata_ready();
             state.mark_triage_metadata_ready();
             state.mark_dirty();
-            let mut effects = Vec::new();
-            briefing::try_start_briefing_with_metadata(&mut state, &mut effects);
-            effects.extend(briefing::resume_deferred_exec_dispatch(&mut state));
-            signal_candidate::sweep_eligible_after_hydration(&mut state, &mut effects);
-            effects
+            Vec::new()
         }
         Msg::AiAvailabilityDetected { availability } => {
             state.set_ai_availability(availability);
@@ -527,18 +485,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             );
             state.set_summary_cache(cache);
             state.mark_dirty();
-            let mut effects = Vec::new();
-            signal_candidate::sweep_eligible_after_hydration(&mut state, &mut effects);
-            effects
+            Vec::new()
         }
         Msg::SignalCandidateCacheLoaded { cache } => {
             engine_info!(
                 "[signal-cache] Hydrated {} entries from persistent store",
                 cache.len()
             );
-            let mut effects = Vec::new();
-            signal_candidate::handle_cache_loaded(&mut state, cache, &mut effects);
-            effects
+            signal_candidate::handle_cache_loaded(&mut state, cache);
+            Vec::new()
         }
         Msg::SignalCandidateOverridesLoaded { overrides } => {
             engine_info!(
@@ -555,12 +510,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             );
             state.set_triage_cache(cache);
             state.mark_dirty();
-            let mut effects = Vec::new();
-            signal_candidate::sweep_eligible_after_hydration(&mut state, &mut effects);
-            effects
-        }
-        Msg::PreTriageOverridesHydrated { overrides } => {
-            state.set_pre_triage_manual_overrides(overrides);
             Vec::new()
         }
         Msg::OpenInBrowserClicked => match state.selected_article_url() {
@@ -570,14 +519,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             None => Vec::new(),
         },
-        Msg::PollSourcesClicked => {
-            let effects = polling::handle_poll_sources_clicked(&mut state);
-            if !effects.is_empty() {
-                pipeline_run::begin_run_if_needed(&mut state);
-            }
-            effects
-        }
-        Msg::PollIndirectLinks => polling::handle_poll_indirect_links(&mut state),
+
         Msg::PollStarted { total } => polling::handle_poll_started(&mut state, total),
         Msg::SourcePollCompleted {
             source_id,
@@ -597,199 +539,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             polling::handle_source_poll_failed(&mut state, source_id, error)
         }
         Msg::AllSourcesPollEnded => polling::handle_all_sources_poll_ended(&mut state),
-        Msg::TabSelected { tab } => {
-            state.select_tab(tab);
-            if tab == AppTab::Trends {
-                // Stub in Slice 1; full entity index loading in Slice 3.
-                vec![Effect::LoadEntityIndex]
-            } else {
-                Vec::new()
-            }
-        }
-        Msg::LeftTabSelected { tab } => {
-            engine_info!("[jobs-ui] left tab selected: {:?}", tab);
-            if tab == LeftTab::PromptLab {
-                state.open_prompt_lab();
-            } else {
-                state.close_prompt_lab_internals();
-                state.set_left_tab(tab);
-            }
-            Vec::new()
-        }
-        Msg::TrendCategorySelected { category } => {
-            state.set_active_trend_category(category);
-            Vec::new()
-        }
-        Msg::PromptLabOpenRequested => prompt_lab::handle_open_requested(&mut state),
-        Msg::PromptLabCloseRequested => prompt_lab::handle_close_requested(&mut state),
-        Msg::JobListScopeSet { scope } => {
-            engine_info!(
-                "[jobs-ui] scope set: {}",
-                match scope {
-                    JobListScope::All => "all",
-                    JobListScope::SinceCheckpoint => "since-checkpoint",
-                }
-            );
-            state.set_job_list_scope(scope);
-            Vec::new()
-        }
-        Msg::PromptLabStageSelected { stage } => {
-            prompt_lab::handle_stage_selected(&mut state, stage)
-        }
-        Msg::PromptLabInputSourceSelected { source } => {
-            prompt_lab::handle_input_source_selected(&mut state, source)
-        }
-        Msg::PromptLabInputChanged { text } => prompt_lab::handle_input_changed(&mut state, text),
-        Msg::PromptLabAdvancedModeSet { enabled } => {
-            prompt_lab::handle_advanced_mode_set(&mut state, enabled)
-        }
-        Msg::PromptLabModelCatalogLoaded { models, source } => {
-            prompt_lab::handle_model_catalog_loaded(&mut state, models, source)
-        }
-        Msg::PromptLabModelOverrideSet { model } => {
-            prompt_lab::handle_model_override_set(&mut state, model)
-        }
-        Msg::PromptLabCompareSectionToggled => {
-            prompt_lab::handle_compare_section_toggled(&mut state)
-        }
-        Msg::PromptLabContextSectionToggled => {
-            prompt_lab::handle_context_section_toggled(&mut state)
-        }
-        Msg::PromptLabTemplateSectionToggled => {
-            prompt_lab::handle_template_section_toggled(&mut state)
-        }
-        Msg::PromptLabRunDetailsSectionToggled => {
-            prompt_lab::handle_run_details_section_toggled(&mut state)
-        }
-        Msg::PromptLabUrlInputChanged { url } => {
-            prompt_lab::handle_url_input_changed(&mut state, url)
-        }
-        Msg::PromptLabResolveRequested => prompt_lab::handle_resolve_requested(&mut state),
-        Msg::PromptLabInputResolved { resolve_id, result } => {
-            prompt_lab::handle_input_resolved(&mut state, resolve_id, result)
-        }
-        Msg::PromptLabContextEditorOpened => prompt_lab::handle_context_editor_opened(&mut state),
-        Msg::PromptLabContextDraftChanged { text } => {
-            prompt_lab::handle_context_draft_changed(&mut state, text)
-        }
-        Msg::PromptLabContextApplyRequested => {
-            prompt_lab::handle_context_apply_requested(&mut state)
-        }
-        Msg::PromptLabContextApplyAndRerunRequested => {
-            prompt_lab::handle_context_apply_and_rerun_requested(&mut state)
-        }
-        Msg::PromptLabContextRevertRequested => {
-            prompt_lab::handle_context_revert_requested(&mut state)
-        }
-        Msg::PromptLabContextSaveRequested => prompt_lab::handle_context_save_requested(&mut state),
-        Msg::PromptLabContextReloadRequested => {
-            prompt_lab::handle_context_reload_requested(&mut state)
-        }
-        Msg::PromptLabContextSaved {
-            prompt_id,
-            path,
-            version,
-        } => prompt_lab::handle_context_saved(&mut state, prompt_id, path, version),
-        Msg::PromptLabContextSaveFailed { prompt_id, reason } => {
-            prompt_lab::handle_context_save_failed(&mut state, prompt_id, reason)
-        }
-        Msg::PromptLabTemplateEditorToggled => {
-            prompt_lab::handle_template_editor_toggled(&mut state)
-        }
-        Msg::PromptLabTemplateSystemDraftChanged { text } => {
-            prompt_lab::handle_template_system_draft_changed(&mut state, text)
-        }
-        Msg::PromptLabTemplateUserDraftChanged { text } => {
-            prompt_lab::handle_template_user_draft_changed(&mut state, text)
-        }
-        Msg::PromptLabTemplateApplyRequested => {
-            prompt_lab::handle_template_apply_requested(&mut state)
-        }
-        Msg::PromptLabTemplateApplyAndRerunRequested => {
-            prompt_lab::handle_template_apply_and_rerun_requested(&mut state)
-        }
-        Msg::PromptLabTemplateRevertRequested => {
-            prompt_lab::handle_template_revert_requested(&mut state)
-        }
-        Msg::PromptLabTemplateSaveRequested => {
-            prompt_lab::handle_template_save_requested(&mut state)
-        }
-        Msg::PromptLabTemplateSaved {
-            prompt_id,
-            version,
-            path,
-        } => prompt_lab::handle_template_saved(&mut state, prompt_id, version, path),
-        Msg::PromptLabTemplateSaveFailed { prompt_id, reason } => {
-            prompt_lab::handle_template_save_failed(&mut state, prompt_id, reason)
-        }
-        Msg::PromptLabRunRequested => prompt_lab::handle_run_requested(&mut state),
-        Msg::PromptLabRerunRequested => prompt_lab::handle_rerun_requested(&mut state),
-        Msg::PromptLabHistoryCleared => prompt_lab::handle_history_cleared(&mut state),
-        Msg::PromptLabCompareDraftReset => prompt_lab::handle_compare_draft_reset(&mut state),
-        Msg::PromptLabCompareCurrentSettingsCaptured => {
-            prompt_lab::handle_compare_current_settings_captured(&mut state)
-        }
-        Msg::PromptLabCompareBaselineCaptured => {
-            prompt_lab::handle_compare_baseline_captured(&mut state)
-        }
-        Msg::PromptLabCompareCandidateRemoved { candidate_id } => {
-            prompt_lab::handle_compare_candidate_removed(&mut state, candidate_id)
-        }
-        Msg::PromptLabCompareCandidateLabelChanged {
-            candidate_id,
-            label,
-        } => prompt_lab::handle_compare_candidate_label_changed(&mut state, candidate_id, label),
-        Msg::PromptLabCompareBatchStartRequested | Msg::PromptLabCompareBatchConfirmedStart => {
-            prompt_lab::handle_compare_batch_start_requested(&mut state)
-        }
-        Msg::PromptLabCompareBatchCancelRequested => {
-            prompt_lab::handle_compare_batch_cancel_requested(&mut state)
-        }
-        Msg::PromptLabCompareWinnerSelected { run_id } => {
-            prompt_lab::handle_compare_winner_selected(&mut state, run_id)
-        }
-        Msg::PromptLabCompareWinnerCleared => prompt_lab::handle_compare_winner_cleared(&mut state),
-        Msg::PromptLabCompareRunRated { run_id, rating } => {
-            prompt_lab::handle_compare_run_rated(&mut state, run_id, rating)
-        }
-        Msg::PromptLabComparePolicyUpdated {
-            require_parse_ok,
-            max_cost_microdollars,
-            max_wall_ms,
-            rating_beats_cost,
-        } => prompt_lab::handle_compare_policy_updated(
-            &mut state,
-            require_parse_ok,
-            max_cost_microdollars,
-            max_wall_ms,
-            rating_beats_cost,
-        ),
-        Msg::PromptLabCompareAutoSelectRequested => {
-            prompt_lab::handle_compare_auto_select_requested(&mut state)
-        }
-        Msg::PromptLabCompareBatchSetWarning { batch_id, warning } => {
-            prompt_lab::handle_compare_batch_set_warning(&mut state, batch_id, warning)
-        }
-        Msg::EntityIndexLoaded { index } => {
-            engine_info!("[entity-index] loaded {} entries", index.entries.len());
-            state.set_entity_index(index, 13, 10);
-            Vec::new()
-        }
-        Msg::EntityIndexLoadFailed { reason } => {
-            engine_warn!("[entity-index] load failed: {reason}; triggering rebuild");
-            vec![Effect::RebuildEntityIndex]
-        }
-        Msg::EntityIndexRebuilt { index } => {
-            engine_info!("[entity-index] rebuilt {} entries", index.entries.len());
-            state.set_entity_index(index, 13, 10);
-            Vec::new()
-        }
-        Msg::EntityIndexRebuildFailed { reason } => {
-            engine_warn!("[entity-index] rebuild failed: {reason}");
-            Vec::new()
-        }
-
-        // --- Import saved webpages ---
         Msg::ImportSavedWebpagesRequested { dir } => {
             import::handle_import_requested(&mut state, dir)
         }
@@ -799,7 +548,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::ImportSavedWebpagesFailed { request_id, reason } => {
             import::handle_import_failed(&mut state, request_id, reason)
         }
-        Msg::ImportedCorpusCleared => import::handle_corpus_cleared(&mut state),
 
         Msg::FetchOutcomeClassified {
             job_id,
@@ -833,40 +581,109 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             let has_in_flight_jobs = state.batch_observation().jobs_in_flight > 0;
             triage::dispatch_pre_triage_if_due(&mut state, tick, has_in_flight_jobs)
         }
-        Msg::NoOp => Vec::new(),
     };
 
+    model_dispatch::dispatch_model_work(&mut state, &mut effects);
+    let after_revisions = state.unfinished_revisions();
+    if after_revisions.0 != unfinished_revisions.0 {
+        if after_revisions.1 == unfinished_revisions.1 {
+            if let Some((url, content_hash)) = completed_identity {
+                state.refresh_unfinished_identity(&url, &content_hash);
+            } else {
+                state.recompute_unfinished_work();
+            }
+        } else {
+            state.recompute_unfinished_work();
+        }
+    }
+    state.rebuild_saved_results_if_changed();
+    if let Some(effect) = state.restore_desktop_selection_if_ready() {
+        effects.push(effect);
+    }
     pipeline_run::record_progress_after(&mut state, progress_before);
+    pipeline_run::finish_if_settled(&mut state);
+    let records = std::mem::take(&mut state.pending_results);
+    if !records.is_empty() {
+        // Save before any flush emitted by settlement, so it includes this completion.
+        effects.insert(0, Effect::SaveResults { records });
+    }
+    if stop_requested || (run_was_active && !state.run_progress_is_active()) {
+        effects.push(Effect::FlushResults);
+    }
+    if persist_runtime_state
+        || (view_change_requested
+            && previous_view_selection != (state.job_list_mode(), state.selected_job_id()))
+        || pending_before_stop.is_some_and(|before| state.pending_intake_urls().len() != before)
+    {
+        effects.push(Effect::PersistRuntimeState {
+            snapshot: crate::PersistenceSnapshot::capture(&state),
+        });
+    }
     (state, effects)
 }
-
-#[cfg(test)]
-mod tests;
 
 #[cfg(test)]
 mod desktop_contract_tests {
     use chrono::{DateTime, Utc};
 
     use super::update;
-    use crate::{AppState, Effect, Msg, WorkspaceView};
+    use crate::{AppState, Effect, Msg};
 
     #[test]
-    fn trends_view_opened_loads_the_entity_index() {
-        let (state, effects) = update(AppState::default(), Msg::TrendsViewOpened);
-        assert_eq!(state.workspace_view(), WorkspaceView::Trends);
-        assert_eq!(effects, vec![Effect::LoadEntityIndex]);
+    fn successful_job_completion_emits_a_runtime_persistence_snapshot() {
+        let (state, _effects) = update(
+            AppState::default(),
+            Msg::InputChanged("https://example.com/article".to_string()),
+        );
+        let (state, effects) = update(state, Msg::UrlsSubmitted);
+        let job_id = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::EnqueueUrl { job_id, .. } => Some(*job_id),
+                _ => None,
+            })
+            .expect("URL submission must enqueue a job");
+
+        let (_state, effects) = update(
+            state,
+            Msg::JobDone {
+                job_id,
+                result: crate::JobResultKind::Success,
+                extracted_links: Vec::new(),
+                fetched_utc: None,
+            },
+        );
+
+        assert!(matches!(
+            effects.last(),
+            Some(Effect::PersistRuntimeState { snapshot })
+                if snapshot.completed.len() == 1 && snapshot.completed[0].url == "https://example.com/article"
+        ));
+        assert!(!effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::StoreArticleLinks { .. })));
     }
 
     #[test]
-    fn jobs_search_reveal_changes_only_the_desktop_workspace() {
-        let initial = AppState::default();
-        let initial_left_tab = initial.left_tab();
-        let initial_active_tab = initial.active_tab();
-        let (state, effects) = update(initial, Msg::JobsSearchRevealRequested);
-        assert_eq!(state.workspace_view(), WorkspaceView::Review);
-        assert_eq!(state.job_list_mode(), crate::JobListMode::SinceCheckpoint);
-        assert_eq!(state.left_tab(), initial_left_tab);
-        assert_eq!(state.active_tab(), initial_active_tab);
+    fn urls_submitted_clears_the_pasted_input_buffer() {
+        let input = "https://a.example.com \n\n  https://b.example.com\n   \n";
+        let (state, _) = update(AppState::new(), Msg::InputChanged(input.into()));
+        assert_eq!(state.input_buffer(), input);
+
+        let (state, effects) = update(state, Msg::UrlsSubmitted);
+        assert!(state.input_buffer().is_empty());
+        assert_eq!(state.view().job_count, 2);
+        assert_eq!(
+            effects
+                .iter()
+                .filter(|e| matches!(e, Effect::EnqueueUrl { .. }))
+                .count(),
+            2
+        );
+
+        let (state, effects) = update(state, Msg::UrlsSubmitted);
+        assert!(state.input_buffer().is_empty());
+        assert_eq!(state.view().job_count, 2);
         assert!(effects.is_empty());
     }
 
@@ -892,7 +709,6 @@ mod desktop_contract_tests {
             Msg::JobDone {
                 job_id: 1,
                 result: crate::JobResultKind::Success,
-                content_preview: None,
                 extracted_links: vec![harvester_engine::ExtractedLink {
                     url: "https://linked.example".into(),
                     text: None,

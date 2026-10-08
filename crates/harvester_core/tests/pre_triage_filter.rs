@@ -1,3 +1,5 @@
+#[cfg(test)]
+use harvester_core::fixture_support::ManualPreTriageDecisions;
 use harvester_core::{
     AutoVerdict, FilterReason, LoadedArticle, ManualDecision, PreTriagePhase, PreTriagePolicy,
     PreTriageSession,

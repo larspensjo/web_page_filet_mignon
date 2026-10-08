@@ -146,8 +146,225 @@ Consequences:
 - The UI distinguishes a fourth empty state, "nothing fetched in the last 24 hours".
 Refs: `crates/harvester_core/src/tabs.rs`, `crates/harvester_core/src/state/view_builder.rs`, `DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS`.
 
+## 2026-09-18 - Prompt Lab is deleted while briefing domain state remains
+Decision: The briefing is dropped as a product deliverable but remains compiled,
+tested domain state; Prompt Lab is deleted outright.
+Context: Briefing capability remains useful for possible re-enablement, whereas
+Prompt Lab was a development editor whose output is independently preserved in
+hand-editable prompt and context files.
+Consequences: The runtime prompt registry, metadata, and file-loading paths stay.
+Prompt tuning would be a fresh implementation against a future UI.
+Refs: docs/plans/Plan.TauriDesktopUi.md (Phase 7); crates/harvester_core;
+crates/harvester_io
+
+## 2026-09-18 - Host persistence is a reducer-emitted effect
+Decision: Host runtime persistence is emitted by the pure reducer as a
+`PersistRuntimeState` effect and serviced by `EffectRunner`; hosts do not
+schedule state capture.
+Context: The desktop driver previously inspected messages, captured `AppState`,
+and handed snapshots directly to `PersistenceWorker`, leaving a second I/O path
+outside the common runner boundary.
+Consequences: The post-update snapshot travels with the effect, the runner owns
+an injected persistence sink, and normal hosts supply the existing debounced
+newest-wins worker while dry-run supplies a no-op sink. Dropping a runner flushes
+pending state in batch and tests; the desktop runner remains process-lifetime,
+so this change adds no desktop-exit flush and no new shutdown-loss window. Save
+timing remains equivalent for the previously persisted job and blacklist
+transitions.
+Refs: crates/harvester_core/src/effect.rs,
+crates/harvester_core/src/update/mod.rs,
+crates/harvester_io/src/effect_runner/, docs/Architecture.md
+
 ## 2026-09-18 - Experiment harnesses live in `harvester_eval` and never touch production providers
 Decision: Provider and prompt experiments are built in `crates/harvester_eval`, a workspace member that is never a default member. It reads recordings and the corpus read-only, depends only on `harvester_engine` (behind `eval-support`) and `engine_logging` among workspace crates, writes every artefact under the gitignored `.local/experiments/`, and never registers a provider, changes a prompt context or writes into the production output directory.
 Context: Evaluating a candidate provider needs the production preprocessing and recordings, but must not risk production behaviour, must stay out of the Node-free root build surface, and must remain buildable and testable without any API key.
 Consequences: Root Cargo commands keep their current surface; anything the harness needs from `harvester_engine` is exposed behind a feature flag rather than widened permanently; experiment results are never committed; adopting a candidate provider in production requires its own plan and decision entry.
 Refs: Cargo.toml, crates/harvester_eval, docs/JevTriageExperiment.Runbook.md, 2026-09-03 "Enumerated root desktop build surface".
+
+## 2026-09-19 - The archive export is a versioned external contract
+Decision: `archive.md` is a versioned contract with the portfolio model
+(`../AI_portfolio`), currently `export_schema: 2`. `docs/ArchiveExportFormat.md`
+is authoritative, and the fixtures under
+`crates/harvester_engine/tests/fixtures/archive_export/` are shared bytes that
+both repositories test against. Changes within a schema number are additive
+only; a rename or a change of meaning bumps `export_schema`.
+Context: The portfolio's `/process-archive` step re-derived clusters and
+relevance from grepped titles while the scraper already held triage and
+signal-candidate judgments. Article-only judgments belong to the scraper;
+judgments that need the portfolio's private, changing state belong to the
+portfolio, which makes the archive the boundary between them.
+Consequences: The export carries existing judgments only and adds no model
+call. `source_tier`, rationale, reasoning, draft gist and confidence are not
+exported, because the scraper's outlet tier would be read as a portfolio
+Methodology tier. Reserved marker lines in bodies are escaped, the trailing
+index is authoritative for line offsets, and an index-only file is a
+recognised archive artifact. The archive stays a generated artifact outside
+the corpus schema, so `CORPUS_SCHEMA_VERSION` is unchanged. Fixture bytes are
+exempt from line-ending normalisation.
+Refs: docs/ArchiveExportFormat.md, docs/CorpusFormat.md,
+docs/plans/Plan.ArchiveExportContract.md, crates/harvester_engine/src/export.rs
+
+## 2026-09-20 - Archive coverage counters measure the exporter's window
+Decision: The schema-2 index lines `window_count` and `unexported_by_priority`
+count the exporter's own `since`-filtered, canonical-URL-deduplicated document
+map, which includes harvested link-target pages under `linked/`, rather than
+the policy-filtered pinned corpus or the per-document annotation map. The
+reducer supplies a submit-time snapshot of every completed triage result it
+holds; a URL missing from that snapshot counts as `unavailable`, never as
+`untriaged`, and the reducer does not consult any cache by content hash to
+fill the gap. Both lines are written only when the export has a `since` bound.
+Context: The pinned corpus is already policy-filtered and annotations cover
+only selected URLs, so either would hide the exclusions these counters exist
+to reveal. Link targets are never triaged, so they land in `unavailable` and
+enlarge the window; `docs/ArchiveExportFormat.md` states this so a consumer
+does not read the bucket as "articles held back".
+Consequences: The counters measure selection coverage, not recall; a recall
+claim additionally needs the sampled review of withheld documents that step 3e
+must define. The invariant `window_count = doc_count + sum(buckets)` is
+structural and readers check it. New index data stays in name-keyed header
+lines: index rows keep their six columns, so a seventh column would require
+`export_schema: 3`. Narrowing the population later would change the meaning of
+a number the portfolio already reads and would need a schema bump, whereas
+adding a separate link-page counter remains additive and compatible.
+Refs: docs/ArchiveExportFormat.md,
+docs/plans/Plan.ArchiveExportContract.md (Phase 3, step 3a),
+crates/harvester_engine/src/export.rs,
+crates/harvester_core/src/update/archive.rs
+
+## 2026-09-27 - Pipeline stages overlap in waves under one request budget
+Decision: A run releases articles to the next stage in waves while earlier stages continue.
+All article model work shares one synchronous request budget, dispatched scoring, then
+summary, then triage. Batch API buffering has its own allowance. Completeness is judged per
+identity under current cache keys, and scoring requires current-key upstream results. Model
+requests are issued only inside a run.
+Context: The concurrency cap, not stage order, bounds throughput once stages overlap, and
+per-article streaming would dissolve the stage concept.
+Consequences: Settlement counts intake-refresh demand and admitted work only. Stage sessions
+and the wave ledger live for the process. Deferred results release downstream exactly once
+through replay waves. Configuration is frozen per run. `batch_next_action` no longer exists.
+Batch synchronous concurrency is capped at the worker's limit.
+Refs: docs/Architecture.md, crates/harvester_core/src/pipeline_waves.rs,
+crates/harvester_core/src/update/waves.rs, crates/harvester_batch/src/runner.rs,
+crates/harvester_batch/src/runner/batch_runtime.rs
+
+## 2026-09-27 - Stop halts new work and drains; export waits only for the run
+Decision: Stop cancels queued downloads and issues no new model request. The in-flight
+download and in-flight model requests finish and are kept. Never-started work becomes
+unfinished. The next run may start without a restart. Export is unavailable while a run is
+working or draining, and never because articles are unfinished or failed.
+Context: An unattended run must be stoppable without losing paid results, and a checkpoint
+moved mid-run would split the window. Completion-time checkpoints were rejected because they
+would change the public corpus format.
+Consequences: Failed articles are retried on the next run, with no retry cap for now.
+Refs: docs/Architecture.md, crates/harvester_core/src/update/pipeline_run.rs,
+crates/harvester_engine/src/engine.rs
+
+## 2026-09-27 - The desktop Run is one primary action
+Context: One press should run unattended; a separate Poll action split the workflow.
+Decision: Run performs poll through scoring, and the Poll Sources action is gone. A secondary
+action processes unfinished window work without fetching and is enabled only when such work
+exists.
+Consequences: The desktop intent vocabulary loses `PollSources` and gains
+`ResumeUnfinishedWork`.
+Refs: docs/Architecture.md, crates/harvester_core/src/ui_intent.rs,
+frontend/src/components/RunSurface.tsx
+
+
+## 2026-09-28 - Paid model results are kept and saved incrementally
+Decision: Paid triage, summary and signal-candidate results have no size or age
+eviction. Each kind uses the shared append-only JSON Lines store. The reducer
+emits incremental SaveResults effects on insertion or provenance change, and
+the runner owns an injected result sink that coalesces for about two seconds,
+flushing at run end, Stop, runner drop and desktop close. There is no dual-write;
+RON files remain untouched backups after verified atomic migration.
+Context: Settlement-only saving lost a run's paid results on a crash. Corrupt RON
+loads could silently become empty stores, and unordered concurrent full-clone
+rewrites could replace newer results with older snapshots.
+Consequences: Invalid or unknown-version RON sources and unreadable stores refuse
+AI stages with a named file and reason; intake continues and the CLI exits
+non-zero. Malformed complete JSONL lines are logged and skipped without rewriting;
+torn tails are preserved in sidecars before appending. Returning to a pre-switch
+build is emergency-only via git. Conversion back is manual or a separate tool,
+outside this commitment. This extends the 2026-09-18 reducer-emitted host
+persistence boundary to paid results.
+Refs: docs/Architecture.md, docs/CorpusFormat.md,
+crates/harvester_core/src/result_store.rs,
+crates/harvester_io/src/result_store.rs, crates/harvester_io/src/result_sink.rs
+
+## 2026-09-29 - One lock per output folder for both hosts; a second start refuses and names the holder
+Decision: The desktop host, command-line host, and IPC probe share `.harvester.lock` in the output folder. A competing start refuses and identifies the current host, PID, and start time.
+Context: Separate desktop and command-line lock files allowed both hosts to write the same runtime state and corpus at once. One shared lock makes the output-folder concurrency policy enforceable while keeping the refusal actionable.
+Consequences: The desktop reports refusal through its pre-window dialog, and the command-line host reports the same holder details before exiting non-zero. `--force-unlock` remains an explicit override.
+Refs: docs/Architecture.md, docs/FutureIdeas.md (FI-Architecture-HostConcurrency-0001), crates/harvester_io/src/run_lock.rs
+
+## 2026-09-29 - Source registry entries of unknown or removed type are skipped with a warning; the rest load
+Decision: A source registry entry with an unknown or removed source type is skipped with a warning; valid entries in the same registry continue to load.
+Context: Script entries have no runtime implementation, and strict whole-registry deserialization prevented the remaining valid sources from loading. Registry files are external input that may outlive supported source types.
+Consequences: Warnings identify the entry position and its id when readable. Supported entries retain their existing parsing and validation rules, including File and CuratedList.
+Refs: docs/Architecture.md, docs/plans/Plan.Simplification.md, crates/harvester_io/src/source_loader.rs
+
+## 2026-09-30 - The Batch API and batch-only modes are removed
+Decision: The Batch API and the batch-only modes (drain, dry-run, recurring, single-shot) are removed; all model calls are synchronous.
+Context: The owner approved the synchronous path and its approximate $5/month additional cost. The read-only reconciliation confirmed all 33 successful collected signal-candidate records, with nothing missing, invalid or outstanding.
+Consequences: The command-line host always runs one poll-download-process cycle and exits; the Batch launch policy supplies no runtime arguments. This retires the "Batch API buffering has its own allowance" clause of 2026-09-27. The dry-run no-op sink recorded on 2026-09-18 is gone with dry-run. The shared synchronous request budget, scoring-first priority, configuration frozen per run, append-only result sink, output-folder lock and Stop drain semantics remain. Replay records stay as forensics and are written only by the synchronous path.
+Refs: docs/plans/Plan.Simplification.md, docs/Architecture.md, crates/harvester_batch/src/runner.rs, crates/harvester_core/src/update/waves.rs, crates/harvester_engine/src/llm/handle.rs, scripts/lib/HarvesterLaunch.psm1
+
+## 2026-09-30 - The aggregate briefing is removed
+Decision: Remove the aggregate executive briefing, its streaming variant and briefing history outright.
+Context: The owner retired this product capability. This supersedes the briefing half of the 2026-09-18 "Prompt Lab is deleted while briefing domain state remains" commitment.
+Consequences: Per-article triage, summaries and scoring remain. Summary settlement saves completed results without an aggregate request. Persisted AggregateBriefing summary entries are skipped with an engine_logging warning naming the store file and count; other entries load through JSONL and RON migration. Existing history files are untouched. The desktop view fields remain false or empty, with IPC schema 12 unchanged. Replay records remain write-only forensics, and saved prompt overlays still load.
+Refs: crates/harvester_core/src/update/briefing.rs, crates/harvester_io/src/result_store.rs, crates/harvester_io/tests/retired_summary_entries.rs, docs/Architecture.md
+
+## 2026-09-30 - Retired generated artifacts leave the corpus marker without a schema bump
+Decision: Remove export.txt, manifest.json, summary_refresh_reports/ and .summary_refresh_last.json from generated_artifacts without changing CORPUS_SCHEMA_VERSION.
+Context: The concatenated export and stale-summary refresh mode are retired. None of these patterns can match an article record under the root or linked Markdown patterns, so article classification is unchanged under the CorpusFormat Versioning Rules.
+Consequences: The marker lists exactly archive.md and archive-*.md as generated artifacts. Existing files on disk are untouched. Archive bytes, summary resolution and archive-predicting estimates remain unchanged.
+Refs: docs/CorpusFormat.md, crates/harvester_engine/src/corpus_manifest.rs, crates/harvester_engine/src/export.rs, crates/harvester_engine/tests/fixtures/archive_export/
+
+## 2026-09-30 - Trends, the entity index, linked-page download and the indirect-link pool are removed
+Decision: Harvester has no trends view, entity index, linked-page download/delete workflow or indirect-link intake pool. Desktop IPC 13 carries only fields rendered by the page, bounded job rows, one selected-job record with extracted links, and the summary body reference.
+Context: These unused surfaces retained state, article previews and per-result entity-index writes without contributing to the supported desktop workflow. The frontend usage audit confirms 23 consumed top-level fields, including `ai_unavailable_message`.
+Consequences: Removed intents and body keys fail closed. Extracted links still open through reducer-resolved browser effects. WorkspaceView/SetWorkspaceView are removed; ReadingPaneMode/SetReadingPaneMode and AppTab/LeftTab jumps referenced by earlier entries are already absent and remain retired. Only desktop logical inner geometry is restored. Old link downloaded paths remain readable and are ignored by runtime state; runtime snapshots no longer carry them forward. Legacy window dimensions remain readable and carried forward on disk, but only desktop geometry drives the host. Summary resolution, archive bytes, the corpus marker schema and launch policy are unchanged; runtime-state restructuring and a link store remain separate work.
+Refs: completes DecisionLog 2026-09-04 (legacy geometry) and 2026-09-08 (pending cleanup); docs/Architecture.md; 2026-09-04 Desktop intents are a restricted vocabulary; 2026-09-04 Desktop hosts persist distinct window geometry; 2026-09-08 Summary-only reading pane; 2026-09-09 Runs never navigate
+
+## 2026-10-01 - Extracted links live in a per-article link store, not in runtime state
+Decision: Store extracted links in output/.article_links/, addressed by the SHA-256 of the canonical archive URL key. Runtime persistence contains only slim completed-job records, pending intake and geometry.
+Context: Persisting every job's link collection after each download made state snapshots and saves unnecessarily large. Links must retain anchor text and kind for future archive link handling.
+Consequences: Startup verifies and preserves the original bytes in .harvester_state.pre-slim.ron before atomically publishing link files and slim state. Pinned migration temporaries are recognised on restart. Existing verified backups are never overwritten or deleted. Selection loads links through a reducer-emitted effect and its reply; opening stays core-resolved and IPC 13 is unchanged. New fields default on old files; older builds can load slim files. The corpus marker adds .article_links/ without a schema bump. Legacy geometry remains readable and carried forward.
+Refs: crates/harvester_io/src/persistence.rs, crates/harvester_io/src/article_links.rs, crates/harvester_core/src/effect.rs, crates/harvester_core/src/update/mod.rs, docs/CorpusFormat.md, docs/Architecture.md, docs/ThreatModel.md
+
+## 2026-10-01 - Runtime-state recovery keeps additional verified backups and continues saving
+Decision: A restored state differing from the original pre-slim backup gets a unique dated verified backup; an unparseable active file gets a dated verified backup before default runtime state replaces it. Neither case permanently disables saving.
+Context: The owner chose option A after review identified downgrade round-trips, restores and truncated files that otherwise refused every later runtime save. This extends the earlier link-store migration commitment without overwriting or deleting any owner backup.
+Consequences: Each fallback names the backup through a reducer message and the existing owner status. Re-migration skips empty link lists and retains existing link data. Fetch-time recovery completes once, including unrecoverable jobs, and its result is persisted through the reducer-emitted runtime effect. Hidden jobs remain retained and block re-download. IPC 13 and corpus schema 1 are unchanged.
+Refs: crates/harvester_io/src/persistence.rs, crates/harvester_io/src/host_bootstrap.rs, crates/harvester_core/src/update/mod.rs, docs/Architecture.md, docs/CorpusFormat.md
+
+## 2026-10-03 - Desktop stage bars show remaining work this run actually does
+Decision: Each desktop run-stage bar shows the work this run still has to do at that stage: admitted minus completed and failed, with in-flight work counted as waiting. For triage, summary and scoring, admission-time reuse is excluded: the snapshot carries a per-stage reused count next to admitted, completed and failed, whose meanings are unchanged, and the desktop subtracts it. Reuse is resolved when an article is admitted to a stage, so reused work settles at once, never waits behind queued requests, and the new-work total only grows. An item judged new work at admission stays new work even if a result produced earlier in the same run later lets it settle without its own request; this deliberate exception trades about one item of bookkeeping and ETA precision for never paying for a duplicate model call and never shrinking the total. Completed and failed accumulate per run and do not fall when a window reload prunes admitted articles. The article stages share one scale, the largest current new-work total; source scanning, which counts sources, uses its own. Count text reads "N of M to do", plus failures, and never mentions reused results. While the run is Stopping every bar is empty, counts show this run's new work done, and no stage shows a time-left estimate or countdown, only its plain status. Time-left estimates use new-work settlements. The completion notice counts this run's new scoring work: articles scored by a model request, plus the rare result that appears only after admission (for example, identical content under two URLs) and settles without its own request; it remains counted as new work. The article-loading row keeps a plain done count and has no bar until the snapshot carries a real loading backlog. Bars and counts are derived from the current snapshot without render-held progress; ETAs also use elapsed time.
+Context: Completed-fraction bars all trended to full. A first remaining-work version still counted every window article reused from earlier runs, so on a morning run with about 25 new articles the shared scale was 158 and the bars were slivers. Stop withdraws pending model work, so neither remaining work nor a time-left estimate is shown honestly during the drain.
+Consequences: Bars show queue size, not a bottleneck; triage usually holds the longest model-stage bar because model requests are dispatched scoring, then summary, then triage under one budget. The per-stage reused count, meaning "settled without a model request this run", is a snapshot contract that any rebuild of run progress keeps along with these tests; it does not depend on cache-hit counters, the wave ledger or process-lifetime stage sessions. A rebuild should add a per-stage loading backlog so that row can regain a bar. Command-line progress keeps its own counts. The count text now carries the denominator, reversing the earlier compact-row choice that left the fraction to the bar.
+Refs: frontend/src/components/RunSurface.tsx, crates/harvester_core/src/run_progress.rs, crates/harvester_core/src/update/waves.rs, docs/Architecture.md, docs/visual_design/VisualDesignSpec.md; 2026-09-07 "Run progress is accumulated in the reducer"; 2026-09-27 "Pipeline stages overlap in waves under one request budget"; 2026-09-27 "Stop halts new work and drains; export waits only for the run"
+
+## 2026-10-03 - Saved current-key results refine the archive coverage snapshot
+Decision: Refine 2026-09-20 "Archive coverage counters measure the exporter's window": annotations and the submit-time priority snapshot come from saved current-key results, including compatible dated aliases, rather than only completed live-session results. The snapshot includes every window article with current-key triage, including manually excluded and unselected articles. A URL missing from it is unavailable.
+Context: After restart there is no completed live session, but its paid results remain saved. Reading only the session made export annotations and coverage disappear until another run.
+Consequences: The exporter retains the 2026-09-20 population: its since-filtered, canonical-URL-deduplicated document map, including linked pages. Missing or malformed corpus fetch dates remain inside the window, matching the scan and exporter, while jobs without fetch times stay hidden from time-scoped lists. Stale keys do not fill snapshot gaps. Coverage meanings, the structural invariant and export_schema 2 remain unchanged.
+Refs: docs/ArchiveExportFormat.md, crates/harvester_core/src/update/archive.rs, docs/plans/Plan.Simplification.md (Phase 8)
+
+## 2026-10-03 - The desktop view and export read one saved-results index
+Decision: The desktop view and export read one reducer-owned saved-results index covering the union of Since checkpoint and Last 24h. Current keys govern triage and priority, selection, annotations, coverage counters and the reading pane. The exported summary body, summary-mode token estimates and summary_result_for_url keep the newest-summary-for-content-hash rule so archive.md and its predictions are unchanged; summary_result_for_url still prefers a live session summary. Processing and archive selection stay window-bound.
+Context: Saved data should produce the same desktop and export after restart without a run. Separate view cache walks, archive indexes and session-only consumers produced contradictory answers. Startup publishes article metadata and hashes for both display scopes through reducer messages; scoring keys use current upstream results and their summary digest.
+Consequences: Configuration freezes, saved completions, checkpoint changes and coarse clock movement update derived entries. Live sessions continue to own progress and the 2026-09-09 running-triage ordering rule; remaining-work bars and reused counts are unchanged. Optional serde-default runtime fields remember the tab and article URL, restoring selection only within that tab and discarding pending restoration once a run is active. Changes emit the existing PersistRuntimeState and use the existing debounce/close flush. Search and scroll are not remembered. Existing AI availability wording distinguishes unavailable AI from a missing current summary without changing desktop IPC.
+Refs: crates/harvester_core/src/state/saved_results.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_io/src/persistence.rs, docs/Architecture.md, docs/plans/Plan.Simplification.md (Phase 8)
+
+## 2026-10-04 - The command-line host is kept with a compact progress block
+Decision: Keep the command-line host for one poll-download-process cycle and browser-page import. Normal runs show elapsed time and cost so far, followed by source scanning, downloading, triage, summaries and scoring from reducer-owned run progress. Their counts match the desktop: `newTotal = max(0, total - reused)`, `newDone = max(0, completed - reused)`, `remaining = max(0, newTotal - newDone - failed)`. Text is `remaining of newTotal to do`, or `0 to do` for zero new work; stopping shows `newDone done`. Append failures when nonzero and never mention reused results. Only Active article stages with no remaining work and open intake show "Waiting for articles"; Pending and Failed labels remain visible. There is no time-left estimate.
+Context: The scheduled command-line workflow remains useful, while a second host-owned progress projection and verbose transcript add complexity. This refines the 2026-10-03 desktop-stage decision's statement that the command line keeps separate counts.
+Consequences: Progress formatting stays pure and reads state; terminal I/O belongs to the surface. Terminal output redraws in place; redirected output emits stage-status transitions (including Waiting), the start of stopping, changed forced updates and 60-second heartbeats. Count-only changes wait for those updates; identical lines are never repeated. The header explains that stopping is safe and a second Ctrl+C exits immediately. Cursor recovery including the second-interrupt hard exit, once-per-intake poll summary and cycle-start unfinished-work/reprocess notices remain. Remove `--verbose-progress` and `--ascii-progress`. Checkpoint commands are `--set-checkpoint`, `--set-checkpoint-now`, `--clear-checkpoint` and `--show-checkpoint`; their previous briefing-since spellings remain hidden aliases, and `.briefing_checkpoint.ron` stays unchanged. Browser-page import keeps its existing reporter. A small read-only AppState::run_progress_view accessor supplies the same snapshot embedded by view(), avoiding a full desktop view build on each batch paint; core progress behavior, IPC and the desktop stay unchanged.
+Refs: docs/plans/Plan.Simplification.md; frontend/src/components/RunSurface.tsx; 2026-09-07 "Run progress is accumulated in the reducer"; 2026-10-03 "Desktop stage bars show remaining work this run actually does"
+
+## 2026-10-07 - The desktop archive meter counts selected scored articles toward a fixed target
+Decision: The first header meter shows the number of checkpoint-window, actionable articles in the signal-candidate selection over saved current-key scoring results, applying the threshold, duplicate-cluster representative and manual-exclusion rules. It measures that count against the core-supplied target of 150 articles and never falls back to the triage set. It reads zero with a short hint while startup inputs are pending ("Loading saved results…") or unavailable ("Saved results unavailable"), when no actionable window article has a current score ("Not scored yet"), or when scoring exists but nothing is selected ("None selected yet"). When the selection is non-empty, secondary text shows its summary-mode token estimate. The backlog counts actionable window articles not settled under current keys: failed attempts remain unfinished, while work below the priority cutoffs is settled. A positive backlog is shown only when startup is ready; it reads "still processing" during a run and "unfinished" while idle. The Run idle line uses the same selected count. The archive bar uses Accent Primary at the target and never Accent Warning.
+Context: The owner uses the count to answer "do I have enough articles?" Switching from the triage set to the selection after scoring settled produced a roughly 300-to-110 jump. Tokens toward 100,000 did not answer that question.
+Consequences: Export population, default selection, fallbacks and coverage counters remain unchanged (2026-09-20 and 2026-10-03). Existing dialog notices explain when its default export differs from the meter; when it defaults to the selection, the counts agree. Manual exclusions and startup readiness are reducer state independent of the scoring session, pre-triage coordinator and request bookkeeping. Meter readiness requires the initial article window to have pre-triage applied and records pending, empty and failed outcomes. Selection restoration uses the same readiness record: it waits until no input remains pending and the initial window is resolved with articles, while tolerating settled failed inputs (owner decision, 2026-10-05). Desktop IPC 15 replaces `token_limit`, `archive_token_estimate`, `archive_filtered_count` and `raw_unprocessed_count` with one grouped `archive_meter` record; `archive_partial_coverage` remains for the archive dialog. The Results list still selects across a wider display scope and can disagree with the meter. The command-line progress block is unchanged.
+Refs: docs/plans/Plan.ArchiveCountMeter.md, crates/harvester_core/src/state/archive_meter.rs, crates/harvester_core/src/state/startup_readiness.rs, crates/harvester_core/src/signal_candidate.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/view_model.rs, crates/harvester_ui_bridge/src/ipc.rs, frontend/src/ipc/schemaVersion.ts, frontend/src/components/StatusMeters.tsx, docs/visual_design/VisualDesignSpec.md, docs/Architecture.md, docs/DecisionLog.md (2026-09-30 "Trends, the entity index, linked-page download and the indirect-link pool are removed"; 2026-10-03 "The desktop view and export read one saved-results index")

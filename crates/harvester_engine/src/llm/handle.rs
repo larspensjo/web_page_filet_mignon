@@ -1,5 +1,5 @@
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{mpsc, Arc, Mutex, RwLock},
     thread,
     time::{Duration, Instant},
@@ -8,7 +8,7 @@ use tokio::sync::Semaphore;
 
 use engine_logging::{engine_error, engine_info, engine_warn};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use tokio::runtime::Runtime;
 
 use crate::llm::{
@@ -18,16 +18,16 @@ use crate::llm::{
         PromptVersion, TemplateVars,
     },
     quota::{LlmQuotaTracker, LlmQuotas, LlmUsageTotals},
-    replay::{content_hash, persist_replay_record, ReplayProvider, ReplayRecord},
+    replay::{content_hash, persist_replay_record, ReplayRecord},
     run_metadata::{CacheStatus, LlmFailureMetadata, LlmRunMetadata, LlmRunMetadataInit},
     types::{ChatMessage, ChatRole, LlmError, LlmRequest, ModelId, ProviderKind},
-    validation::{
-        validate_briefing, validate_briefing_executive_summary, validate_briefing_next_item,
-        validate_summary, validate_triage, ValidationError,
-    },
+    validation::{validate_summary, validate_triage, ValidationError},
 };
+use crate::persist::PersistError;
 
 /// Configuration for the LLM worker + handle.
+pub type ReplayWriteObserver = Arc<dyn Fn(&Path, u64, Duration) + Send + Sync>;
+
 #[derive(Clone)]
 pub struct LlmConfig {
     pub provider: Arc<dyn crate::llm::provider::LlmProvider>,
@@ -35,19 +35,15 @@ pub struct LlmConfig {
     pub triage_model: Option<ModelId>,
     pub summary_model: Option<ModelId>,
     pub signal_candidate_model: Option<ModelId>,
-    pub briefing_model: Option<ModelId>,
     pub registry: Arc<RwLock<PromptRegistry>>,
     pub quotas: LlmQuotas,
     pub output_dir: PathBuf,
     pub pricing: PricingRegistry,
     /// Maximum byte length of the input content passed to the worker.
     pub max_input_bytes: usize,
-    /// Deprecated alias for `max_input_bytes`. Will be removed in a future release.
-    #[deprecated(note = "use max_input_bytes")]
-    pub max_input_chars: usize,
     pub timestamp_utc: Arc<dyn Fn() -> String + Send + Sync>,
     pub session_id: String,
-    pub replay_cache: Option<Arc<RwLock<ReplayProvider>>>,
+    pub replay_write_observer: Option<ReplayWriteObserver>,
     /// Maximum number of concurrent LLM requests. Defaults to 1 (serial). Max enforced at 10.
     pub max_concurrent_requests: usize,
 }
@@ -56,16 +52,20 @@ impl LlmConfig {
     pub fn replay_output_dir(&self) -> PathBuf {
         self.output_dir.join("llm_results")
     }
+}
 
-    /// Effective byte limit, resolving the deprecated `max_input_chars` alias.
-    fn effective_max_input_bytes(&self) -> usize {
-        #[allow(deprecated)]
-        if self.max_input_bytes != 0 {
-            self.max_input_bytes
-        } else {
-            self.max_input_chars
+fn persist_record_with_observer(
+    config: &LlmConfig,
+    record: &ReplayRecord,
+) -> Result<(), PersistError> {
+    let started = Instant::now();
+    let path = persist_replay_record(&config.replay_output_dir(), record)?;
+    if let Some(observer) = &config.replay_write_observer {
+        if let Ok(metadata) = std::fs::metadata(&path) {
+            observer(&path, metadata.len(), started.elapsed());
         }
     }
+    Ok(())
 }
 
 /// Handle allowing effect runners to submit requests to the worker.
@@ -126,11 +126,8 @@ pub struct LlmCompletionCommand {
     pub request_id: u64,
     pub prompt_id: PromptId,
     pub prompt_version: Option<PromptVersion>,
-    /// Per-run model override; `None` means use the stage/default model.
-    pub model_override: Option<ModelId>,
     pub input_content: String,
     pub context: Vec<(String, String)>,
-    pub template_override: Option<PromptTemplateOwned>,
     /// Extra key-value pairs inserted as individual template variables ({{key}}).
     /// NOT concatenated into the {{context}} block.
     pub extra_template_vars: Vec<(String, String)>,
@@ -149,7 +146,7 @@ pub struct LlmCompletionResult {
     pub metadata: LlmRunMetadata,
 }
 
-/// Fully rendered completion request shared by synchronous and Batch callers.
+/// Fully rendered synchronous completion request.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedCompletion {
     pub model: ModelId,
@@ -168,34 +165,17 @@ pub fn prepare_completion(
     command: &LlmCompletionCommand,
     config: &LlmConfig,
 ) -> Result<PreparedCompletion, LlmCompletionError> {
-    if let Some(override_model) = command.model_override.as_ref() {
-        if let Err(validation_err) = validate_model_override(override_model, config, None) {
-            return Err(validation_err.into_completion_error(override_model.clone()));
-        }
-    }
-    let model = resolve_model(command.prompt_id, command.model_override.as_ref(), config);
-    let (system_template, user_template, prompt_version) =
-        if let Some(template) = &command.template_override {
-            (
-                template.system_template.clone(),
-                template.user_template.clone(),
-                template.version,
-            )
-        } else {
-            let (template, version) =
-                fetch_prompt_template(config, command.prompt_id, command.prompt_version).ok_or(
-                    LlmCompletionError::PromptNotFound {
-                        prompt_id: command.prompt_id,
-                    },
-                )?;
-            (template.system_template, template.user_template, version)
-        };
-    let document_key = match command.prompt_id {
-        PromptId::AggregateBriefing => "collection",
-        _ => "content",
-    };
+    let model = resolve_model(command.prompt_id, config);
+    let (template, prompt_version) =
+        fetch_prompt_template(config, command.prompt_id, command.prompt_version).ok_or(
+            LlmCompletionError::PromptNotFound {
+                prompt_id: command.prompt_id,
+            },
+        )?;
+    let system_template = template.system_template;
+    let user_template = template.user_template;
     let mut vars = TemplateVars::new();
-    vars.set_document(document_key, &command.input_content);
+    vars.set_document("content", &command.input_content);
     let context_text = command
         .context
         .iter()
@@ -265,13 +245,6 @@ pub enum LlmCompletionError {
     TemplateRenderFailed {
         detail: String,
     },
-    /// The caller supplied a `model_override` that is not supported by the
-    /// configured provider or is not in the known-model allow-list.
-    /// This is a pre-flight check; `failure_metadata` is always `None`.
-    UnsupportedModel {
-        model: ModelId,
-        reason: String,
-    },
 }
 
 /// Where a quota-exhausted stop originated. Provider = the LLM vendor refused
@@ -316,7 +289,9 @@ fn worker_loop(
     event_tx: mpsc::Sender<LlmEvent>,
     config: LlmConfig,
 ) {
-    let max_concurrent = config.max_concurrent_requests.clamp(1, 10);
+    let max_concurrent = config
+        .max_concurrent_requests
+        .clamp(1, super::MAX_LLM_CONCURRENT_REQUESTS);
     let runtime = Runtime::new().expect("failed to build tokio runtime for LLM worker");
     let quota_tracker = Arc::new(Mutex::new(LlmQuotaTracker::new(config.quotas.clone())));
     let config = Arc::new(config);
@@ -396,10 +371,8 @@ async fn handle_completion_concurrent(
         request_id,
         prompt_id,
         prompt_version,
-        model_override,
         input_content,
         context,
-        template_override,
         extra_template_vars,
     } = *command;
 
@@ -408,7 +381,7 @@ async fn handle_completion_concurrent(
     let timestamp_utc = (config.timestamp_utc)();
 
     let input_bytes = input_content.len();
-    let max_bytes = config.effective_max_input_bytes();
+    let max_bytes = config.max_input_bytes;
     if input_bytes > max_bytes {
         let err = LlmCompletionError::InputTooLarge {
             size: input_bytes,
@@ -429,6 +402,9 @@ async fn handle_completion_concurrent(
     {
         let mut tracker = quota_tracker.lock().unwrap();
         if let Err(failure) = tracker.reserve_call() {
+            // Completion reporting also reads usage. Release this guard before
+            // reporting rejection so concurrent requests can drain normally.
+            drop(tracker);
             engine_warn!(
                 "[llm-quota] request_id={} rejected=pre-call reason={}",
                 request_id,
@@ -458,10 +434,8 @@ async fn handle_completion_concurrent(
             request_id,
             prompt_id,
             prompt_version,
-            model_override: model_override.clone(),
             input_content: input_content.clone(),
             context,
-            template_override,
             extra_template_vars,
         },
         config,
@@ -480,64 +454,8 @@ async fn handle_completion_concurrent(
         request,
         prompt_version: version,
     } = prepared;
-    if let Some(ref override_model) = model_override {
-        engine_info!(
-            "[llm-dispatch] request_id={} override model={:?}/{} resolved={:?}/{}",
-            request_id,
-            override_model.provider(),
-            override_model.model_name(),
-            model.provider(),
-            model.model_name()
-        );
-    }
+
     let input_hash = content_hash(&input_content);
-
-    if let Some(ref cache) = config.replay_cache {
-        let guard = cache.read().unwrap();
-        if let Some(record) = guard.lookup(&input_hash, prompt_id, version) {
-            if record.validated_output.is_some() {
-                let wall_ms = start_at.elapsed().as_millis() as u64;
-                engine_info!(
-                    "[llm-replay] cache hit request_id={} hash={}",
-                    request_id,
-                    &input_hash[..8]
-                );
-                let output_json = record
-                    .validated_output
-                    .as_ref()
-                    .and_then(|value| serde_json::to_string(value).ok())
-                    .unwrap_or_else(|| record.raw_response.clone());
-
-                let metadata = LlmRunMetadata::new(LlmRunMetadataInit {
-                    prompt_id,
-                    prompt_version: version,
-                    resolved_model: model.model_name().to_string(),
-                    input_bytes,
-                    input_tokens: record.usage.input_tokens,
-                    output_tokens: record.usage.output_tokens,
-                    cached_input_tokens: record.usage.cached_input_tokens,
-                    cost_microdollars: record.cost_microdollars,
-                    wall_ms,
-                    parse_ok: true,
-                    validation_error: None,
-                    cache_status: CacheStatus::HitValidated,
-                    timestamp_utc: record.timestamp_utc.clone(),
-                });
-                engine_info!(
-                    "[llm-run] request_id={} prompt_id={:?} version={} model={} input_bytes={} input_tokens={} output_tokens={} cached_input_tokens={} cost_microdollars={} wall_ms={} parse_ok=true cache_status=hit_validated",
-                    request_id, metadata.prompt_id, metadata.prompt_version, metadata.resolved_model,
-                    metadata.input_bytes, metadata.input_tokens, metadata.output_tokens,
-                    metadata.cached_input_tokens, metadata.cost_microdollars, metadata.wall_ms
-                );
-                let result = LlmCompletionResult {
-                    output_json,
-                    metadata,
-                };
-                send_llm_completed(event_tx, request_id, Ok(result), quota_tracker);
-                return;
-            }
-        }
-    }
 
     engine_info!(
         "[llm-worker] request_id={} model={} start",
@@ -705,7 +623,7 @@ async fn handle_completion_concurrent(
                 ..record
             };
 
-            if let Err(err) = persist_replay_record(&config.replay_output_dir(), &success_record) {
+            if let Err(err) = persist_record_with_observer(config, &success_record) {
                 engine_error!(
                     "[llm-replay] request_id={} persist failed: {}",
                     request_id,
@@ -729,11 +647,6 @@ async fn handle_completion_concurrent(
                     quota_tracker,
                 );
                 return;
-            }
-
-            if let Some(ref cache) = config.replay_cache {
-                let mut guard = cache.write().unwrap();
-                guard.insert(success_record.clone());
             }
 
             let metadata = LlmRunMetadata::new(LlmRunMetadataInit {
@@ -779,7 +692,7 @@ async fn handle_completion_concurrent(
                 ..record
             };
 
-            if let Err(err) = persist_replay_record(&config.replay_output_dir(), &failure_record) {
+            if let Err(err) = persist_record_with_observer(config, &failure_record) {
                 engine_error!(
                     "[llm-replay] request_id={} persist failed: {}",
                     request_id,
@@ -830,17 +743,9 @@ async fn handle_completion_concurrent(
 /// Resolve the model for a request.
 ///
 /// Precedence (highest to lowest):
-/// 1. `model_override` if `Some` — caller's explicit choice.
-/// 2. Per-prompt-id stage model if configured.
-/// 3. `config.default_model` — unconditional fallback.
-fn resolve_model(
-    prompt_id: PromptId,
-    model_override: Option<&ModelId>,
-    config: &LlmConfig,
-) -> ModelId {
-    if let Some(override_model) = model_override {
-        return override_model.clone();
-    }
+/// 1. Per-prompt-id stage model if configured.
+/// 2. `config.default_model` — unconditional fallback.
+fn resolve_model(prompt_id: PromptId, config: &LlmConfig) -> ModelId {
     match prompt_id {
         PromptId::ArticleTriage => config
             .triage_model
@@ -858,131 +763,6 @@ fn resolve_model(
             .or(config.summary_model.as_ref())
             .unwrap_or(&config.default_model)
             .clone(),
-        PromptId::AggregateBriefing
-        | PromptId::BriefingExecutiveSummary
-        | PromptId::BriefingNextItem => config
-            .briefing_model
-            .as_ref()
-            .unwrap_or(&config.default_model)
-            .clone(),
-    }
-}
-
-/// Returns the set of model names the engine will accept as overrides
-/// from local config alone (stage models + pricing registry keys).
-pub fn local_dispatchable_model_names(config: &LlmConfig) -> Vec<String> {
-    let mut names = std::collections::HashSet::new();
-    names.insert(config.default_model.model_name().to_string());
-    if let Some(m) = &config.triage_model {
-        names.insert(m.model_name().to_string());
-    }
-    if let Some(m) = &config.summary_model {
-        names.insert(m.model_name().to_string());
-    }
-    if let Some(m) = &config.signal_candidate_model {
-        names.insert(m.model_name().to_string());
-    }
-    if let Some(m) = &config.briefing_model {
-        names.insert(m.model_name().to_string());
-    }
-    for key in config.pricing.model_names() {
-        names.insert(key.to_string());
-    }
-    let mut result: Vec<String> = names.into_iter().collect();
-    result.sort();
-    result
-}
-
-/// Validate a model override before use.
-///
-/// Checks (in order):
-/// 1. Provider must match `config.default_model.provider()` (proxy for the configured provider).
-/// 2. Model name must be in the allow-list built from config models and the pricing registry,
-///    or in the optional extra_catalog parameter (for remote-discovered models).
-///
-/// Returns a small validation error on failure; caller maps it into
-/// `LlmCompletionError::UnsupportedModel`.
-fn validate_model_override(
-    override_model: &ModelId,
-    config: &LlmConfig,
-    extra_catalog: Option<&[ModelId]>,
-) -> Result<(), ModelOverrideValidationError> {
-    let configured_provider = config.default_model.provider();
-
-    // Check 1: provider must match.
-    if override_model.provider() != configured_provider {
-        engine_warn!(
-            "[llm-dispatch] unsupported model override: wrong provider {:?} (expected {:?}) model={}",
-            override_model.provider(),
-            configured_provider,
-            override_model.model_name()
-        );
-        return Err(ModelOverrideValidationError::WrongProvider {
-            configured_provider,
-        });
-    }
-
-    // Check 2: model name must be in the allow-list (local or extra catalog).
-    let mut allow_list: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    allow_list.insert(config.default_model.model_name());
-    if let Some(m) = &config.triage_model {
-        allow_list.insert(m.model_name());
-    }
-    if let Some(m) = &config.summary_model {
-        allow_list.insert(m.model_name());
-    }
-    if let Some(m) = &config.signal_candidate_model {
-        allow_list.insert(m.model_name());
-    }
-    if let Some(m) = &config.briefing_model {
-        allow_list.insert(m.model_name());
-    }
-
-    let in_local_allow_list = allow_list.contains(override_model.model_name())
-        || config.pricing.get(override_model.model_name()).is_some();
-
-    let in_extra_catalog = extra_catalog
-        .map(|catalog| {
-            catalog
-                .iter()
-                .any(|m| m.model_name() == override_model.model_name())
-        })
-        .unwrap_or(false);
-
-    if !in_local_allow_list && !in_extra_catalog {
-        engine_warn!(
-            "[llm-dispatch] unsupported model override: unknown model name={} provider={:?}",
-            override_model.model_name(),
-            override_model.provider()
-        );
-        return Err(ModelOverrideValidationError::UnknownModelName);
-    }
-
-    Ok(())
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ModelOverrideValidationError {
-    WrongProvider { configured_provider: ProviderKind },
-    UnknownModelName,
-}
-
-impl ModelOverrideValidationError {
-    fn into_completion_error(self, model: ModelId) -> LlmCompletionError {
-        let reason = match self {
-            Self::WrongProvider {
-                configured_provider,
-            } => format!(
-                "provider {:?} does not match configured provider {:?}",
-                model.provider(),
-                configured_provider
-            ),
-            Self::UnknownModelName => format!(
-                "model name '{}' is not in the known-model allow-list",
-                model.model_name()
-            ),
-        };
-        LlmCompletionError::UnsupportedModel { model, reason }
     }
 }
 
@@ -1030,35 +810,6 @@ fn validate_response(prompt_id: PromptId, content: &str) -> Result<String, Valid
         PromptId::ArticleSignalCandidate => {
             let _ = crate::llm::validation::validate_signal_candidate(content)?;
             Ok(content.to_string())
-        }
-        PromptId::AggregateBriefing => {
-            let validated = validate_briefing(content)?;
-            let normalized = json!({
-                "executive_summary": validated.executive_summary,
-                "top_stories": validated.top_stories.iter().map(|story| {
-                    json!({
-                        "headline": story.headline,
-                        "body": story.body,
-                    })
-                }).collect::<Vec<_>>(),
-                "article_count": validated.article_count,
-            });
-            Ok(normalized.to_string())
-        }
-        PromptId::BriefingExecutiveSummary => {
-            let validated = validate_briefing_executive_summary(content)?;
-            let normalized = json!({ "executive_summary": validated.executive_summary });
-            Ok(normalized.to_string())
-        }
-        PromptId::BriefingNextItem => {
-            let validated = validate_briefing_next_item(content)?;
-            let normalized = match validated {
-                crate::llm::dto::BriefingNextItem::Item { headline, body } => {
-                    json!({ "status": "item", "headline": headline, "body": body })
-                }
-                crate::llm::dto::BriefingNextItem::Exhausted => json!({ "status": "exhausted" }),
-            };
-            Ok(normalized.to_string())
         }
     }
 }
@@ -1140,10 +891,8 @@ mod tests {
     #[test]
     fn extra_template_vars_not_in_context_block() {
         let context: Vec<(String, String)> = vec![("analyst".to_string(), "finance".to_string())];
-        let extra_template_vars: Vec<(String, String)> = vec![(
-            "previous_briefings".to_string(),
-            "old summary content".to_string(),
-        )];
+        let extra_template_vars: Vec<(String, String)> =
+            vec![("article_url".to_string(), "old summary content".to_string())];
 
         // Replicate the logic in handle_completion_concurrent
         let mut vars = TemplateVars::new();
@@ -1170,8 +919,8 @@ mod tests {
             context_rendered
         );
 
-        // {{previous_briefings}} must render the extra var value
-        let pb_rendered = render_template("{{previous_briefings}}", &rendered).unwrap();
+        // {{article_url}} must render the extra var value
+        let pb_rendered = render_template("{{article_url}}", &rendered).unwrap();
         assert_eq!(pb_rendered, "old summary content");
     }
 
@@ -1199,7 +948,6 @@ mod tests {
     fn test_llm_config() -> LlmConfig {
         let provider = Arc::new(MockLlmProvider::new());
         let registry = Arc::new(RwLock::new(PromptRegistry::with_defaults()));
-        #[allow(deprecated)]
         {
             LlmConfig {
                 provider,
@@ -1207,19 +955,66 @@ mod tests {
                 triage_model: None,
                 summary_model: None,
                 signal_candidate_model: None,
-                briefing_model: None,
                 registry,
                 quotas: LlmQuotas::default(),
                 output_dir: PathBuf::from("."),
                 pricing: PricingRegistry::with_defaults(),
                 max_input_bytes: 100_000,
-                max_input_chars: 0,
                 timestamp_utc: Arc::new(|| "2026-01-01T00:00:00Z".to_string()),
                 session_id: "test-session".to_string(),
-                replay_cache: None,
+                replay_write_observer: None,
                 max_concurrent_requests: 1,
             }
         }
+    }
+
+    #[test]
+    fn pre_call_quota_rejections_report_usage_and_drain_all_requests() {
+        let mut config = test_llm_config();
+        config.quotas.max_calls_per_session = Some(0);
+        config.max_concurrent_requests = 10;
+        let handle = LlmHandle::new(config);
+        let events = handle.event_receiver();
+        for request_id in 0..10 {
+            handle
+                .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
+                    request_id,
+                    prompt_id: PromptId::ArticleTriage,
+                    prompt_version: None,
+                    input_content: "fixture".into(),
+                    context: Vec::new(),
+                    extra_template_vars: Vec::new(),
+                })))
+                .unwrap();
+        }
+        let mut completions = std::collections::HashSet::new();
+        let mut usage_updates = 0;
+        for _ in 0..20 {
+            match events
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(5))
+                .expect("every rejected request must report completion and usage")
+            {
+                LlmEvent::Completed { request_id, result } => {
+                    assert!(matches!(
+                        result,
+                        Err(LlmCompletionError::QuotaExhausted {
+                            origin: QuotaOrigin::SessionBudget,
+                            ..
+                        })
+                    ));
+                    assert!(completions.insert(request_id));
+                }
+                LlmEvent::UsageUpdated { usage } => {
+                    assert_eq!(usage.calls, 0);
+                    usage_updates += 1;
+                }
+            }
+        }
+        assert_eq!(completions.len(), 10);
+        assert_eq!(usage_updates, 10);
+        handle.drain_and_stop();
     }
 
     #[test]
@@ -1232,21 +1027,29 @@ mod tests {
         let mut config = test_llm_config();
         config.provider = provider.clone();
         config.output_dir = output_dir.path().to_path_buf();
+        config
+            .registry
+            .write()
+            .unwrap()
+            .register(crate::llm::PromptTemplate {
+                id: PromptId::ArticleTriage,
+                system_template: "Classify for {{audience}}",
+                user_template: "{{content}}\n{{context}}",
+                version: 17,
+                description: "fixture",
+                expected_format: "json",
+            });
+        config
+            .registry
+            .write()
+            .unwrap()
+            .set_active(PromptId::ArticleTriage, 17);
         let command = LlmCompletionCommand {
             request_id: 41,
             prompt_id: PromptId::ArticleTriage,
             prompt_version: None,
-            model_override: None,
             input_content: "A compact article body".to_string(),
             context: vec![("audience".to_string(), "engineers".to_string())],
-            template_override: Some(PromptTemplateOwned {
-                id: PromptId::ArticleTriage,
-                system_template: "Classify for {{audience}}".to_string(),
-                user_template: "{{content}}\n{{context}}".to_string(),
-                version: 17,
-                description: String::new(),
-                expected_format: String::new(),
-            }),
             extra_template_vars: Vec::new(),
         };
         let prepared = prepare_completion(&command, &config).unwrap();
@@ -1278,62 +1081,22 @@ mod tests {
     }
 
     #[test]
-    fn validate_model_override_rejects_wrong_provider_with_small_error_type() {
-        let config = test_llm_config();
-        let override_model = ModelId::new(ProviderKind::Anthropic, "claude-3-5-sonnet");
-
-        let err = validate_model_override(&override_model, &config, None).unwrap_err();
-
-        assert_eq!(
-            err,
-            ModelOverrideValidationError::WrongProvider {
-                configured_provider: ProviderKind::OpenAi
-            }
-        );
-    }
-
-    #[test]
-    fn validate_model_override_rejects_unknown_model_name_with_small_error_type() {
-        let config = test_llm_config();
-        let override_model = ModelId::new(ProviderKind::OpenAi, "definitely-unknown-model");
-
-        let err = validate_model_override(&override_model, &config, None).unwrap_err();
-
-        assert_eq!(err, ModelOverrideValidationError::UnknownModelName);
-    }
-
-    #[test]
     fn signal_candidate_falls_back_to_summary_model_then_default() {
         let mut cfg = test_llm_config();
         cfg.default_model = ModelId::new(ProviderKind::OpenAi, "gpt-default");
         cfg.summary_model = Some(ModelId::new(ProviderKind::OpenAi, "gpt-summary"));
         cfg.signal_candidate_model = None;
 
-        let m = resolve_model(PromptId::ArticleSignalCandidate, None, &cfg);
+        let m = resolve_model(PromptId::ArticleSignalCandidate, &cfg);
         assert_eq!(m.model_name(), "gpt-summary");
 
         cfg.summary_model = None;
-        let m = resolve_model(PromptId::ArticleSignalCandidate, None, &cfg);
+        let m = resolve_model(PromptId::ArticleSignalCandidate, &cfg);
         assert_eq!(m.model_name(), "gpt-default");
 
         cfg.signal_candidate_model = Some(ModelId::new(ProviderKind::OpenAi, "gpt-signal"));
-        let m = resolve_model(PromptId::ArticleSignalCandidate, None, &cfg);
+        let m = resolve_model(PromptId::ArticleSignalCandidate, &cfg);
         assert_eq!(m.model_name(), "gpt-signal");
-    }
-
-    #[test]
-    fn briefing_stream_ids_resolve_to_briefing_model() {
-        let mut cfg = test_llm_config();
-        cfg.default_model = ModelId::new(ProviderKind::OpenAi, "gpt-default");
-        cfg.briefing_model = Some(ModelId::new(ProviderKind::OpenAi, "gpt-briefing"));
-
-        for id in [
-            PromptId::BriefingExecutiveSummary,
-            PromptId::BriefingNextItem,
-        ] {
-            let model = resolve_model(id, None, &cfg);
-            assert_eq!(model.model_name(), "gpt-briefing");
-        }
     }
 
     #[test]

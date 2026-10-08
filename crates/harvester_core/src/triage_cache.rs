@@ -1,9 +1,8 @@
 use crate::cache_utils::model_ids_compatible;
 use crate::context_hash;
-use crate::summary_cache::DEFAULT_CACHE_CAPACITY;
 use crate::triage::ArticleTriageResult;
+use crate::ResultStore;
 use chrono::Utc;
-use engine_logging::engine_info;
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -78,36 +77,137 @@ pub struct TriageCacheEntry {
 }
 
 /// In-memory cache for article triage results.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TriageCache {
-    entries: HashMap<TriageCacheKey, TriageCacheEntry>,
+    entries: ResultStore<TriageCacheKey, TriageCacheEntry>,
+    #[serde(skip)]
+    aliases: HashMap<String, Vec<TriageCacheAlias>>,
+}
+
+#[derive(Debug, Clone)]
+struct TriageCacheAlias {
+    key: TriageCacheKey,
+    priority: u8,
+}
+
+impl PartialEq for TriageCache {
+    fn eq(&self, other: &Self) -> bool {
+        self.entries == other.entries
+    }
+}
+
+impl Eq for TriageCache {}
+
+impl<'de> Deserialize<'de> for TriageCache {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Wire {
+            entries: ResultStore<TriageCacheKey, TriageCacheEntry>,
+        }
+        let mut cache = Self {
+            entries: Wire::deserialize(deserializer)?.entries,
+            aliases: HashMap::new(),
+        };
+        cache.rebuild_alias_index();
+        Ok(cache)
+    }
 }
 
 impl TriageCache {
     pub fn new() -> Self {
         Self {
-            entries: HashMap::new(),
+            entries: ResultStore::new(),
+            aliases: HashMap::new(),
         }
     }
 
-    pub fn lookup(&self, key: &TriageCacheKey) -> Option<&ArticleTriageResult> {
-        if let Some(entry) = self.entries.get(key) {
-            return Some(&entry.result);
+    /// Returns both the result and its stored key so consumers retain provenance
+    /// when a compatible model alias satisfies the lookup.
+    pub fn lookup<'a>(
+        &'a self,
+        key: &TriageCacheKey,
+    ) -> Option<(&'a TriageCacheKey, &'a ArticleTriageResult)> {
+        if let Some((stored_key, entry)) = self.entries.get_key_value(key) {
+            return Some((stored_key, &entry.result));
         }
-        self.entries.iter().find_map(|(stored_key, entry)| {
-            let model_match = model_ids_compatible(&stored_key.model_id, &key.model_id)
-                || model_ids_compatible(&key.model_id, &stored_key.model_id);
-            if stored_key.content_hash == key.content_hash
-                && stored_key.prompt_id == key.prompt_id
-                && stored_key.prompt_version == key.prompt_version
-                && stored_key.context_hash == key.context_hash
-                && model_match
-            {
-                Some(&entry.result)
-            } else {
-                None
-            }
-        })
+        self.lookup_current_key_parts(
+            &key.content_hash,
+            key.prompt_id,
+            key.prompt_version,
+            &key.model_id,
+            &key.context_hash,
+        )
+    }
+
+    /// Look up a current metadata key without allocating an owned cache-key tuple for each
+    /// article. Exact model matches retain the same precedence as `lookup`; compatible model
+    /// aliases retain their insertion order within the matching prompt/version/context group.
+    pub(crate) fn lookup_current_key_parts(
+        &self,
+        content_hash: &str,
+        prompt_id: PromptId,
+        prompt_version: PromptVersion,
+        model_id: &str,
+        context_hash: &str,
+    ) -> Option<(&TriageCacheKey, &ArticleTriageResult)> {
+        let alias = self.current_alias(
+            content_hash,
+            prompt_id,
+            prompt_version,
+            model_id,
+            context_hash,
+        )?;
+        let (stored_key, entry) = self.entries.get_key_value(&alias.key)?;
+        Some((stored_key, &entry.result))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn lookup_current_priority_parts(
+        &self,
+        content_hash: &str,
+        prompt_id: PromptId,
+        prompt_version: PromptVersion,
+        model_id: &str,
+        context_hash: &str,
+    ) -> Option<u8> {
+        self.current_alias(
+            content_hash,
+            prompt_id,
+            prompt_version,
+            model_id,
+            context_hash,
+        )
+        .map(|alias| alias.priority)
+    }
+
+    fn current_alias(
+        &self,
+        content_hash: &str,
+        prompt_id: PromptId,
+        prompt_version: PromptVersion,
+        model_id: &str,
+        context_hash: &str,
+    ) -> Option<&TriageCacheAlias> {
+        let candidates = self.aliases.get(content_hash)?;
+        let matches_metadata = |candidate: &&TriageCacheAlias| {
+            candidate.key.prompt_id == prompt_id
+                && candidate.key.prompt_version == prompt_version
+                && candidate.key.context_hash == context_hash
+        };
+        let exact = candidates
+            .iter()
+            .filter(matches_metadata)
+            .find(|candidate| candidate.key.model_id == model_id);
+        let candidate = exact.or_else(|| {
+            candidates
+                .iter()
+                .filter(matches_metadata)
+                .find(|candidate| {
+                    model_ids_compatible(&candidate.key.model_id, model_id)
+                        || model_ids_compatible(model_id, &candidate.key.model_id)
+                })
+        })?;
+        Some(candidate)
     }
 
     pub fn insert(&mut self, key: TriageCacheKey, result: ArticleTriageResult) {
@@ -115,27 +215,41 @@ impl TriageCache {
             result,
             created_at_utc: Utc::now().to_rfc3339(),
         };
-        self.insert_entry(key, entry);
+        self.insert_entry(key, entry)
     }
 
     pub fn insert_entry(&mut self, key: TriageCacheKey, entry: TriageCacheEntry) {
+        let priority = entry.result.priority;
+        if self.entries.contains_key(&key) {
+            if let Some(alias) = self
+                .aliases
+                .get_mut(&key.content_hash)
+                .and_then(|candidates| candidates.iter_mut().find(|candidate| candidate.key == key))
+            {
+                alias.priority = priority;
+            }
+        } else {
+            self.aliases
+                .entry(key.content_hash.clone())
+                .or_default()
+                .push(TriageCacheAlias {
+                    key: key.clone(),
+                    priority,
+                });
+        }
         self.entries.insert(key, entry);
-        self.enforce_capacity();
     }
 
-    fn enforce_capacity(&mut self) {
-        if self.entries.len() <= DEFAULT_CACHE_CAPACITY {
-            return;
-        }
-        let before = self.entries.len();
-        self.evict_to_limit(DEFAULT_CACHE_CAPACITY);
-        let evicted = before - self.entries.len();
-        if evicted > 0 {
-            engine_info!(
-                "[triage-cache] Evicted {} oldest entries (capacity: {})",
-                evicted,
-                DEFAULT_CACHE_CAPACITY
-            );
+    pub(crate) fn rebuild_alias_index(&mut self) {
+        self.aliases.clear();
+        for (key, entry) in &self.entries {
+            self.aliases
+                .entry(key.content_hash.clone())
+                .or_default()
+                .push(TriageCacheAlias {
+                    key: key.clone(),
+                    priority: entry.result.priority,
+                });
         }
     }
 
@@ -149,22 +263,6 @@ impl TriageCache {
 
     pub fn iter(&self) -> impl Iterator<Item = (&TriageCacheKey, &TriageCacheEntry)> {
         self.entries.iter()
-    }
-
-    fn evict_to_limit(&mut self, limit: usize) {
-        if self.entries.len() <= limit {
-            return;
-        }
-        let mut entries: Vec<_> = self
-            .entries
-            .iter()
-            .map(|(k, v)| (k.clone(), v.created_at_utc.clone()))
-            .collect();
-        entries.sort_by(|a, b| a.1.cmp(&b.1));
-        let to_remove = self.entries.len() - limit;
-        for (key, _) in entries.iter().take(to_remove) {
-            self.entries.remove(key);
-        }
     }
 }
 
@@ -217,7 +315,7 @@ mod tests {
         )
         .unwrap();
         cache.insert(key.clone(), sample_result());
-        let retrieved = cache.lookup(&key).unwrap();
+        let (_, retrieved) = cache.lookup(&key).unwrap();
         assert_eq!(retrieved.category, "cat");
     }
 
@@ -244,7 +342,99 @@ mod tests {
         let stored_key = build_key("hash", TEST_MODEL_ID, &context_hash);
         cache.insert(stored_key, sample_result());
         let lookup_key = build_key("hash", TEST_MODEL_VARIANT_ID, &context_hash);
-        assert!(cache.lookup(&lookup_key).is_some());
+        let (stored_key, _) = cache.lookup(&lookup_key).expect("compatible cache hit");
+        assert_eq!(stored_key.model_id, TEST_MODEL_ID);
+        assert_eq!(
+            cache.lookup_current_priority_parts(
+                "hash",
+                PromptId::ArticleTriage,
+                1,
+                TEST_MODEL_VARIANT_ID,
+                &context_hash,
+            ),
+            Some(sample_result().priority)
+        );
+    }
+
+    #[test]
+    fn current_priority_index_tracks_cache_writes_hydration_and_metadata() {
+        let context_hash = "triage-context";
+        let key = build_key("hash", TEST_MODEL_ID, context_hash);
+        let mut cache = TriageCache::new();
+
+        let mut result = sample_result();
+        result.priority = 2;
+        cache.insert_entry(
+            key.clone(),
+            TriageCacheEntry {
+                result,
+                created_at_utc: "2026-09-25T12:00:00Z".into(),
+            },
+        );
+        assert_eq!(
+            cache.lookup_current_priority_parts(
+                "hash",
+                PromptId::ArticleTriage,
+                1,
+                TEST_MODEL_ID,
+                context_hash,
+            ),
+            cache.lookup(&key).map(|(_, result)| result.priority)
+        );
+
+        let mut replacement = sample_result();
+        replacement.priority = 5;
+        cache.insert_entry(
+            key.clone(),
+            TriageCacheEntry {
+                result: replacement,
+                created_at_utc: "2026-09-25T12:01:00Z".into(),
+            },
+        );
+        assert_eq!(
+            cache.lookup_current_priority_parts(
+                "hash",
+                PromptId::ArticleTriage,
+                1,
+                TEST_MODEL_ID,
+                context_hash,
+            ),
+            cache.lookup(&key).map(|(_, result)| result.priority)
+        );
+
+        let mut hydrated = cache.clone();
+        hydrated.aliases.clear();
+        hydrated.rebuild_alias_index();
+        assert_eq!(
+            hydrated.lookup_current_priority_parts(
+                "hash",
+                PromptId::ArticleTriage,
+                1,
+                TEST_MODEL_ID,
+                context_hash,
+            ),
+            hydrated.lookup(&key).map(|(_, result)| result.priority)
+        );
+        assert_eq!(
+            hydrated.lookup_current_priority_parts(
+                "hash",
+                PromptId::ArticleTriage,
+                2,
+                TEST_MODEL_ID,
+                context_hash,
+            ),
+            None
+        );
+        assert_eq!(
+            hydrated.lookup_current_priority_parts(
+                "hash",
+                PromptId::ArticleTriage,
+                1,
+                TEST_MODEL_ID,
+                "changed-context",
+            ),
+            None
+        );
     }
 
     #[test]
@@ -291,26 +481,5 @@ mod tests {
         )
         .unwrap();
         assert!(cache.lookup(&miss_key).is_none());
-    }
-
-    #[test]
-    fn capacity_guard_evicts_oldest_entry() {
-        let mut cache = TriageCache::new();
-        let context = vec![("k".to_string(), "v".to_string())];
-        for i in 0..=DEFAULT_CACHE_CAPACITY {
-            let key = TriageCacheKey::try_new(
-                &format!("hash-{i}"),
-                PromptId::ArticleTriage,
-                Some(1),
-                Some("model"),
-                &context,
-            )
-            .unwrap();
-            cache.insert(key.clone(), sample_result());
-            if i == DEFAULT_CACHE_CAPACITY {
-                assert_eq!(cache.len(), DEFAULT_CACHE_CAPACITY);
-            }
-        }
-        assert_eq!(cache.len(), DEFAULT_CACHE_CAPACITY);
     }
 }

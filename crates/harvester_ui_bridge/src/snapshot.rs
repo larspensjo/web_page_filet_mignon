@@ -5,10 +5,7 @@ use harvester_core::AppViewModel;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum BodyKey {
-    Preview,
-    TriageMarkdown,
     SummaryMarkdown,
-    PollStatsMarkdown,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BodyRef {
@@ -61,29 +58,11 @@ pub fn project(view: &AppViewModel) -> (ProjectedSnapshot, BodyTable) {
     let mut value = serde_json::to_value(view)
         .expect("AppViewModel serialization is an IPC contract and must not fail");
     let mut bodies = BodyTable::new();
-    remove_pointer(&mut value, "/jobs");
-    remove_pointer(&mut value, "/left_pane/prompt_lab");
-    remove_pointer(&mut value, "/left_pane/visible_jobs_after_filter");
-    remove_pointer(&mut value, "/briefing_preview");
-    remove_pointer(&mut value, "/right_pane/briefing_markdown");
-    replace_body(&mut value, &mut bodies, "/preview_text", BodyKey::Preview);
-    replace_body(
-        &mut value,
-        &mut bodies,
-        "/right_pane/triage_markdown",
-        BodyKey::TriageMarkdown,
-    );
     replace_body(
         &mut value,
         &mut bodies,
         "/right_pane/summary_markdown",
         BodyKey::SummaryMarkdown,
-    );
-    replace_body(
-        &mut value,
-        &mut bodies,
-        "/right_pane/poll_stats_markdown",
-        BodyKey::PollStatsMarkdown,
     );
     (
         ProjectedSnapshot {
@@ -92,23 +71,6 @@ pub fn project(view: &AppViewModel) -> (ProjectedSnapshot, BodyTable) {
         },
         bodies,
     )
-}
-
-fn remove_pointer(value: &mut serde_json::Value, pointer: &str) {
-    let (parent, key) = pointer
-        .rsplit_once('/')
-        .expect("projection pointers always name a field");
-    let parent = if parent.is_empty() {
-        value
-    } else {
-        value
-            .pointer_mut(parent)
-            .expect("AppViewModel IPC projection pointer must exist")
-    };
-    parent
-        .as_object_mut()
-        .expect("AppViewModel IPC projection parent must be an object")
-        .remove(key);
 }
 
 fn replace_body(value: &mut serde_json::Value, table: &mut BodyTable, pointer: &str, key: BodyKey) {
@@ -145,41 +107,14 @@ pub(crate) fn hash(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harvester_core::{AppViewModel, JobOrigin, JobResultKind, JobRowView, Stage};
+    use harvester_core::AppViewModel;
     use std::collections::BTreeSet;
 
     #[test]
     fn project_preserves_the_full_view_except_for_the_explicit_contract_paths() {
         let view = AppViewModel {
-            jobs: vec![JobRowView {
-                job_id: 1,
-                url: "https://example.invalid/job".to_string(),
-                stage: Stage::Done,
-                outcome: Some(JobResultKind::Success),
-                tokens: None,
-                bytes: None,
-                link_count: 0,
-                downloaded_link_count: 0,
-                links: Vec::new(),
-                origin: JobOrigin::Direct,
-                triage_annotation: None,
-                has_summary: false,
-                summary_title: None,
-                summary_tokens: None,
-                filter_status: None,
-                has_analysis: false,
-                is_since_checkpoint: true,
-            }],
-            left_pane: harvester_core::LeftPaneView {
-                visible_jobs_after_filter: vec![1],
-                ..Default::default()
-            },
-            preview_text: Some("preview".to_string()),
             right_pane: harvester_core::RightPaneView {
-                triage_markdown: Some("triage".to_string()),
                 summary_markdown: Some("summary".to_string()),
-                poll_stats_markdown: Some("stats".to_string()),
-                ..Default::default()
             },
             ..Default::default()
         };
@@ -188,22 +123,11 @@ mod tests {
         let envelope = projected.with_generation(42);
         assert_eq!(
             table.keys().copied().collect::<Vec<_>>(),
-            vec![
-                BodyKey::Preview,
-                BodyKey::TriageMarkdown,
-                BodyKey::SummaryMarkdown,
-                BodyKey::PollStatsMarkdown
-            ]
+            vec![BodyKey::SummaryMarkdown,]
         );
         let raw_paths = value_paths(&raw);
         let envelope_paths = value_paths(&envelope.view);
-        let stripped_roots = [
-            "/jobs",
-            "/left_pane/prompt_lab",
-            "/left_pane/visible_jobs_after_filter",
-            "/briefing_preview",
-            "/right_pane/briefing_markdown",
-        ];
+        let stripped_roots: [&str; 0] = [];
         let expected_removed = raw_paths
             .iter()
             .filter(|path| {
@@ -221,12 +145,7 @@ mod tests {
             expected_removed
         );
 
-        let replaced = BTreeSet::from([
-            "/preview_text".to_string(),
-            "/right_pane/triage_markdown".to_string(),
-            "/right_pane/summary_markdown".to_string(),
-            "/right_pane/poll_stats_markdown".to_string(),
-        ]);
+        let replaced = BTreeSet::from(["/right_pane/summary_markdown".to_string()]);
         let raw_leaf_paths = leaf_paths(&raw);
         let changed = raw_leaf_paths
             .iter()
@@ -298,5 +217,74 @@ mod tests {
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod desktop_shape_tests {
+    #[test]
+    fn desktop_snapshot_pins_only_rendered_fields() {
+        let (snapshot, _) = super::project(&harvester_core::AppViewModel::default());
+        let actual = snapshot
+            .view
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        let expected = [
+            "job_count",
+            "desktop_job_list",
+            "last_paste_stats",
+            "archive_meter",
+            "archive_partial_coverage",
+            "stop_finish_button",
+            "signal_candidate_rows",
+            "ai_unavailable_message",
+            "run_progress",
+            "archive_enabled",
+            "run_state",
+            "run_completion_notice",
+            "run_enabled",
+            "resume_enabled",
+            "resume_disabled_reason",
+            "unfinished_work",
+            "reprocess_notice",
+            "checkpoint_status_message",
+            "llm_quota",
+            "right_pane",
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(actual, expected);
+        assert_eq!(actual.len(), 20);
+        assert_eq!(
+            snapshot.view["archive_meter"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<_>>(),
+            [
+                "selected_count",
+                "target",
+                "token_estimate",
+                "unsettled_count",
+                "status"
+            ]
+            .into_iter()
+            .collect()
+        );
+        assert_eq!(
+            snapshot.view["archive_meter"],
+            serde_json::json!({
+                "selected_count": 0, "target": 150, "token_estimate": 0,
+                "unsettled_count": 0, "status": "Loading"
+            })
+        );
+        assert_eq!(
+            snapshot.view["right_pane"],
+            serde_json::json!({"summary_markdown": null})
+        );
     }
 }

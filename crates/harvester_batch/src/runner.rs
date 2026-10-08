@@ -1,15 +1,12 @@
-#[cfg(test)]
-use crate::batch_coordinator::BatchPeek;
 use crate::cli::{Args, CheckpointCommand};
-use crate::progress::{BatchDisplayPhase, BatchRunBaseline};
 use chrono::Utc;
 use crossterm::{cursor::Show, QueueableCommand};
 use engine_logging::{engine_info, engine_warn};
-use harvester_core::{BatchObservation, Msg};
+use harvester_core::{AppState, BatchObservation, Msg};
 use harvester_engine::llm::{ModelId, ProviderKind, OPENAI_MODEL_GPT_4O_MINI};
 use harvester_io::{
     acquire_lock, host_bootstrap::HostLlmDefaults, load_briefing_checkpoint, load_sources,
-    persist_completed_jobs, save_blacklist, save_briefing_checkpoint, LockIdentity, RuntimePaths,
+    save_blacklist, save_briefing_checkpoint, RuntimePaths, COMMAND_LINE_LOCK_IDENTITY,
 };
 use std::io::{IsTerminal, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,20 +14,10 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-mod batch_runtime;
 mod bootstrap;
 mod dispatch_loop;
-mod drain_control;
-mod dry_run;
 mod live_progress;
 mod reporting;
-
-const BATCH_LOCK_IDENTITY: LockIdentity = LockIdentity {
-    filename: ".harvester_batch.lock",
-    log_tag: "[batch-lock]",
-    actor_description: "batch run",
-    force_unlock_hint: Some("Use --force-unlock to override."),
-};
 
 pub(crate) const BATCH_MISSING_API_KEY_WARNING: &str =
     "[batch] OPENAI_API_KEY not set; AI triage/summary features disabled";
@@ -44,34 +31,21 @@ pub(crate) fn batch_host_llm_defaults() -> HostLlmDefaults {
     }
 }
 
+pub(crate) use bootstrap::{apply_llm_availability, apply_signal_candidate_selection_settings};
+use dispatch_loop::prepare_startup_window;
 #[cfg(test)]
 use dispatch_loop::run_dispatch_loop;
+#[cfg(test)]
 use dispatch_loop::run_dispatch_loop_with_tick_interval;
 pub(crate) use dispatch_loop::{
-    maybe_dispatch_batch_ai_orchestration, should_log_batch_msg, summarize_batch_msg, CycleOutcome,
-    DispatchLoopOptions, MAX_DISPATCH_INBOX_BATCH,
+    should_log_batch_msg, summarize_batch_msg, CycleOutcome, DispatchLoopOptions,
+    MAX_DISPATCH_INBOX_BATCH,
 };
-use dry_run::run_dry_run;
-
-use batch_runtime::collect_and_rearm_batch_cycle;
-#[cfg(test)]
-pub(crate) use batch_runtime::persist_batch_replay_records;
-use batch_runtime::remove_collected_with_persisted_cache_confirmation;
-pub(crate) use bootstrap::{
-    apply_signal_candidate_selection_settings, is_ai_orchestration_enabled,
-};
-#[cfg(test)]
-use drain_control::{
-    batch_drain_made_progress, decide_batch_wait, should_exit_batch_drain_after_no_progress,
-    BatchDrainSnapshot, BatchWaitDecision,
-};
-use drain_control::{evaluate_batch_drain, DrainControl, DrainControlState};
 
 use live_progress::LiveBatchProgress;
-pub(crate) use reporting::microdollars_to_display;
+pub(crate) use reporting::CycleStartWorkReporter;
 use reporting::{
-    format_awaiting_batch_line, format_drain_summary, format_optional_cycle_diagnostics,
-    format_startup_notice, print_final_summary, print_poll_stats, CycleCounts,
+    format_startup_notice, print_final_summary, print_poll_stats, CycleCounts, PollSummaryReporter,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -85,14 +59,6 @@ struct CycleCounterBaseline {
     summary_failed: usize,
     imports_completed: usize,
     imports_failed: usize,
-}
-
-fn batch_mode_label(batch_api_enabled: bool, drain: bool) -> &'static str {
-    match (batch_api_enabled, drain) {
-        (_, true) => "drain",
-        (true, false) => "batch-api",
-        (false, false) => "recurring",
-    }
 }
 
 impl CycleCounterBaseline {
@@ -127,25 +93,6 @@ impl CycleCounterBaseline {
     }
 }
 
-fn should_stop_after_cycle(single_shot: bool, shutdown_requested: bool) -> bool {
-    shutdown_requested || single_shot
-}
-
-/// A collect-only cycle skips source polling and only advances work the batch
-/// manifest already owns. Batch API mode polls once and then collects; drain
-/// mode never polls, so its very first cycle is already collect-only.
-fn is_collect_only_cycle(batch_api_enabled: bool, drain: bool, cycle_count: usize) -> bool {
-    batch_api_enabled && (drain || cycle_count > 1)
-}
-
-fn require_new_jobs_since(
-    single_shot: bool,
-    batch_api: bool,
-    cycle_jobs_total_baseline: usize,
-) -> Option<usize> {
-    (single_shot && !batch_api).then_some(cycle_jobs_total_baseline)
-}
-
 pub(crate) fn exit_code_with_shutdown(default_exit_code: i32, shutdown_requested: bool) -> i32 {
     if shutdown_requested {
         130
@@ -162,21 +109,15 @@ fn determine_exit_code(total_failure_cycles: usize) -> i32 {
     }
 }
 
-/// Run the batch orchestration loop.
-///
-/// Executes repeated poll cycles until shutdown signal received or error occurs.
-/// Returns exit code: 0 (success), 1 (partial failure), or 2 (fatal error via Err).
-///
-/// # Arguments
-/// * `args` - Parsed command-line arguments specifying paths, intervals, and flags
-///
-/// # Behavior
-/// - Acquires exclusive lock on output directory
-/// - Polls sources at configured intervals
-/// - Persists state after each cycle
-/// - Handles SIGINT/SIGTERM gracefully
-/// - Dry-run mode: single poll, read-only, no persistence
+/// Run one poll, download and synchronous processing cycle, then exit.
 pub fn run(args: Args) -> Result<i32, String> {
+    engine_info!("[batch] Starting harvester_batch");
+    engine_info!("[batch] output_dir: {:?}", args.output_dir);
+    engine_info!("[batch] sources: {:?}", args.sources_path());
+    engine_info!(
+        "[batch] signal_candidate_threshold: {:?}",
+        args.signal_candidate_threshold
+    );
     engine_info!("[batch] Initializing runtime paths");
 
     let sources_path = args.sources_path();
@@ -195,8 +136,11 @@ pub fn run(args: Args) -> Result<i32, String> {
             return Ok(0);
         }
         Some(cmd) => {
-            let _lock_guard =
-                acquire_lock(&paths.output_dir, BATCH_LOCK_IDENTITY, args.force_unlock)?;
+            let _lock_guard = acquire_lock(
+                &paths.output_dir,
+                COMMAND_LINE_LOCK_IDENTITY,
+                args.force_unlock,
+            )?;
             execute_checkpoint_write(cmd, &paths)?;
             return Ok(0);
         }
@@ -204,18 +148,17 @@ pub fn run(args: Args) -> Result<i32, String> {
     }
 
     engine_info!("[batch] Acquiring lock");
-    let _lock_guard = acquire_lock(&paths.output_dir, BATCH_LOCK_IDENTITY, args.force_unlock)?;
+    let _lock_guard = acquire_lock(
+        &paths.output_dir,
+        COMMAND_LINE_LOCK_IDENTITY,
+        args.force_unlock,
+    )?;
 
     // Install signal handler immediately after lock acquisition so Ctrl-C always
     // reaches the shared graceful-shutdown path for every execution mode.
     let shutdown_flag = Arc::new(AtomicBool::new(false));
     let interactive = std::io::stdout().is_terminal() && std::io::stderr().is_terminal();
     install_signal_handler(Arc::clone(&shutdown_flag), interactive);
-
-    if args.dry_run {
-        engine_info!("[batch] Dry-run mode: single poll only");
-        return run_dry_run(&paths, &args, &shutdown_flag);
-    }
 
     // Import mode: branch before source loading
     if let Some(import_dir) = &args.import_saved_web_dir {
@@ -228,322 +171,265 @@ pub fn run(args: Args) -> Result<i32, String> {
         );
     }
 
-    if args.refresh_stale_summaries_limit.is_some() {
-        engine_info!("[batch] Summary refresh mode enabled");
-        return crate::summary_refresh::run_refresh_stale_summaries_mode(
-            &paths,
-            &args,
-            &shutdown_flag,
-        );
-    }
-
     // Validate source configuration
     engine_info!(
         "[batch] Loading source registry from {:?}",
         paths.sources_path
     );
     let source_registry = load_sources(&paths.sources_path);
+    engine_info!(
+        "[batch] Source registry entries loaded={}",
+        source_registry.sources.len()
+    );
 
-    // Drain never polls, so an unsupported source must not be able to abort a
-    // collection of work that has already been paid for.
-    if !args.allow_unsupported_sources && !args.drain {
-        let unsupported: Vec<_> = source_registry
-            .sources
-            .iter()
-            .filter_map(|s| match &s.source_type {
-                harvester_engine::SourceType::Script { .. } => Some(s.id.to_string()),
-                _ => None,
-            })
-            .collect();
-
-        if !unsupported.is_empty() {
-            return Err(format!(
-                "Unsupported source types detected: {:?}. Use --allow-unsupported-sources to override.",
-                unsupported
-            ));
-        }
-    } else {
-        let unsupported_count = source_registry
-            .sources
-            .iter()
-            .filter(|s| matches!(&s.source_type, harvester_engine::SourceType::Script { .. }))
-            .count();
-        if unsupported_count > 0 {
-            engine_warn!(
-                "[batch] Running with {} unsupported source(s) (Script type)",
-                unsupported_count
-            );
-        }
-    }
-
-    // Create message channel
     let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
-
-    // Hydration takes seconds on a large corpus; say so instead of sitting
-    // silent until the dashboard exists. Non-interactive runs keep their
-    // existing "[batch] started" line below.
     if interactive {
-        println!(
-            "{}",
-            format_startup_notice(batch_mode_label(args.batch_api_enabled(), args.drain))
-        );
+        println!("{}", format_startup_notice("one cycle"));
     }
-
-    let (mut state, effect_runner, mut batch_runtime, enable_ai_orchestration) =
-        bootstrap::prepare_runtime(&paths, &args, msg_tx.clone())?;
-
-    let run_baseline = BatchRunBaseline::from_observation(&state.batch_observation());
+    let (mut state, effect_runner) = bootstrap::prepare_runtime(&paths, &args, msg_tx.clone())?;
+    prepare_startup_window(&mut state, &msg_rx, &effect_runner)?;
     let run_started_at = Instant::now();
-    let mut progress = LiveBatchProgress::new(run_baseline, interactive, args.ascii_progress);
-    if !interactive {
-        println!(
-            "[batch] started mode={}",
-            batch_mode_label(args.batch_api_enabled(), args.drain)
-        );
-    }
-
-    // Ordinary mode polls repeatedly. Batch API mode runs one intake cycle,
-    // then drains exactly that cycle's deferred work without polling again.
-    let poll_interval = Duration::from_secs((args.poll_interval * 60) as u64);
-    let mut cycle_count = 0;
-    let mut total_cycles = 0;
-    let mut total_failure_cycles = 0;
     let mut cycle_baseline = CycleCounterBaseline::from_observation(&state.batch_observation());
-    let mut total_new_articles = 0usize;
-    let mut total_triaged = 0usize;
-    let mut total_summarized = 0usize;
-    let mut drain_control_state = DrainControlState::default();
-
-    'cycles: loop {
-        cycle_count += 1;
-        total_cycles += 1;
-        let collect_only_cycle =
-            is_collect_only_cycle(args.batch_api_enabled(), args.drain, cycle_count);
-        progress.record_pass(collect_only_cycle);
-        if collect_only_cycle {
-            engine_info!(
-                "[batch] === Starting collect-only cycle {} ===",
-                cycle_count
-            );
-        } else {
-            engine_info!("[batch] === Starting cycle {} ===", cycle_count);
-        }
-        let cycle_jobs_total_baseline = state.batch_observation().jobs_total;
-
-        if let Some(batch) = batch_runtime.as_mut() {
-            state = collect_and_rearm_batch_cycle(
-                state,
-                batch,
-                &paths,
-                &effect_runner,
-                &msg_tx,
-                &mut progress,
-            );
-        }
-
-        if !collect_only_cycle {
-            progress.clear_phase_override();
-            progress.paint(
-                &state,
-                batch_runtime
-                    .as_ref()
-                    .map_or(0, |batch| batch.realized_cost_microdollars),
-                true,
-            );
-            engine_info!("[batch] Dispatching poll sources");
-            msg_tx
-                .send(Msg::PollSourcesClicked)
-                .map_err(|e| format!("Failed to dispatch poll: {}", e))?;
-        }
-
-        // Run dispatch loop until settled
-        let outcome = run_dispatch_loop_with_tick_interval(
-            &mut state,
-            &msg_tx,
-            &msg_rx,
-            &effect_runner,
-            &shutdown_flag,
-            DispatchLoopOptions {
-                enable_ai_orchestration,
-                require_new_jobs_since: require_new_jobs_since(
-                    args.single_shot,
-                    args.batch_api_enabled(),
-                    cycle_jobs_total_baseline,
-                ),
-                tick_interval: Duration::from_millis(75),
-            },
-            Some(&mut progress),
-            batch_runtime.as_mut(),
-        )?;
-
-        // Track outcome statistics
-        match outcome {
-            CycleOutcome::Success => {}
-            CycleOutcome::PartialFailure => {}
-            CycleOutcome::TotalFailure => total_failure_cycles += 1,
-        }
-
-        // Print cycle summary
-        let obs = state.batch_observation();
-        let cycle_counts = cycle_baseline.measure_cycle_and_advance(&obs);
-        total_new_articles += cycle_counts.new_jobs;
-        total_triaged += cycle_counts.triage_completed;
-        total_summarized += cycle_counts.summary_completed;
-        let current_cost = batch_runtime
-            .as_ref()
-            .map_or(0, |batch| batch.realized_cost_microdollars);
-        let diagnostics = format_optional_cycle_diagnostics(
-            args.verbose_progress,
-            cycle_count == 1,
-            !collect_only_cycle,
-            cycle_count,
-            &outcome,
-            &cycle_counts,
-            current_cost,
-            &obs,
-            &state.llm_usage_rows(),
-            progress.last_provider_check_local,
-        );
-        if !diagnostics.is_empty() {
-            progress.suspend_for_output();
-            for line in diagnostics {
-                println!("{line}");
-            }
-            progress.resume(&state, current_cost);
-        }
-
-        // Persist state
-        engine_info!("[batch] Persisting state");
-        progress.set_phase(BatchDisplayPhase::Persisting);
-        progress.paint(&state, current_cost, true);
-        let completed_jobs = state.completed_jobs_snapshot();
-        persist_completed_jobs(&paths.state_path, &completed_jobs);
-        if let Err(err) = save_blacklist(&paths.blacklist_path, state.blacklist()) {
-            engine_warn!("[batch] failed to save blacklist: {}", err);
-        }
-
-        let shutdown_requested = shutdown_flag.load(Ordering::Relaxed);
-
-        // Drain collects whatever the provider has already finished and exits.
-        // It deliberately does not consult the reducer's deferred counters: a
-        // fresh drain process has no deferred work to begin with, because that
-        // state lives in memory rather than on disk. The manifest is the only
-        // durable record of what is still outstanding.
-        if args.drain {
-            // A drain has no next cycle to run the confirmation, so snapshots
-            // whose results already reached the caches are pruned here. Failure
-            // only retains them for the next run, so it is not fatal.
-            if let Some(batch) = batch_runtime.as_mut() {
-                if let Err(err) = remove_collected_with_persisted_cache_confirmation(batch, &paths)
-                {
-                    engine_warn!(
-                        "[batch-collect] persisted cache confirmation failed; retaining snapshots: {}",
-                        err
-                    );
-                }
-            }
-            let summary = format_drain_summary(
-                &batch_runtime
-                    .as_ref()
-                    .map(|batch| batch.coordinator.pending_manifest_batches())
-                    .unwrap_or_default(),
-            );
-            engine_info!("{}", summary);
-            progress.suspend_for_output();
-            println!("{summary}");
-            progress.resume(&state, current_cost);
-            break;
-        }
-
-        match evaluate_batch_drain(
-            args.batch_api_enabled(),
-            &obs,
-            &mut batch_runtime,
-            shutdown_flag.as_ref(),
-            &state,
-            &mut progress,
-            &mut drain_control_state,
-        ) {
-            DrainControl::ContinueCollectCycle => continue 'cycles,
-            DrainControl::Break => break,
-            DrainControl::Proceed => {}
-        }
-
-        // Check for shutdown signal or single-shot completion.
-        if should_stop_after_cycle(args.single_shot, shutdown_requested) {
-            if args.single_shot {
-                engine_info!("[batch] Single-shot mode completed one cycle; exiting");
-            }
-            if shutdown_requested {
-                engine_info!("[batch] Shutdown signal received, exiting");
-            }
-            break;
-        }
-
-        // Sleep interruptibly before the next ordinary polling cycle.
-        engine_info!(
-            "[batch] Sleeping for {} minutes before next cycle",
-            args.poll_interval
-        );
-        if sleep_interruptible(poll_interval, &shutdown_flag) {
-            engine_info!("[batch] Shutdown during sleep, exiting");
-            break;
-        }
+    let mut progress = LiveBatchProgress::new(interactive);
+    if !interactive {
+        println!("[batch] started mode=one-cycle");
     }
-
-    // Graceful shutdown
+    progress.paint(&state, state.llm_quota().usage.cost_microdollars, true);
+    let mut effect_sink = |effects| effect_runner.enqueue(effects);
+    let mut reducer_observer = |_: &str, _: Duration| {};
+    let mut cycle_counts = CycleCounts::default();
+    let mut cycle_outcome = CycleOutcome::Success;
+    let mut poll_summary = PollSummaryReporter::default();
+    execute_cycle_with_sink(
+        &mut state,
+        &paths,
+        &msg_tx,
+        &msg_rx,
+        &mut effect_sink,
+        &mut reducer_observer,
+        &shutdown_flag,
+        &mut progress,
+        |outcome, state, progress| {
+            cycle_outcome = outcome;
+            let obs = state.batch_observation();
+            cycle_counts = cycle_baseline.measure_cycle_and_advance(&obs);
+            if let Some(summary) = poll_summary.take(&obs.source_poll_stats) {
+                progress.suspend_for_output();
+                println!("{summary}");
+                progress.resume(state, state.llm_quota().usage.cost_microdollars);
+            }
+        },
+        None,
+    )?;
+    // Flush and stop the ordered persistence sinks before the final synchronous save.
     engine_info!("[batch] Graceful shutdown: draining effects and persisting final state");
+    let result_save_error = effect_runner.flush_results().err();
     drop(effect_runner);
     drop(msg_rx);
-
-    let completed_jobs = state.completed_jobs_snapshot();
-    persist_completed_jobs(&paths.state_path, &completed_jobs);
-    if let Err(err) = save_blacklist(&paths.blacklist_path, state.blacklist()) {
-        engine_warn!("[batch] failed to save blacklist on shutdown: {}", err);
-    }
-
-    let final_cost = batch_runtime
-        .as_ref()
-        .map_or(0, |batch| batch.realized_cost_microdollars);
-    progress.set_phase(if shutdown_flag.load(Ordering::Relaxed) {
-        BatchDisplayPhase::Interrupted
-    } else {
-        BatchDisplayPhase::Complete
-    });
-    progress.paint(&state, final_cost, true);
+    persist_final_cycle_state(&paths, &state, None);
+    progress.set_stopping(shutdown_flag.load(Ordering::Relaxed));
+    progress.paint(&state, state.llm_quota().usage.cost_microdollars, true);
     progress.suspend_for_output();
-
-    // Print final summary
     print_final_summary(
-        args.batch_api_enabled(),
-        total_cycles,
+        1,
         &state.batch_observation(),
-        total_new_articles,
-        total_triaged,
-        total_summarized,
+        cycle_counts.new_jobs,
+        cycle_counts.triage_completed,
+        cycle_counts.summary_completed,
         run_started_at.elapsed(),
-        final_cost,
     );
-    let final_obs = state.batch_observation();
-    print_poll_stats(&final_obs.source_poll_stats);
-    if args.verbose_progress {
-        if let Some(line) = format_awaiting_batch_line(
-            final_obs.triage_deferred,
-            final_obs.summary_deferred,
-            final_obs.signal_deferred,
-        ) {
-            println!("{line}");
-            println!("  Run again after the batches complete to collect results.");
-        }
-    }
     progress.finish();
-
     engine_info!("[batch] Shutdown complete");
-
     Ok(exit_code_with_shutdown(
-        determine_exit_code(total_failure_cycles),
+        if let Some(reason) = state
+            .result_store_failure()
+            .map(str::to_owned)
+            .or_else(|| result_save_error.map(|e| e.to_string()))
+        {
+            eprintln!("Final summary: AI features unavailable: {reason}");
+            1
+        } else {
+            determine_exit_code(usize::from(cycle_outcome == CycleOutcome::TotalFailure))
+        },
         shutdown_flag.load(Ordering::Relaxed),
     ))
+}
+
+/// Prepare the same hydrated batch state and startup window for a host that
+/// supplies its own effect sink. The sink runs on the host/effect boundary;
+/// reducer policy remains in `harvester_core`.
+pub fn prepare_cycle_state_with_effect_sink(
+    paths: &RuntimePaths,
+    args: &Args,
+    msg_rx: &mpsc::Receiver<Msg>,
+    effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
+    reducer_observer: &mut dyn FnMut(&str, Duration),
+) -> Result<AppState, String> {
+    let (hydrated_state, startup_effects) = bootstrap::hydrate_batch_state(paths, args);
+    let mut state = bootstrap::apply_llm_availability(
+        hydrated_state,
+        harvester_core::AiAvailability::Available,
+    );
+    if !startup_effects.is_empty() {
+        effect_sink(startup_effects);
+    }
+    dispatch_loop::prepare_startup_window_with_sink(
+        &mut state,
+        msg_rx,
+        effect_sink,
+        reducer_observer,
+    )?;
+    Ok(state)
+}
+
+/// Request and run one normal Full batch cycle through the production reducer
+/// dispatch loop, using the host-provided effect sink.
+#[allow(clippy::too_many_arguments)]
+pub fn run_single_cycle_with_effect_sink(
+    state: &mut AppState,
+    paths: &RuntimePaths,
+    msg_tx: &mpsc::Sender<Msg>,
+    msg_rx: &mpsc::Receiver<Msg>,
+    effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
+    reducer_observer: &mut dyn FnMut(&str, Duration),
+    file_write_observer: &harvester_io::FileWriteObserver,
+) -> Result<(), String> {
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    let started = Instant::now();
+    let mut progress = LiveBatchProgress::new(false);
+    println!("[batch] started mode=one-cycle");
+    progress.paint(state, state.llm_quota().usage.cost_microdollars, true);
+    execute_cycle_with_sink(
+        state,
+        paths,
+        msg_tx,
+        msg_rx,
+        effect_sink,
+        reducer_observer,
+        &shutdown_flag,
+        &mut progress,
+        |_, _, _| {},
+        Some(file_write_observer),
+    )?;
+    progress.paint(state, state.llm_quota().usage.cost_microdollars, true);
+    progress.suspend_for_output();
+    let obs = state.batch_observation();
+    print_final_summary(
+        1,
+        &obs,
+        obs.jobs_total,
+        obs.triage_completed,
+        obs.summary_completed,
+        started.elapsed(),
+    );
+    print_poll_stats(&obs.source_poll_stats);
+    progress.finish();
+    Ok(())
+}
+
+pub fn persist_final_cycle_state(
+    paths: &RuntimePaths,
+    state: &AppState,
+    observer: Option<&harvester_io::FileWriteObserver>,
+) {
+    persist_cycle_state(paths, state, observer);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_cycle_with_sink<F>(
+    state: &mut AppState,
+    paths: &RuntimePaths,
+    msg_tx: &mpsc::Sender<Msg>,
+    msg_rx: &mpsc::Receiver<Msg>,
+    effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
+    reducer_observer: &mut dyn FnMut(&str, Duration),
+    shutdown_flag: &Arc<AtomicBool>,
+    progress: &mut live_progress::LiveSystemBatchProgress,
+    after_dispatch: F,
+    file_write_observer: Option<&harvester_io::FileWriteObserver>,
+) -> Result<(), String>
+where
+    F: FnOnce(CycleOutcome, &AppState, &mut live_progress::LiveSystemBatchProgress),
+{
+    let outcome = dispatch_cycle_with_sink(
+        state,
+        msg_tx,
+        msg_rx,
+        effect_sink,
+        reducer_observer,
+        shutdown_flag,
+        Some(progress),
+    )?;
+    after_dispatch(outcome, state, progress);
+    // The reducer loop is the sole state owner. This checkpoint can race the
+    // debounced writer; final shutdown writes again after the runner stops.
+    engine_info!("[batch] Persisting state");
+    progress.paint(state, state.llm_quota().usage.cost_microdollars, true);
+    persist_cycle_state(paths, state, file_write_observer);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dispatch_cycle_with_sink(
+    state: &mut AppState,
+    msg_tx: &mpsc::Sender<Msg>,
+    msg_rx: &mpsc::Receiver<Msg>,
+    effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
+    reducer_observer: &mut dyn FnMut(&str, Duration),
+    shutdown_flag: &Arc<AtomicBool>,
+    progress: Option<&mut live_progress::LiveSystemBatchProgress>,
+) -> Result<CycleOutcome, String> {
+    {
+        msg_tx
+            .send(Msg::PipelineRunRequested {
+                scope: harvester_core::PipelineRunScope::Full,
+            })
+            .map_err(|error| format!("Failed to request full pipeline run: {error}"))?;
+    }
+    dispatch_loop::run_dispatch_loop_with_sink(
+        state,
+        msg_rx,
+        effect_sink,
+        reducer_observer,
+        shutdown_flag,
+        DispatchLoopOptions {
+            tick_interval: Duration::from_millis(75),
+            ..DispatchLoopOptions::default()
+        },
+        progress,
+    )
+}
+
+fn persist_cycle_state(
+    paths: &RuntimePaths,
+    state: &AppState,
+    observer: Option<&harvester_io::FileWriteObserver>,
+) {
+    let started = Instant::now();
+    let snapshot = harvester_core::PersistenceSnapshot::capture(state);
+    if let Err(error) = harvester_io::try_persist_runtime_state_with_pending(
+        &paths.state_path,
+        &snapshot.completed,
+        &snapshot.pending_intake,
+    ) {
+        engine_warn!(
+            "[batch] failed to save runtime state {}: {}",
+            paths.state_path.display(),
+            error
+        );
+    } else if let Some(observer) = observer {
+        if let Ok(metadata) = std::fs::metadata(&paths.state_path) {
+            observer(&paths.state_path, metadata.len(), started.elapsed());
+        }
+    }
+    let started = Instant::now();
+    if let Err(error) = save_blacklist(&paths.blacklist_path, state.blacklist()) {
+        engine_warn!("[batch] failed to save blacklist: {}", error);
+    } else if let (Some(observer), Ok(metadata)) =
+        (observer, std::fs::metadata(&paths.blacklist_path))
+    {
+        observer(&paths.blacklist_path, metadata.len(), started.elapsed());
+    }
 }
 
 /// Writes or clears the briefing checkpoint file.
@@ -569,25 +455,6 @@ fn execute_checkpoint_write(cmd: CheckpointCommand, paths: &RuntimePaths) -> Res
     }
 }
 
-/// Sleeps for the specified duration, checking shutdown flag periodically.
-/// Returns true if shutdown was requested during sleep.
-fn sleep_interruptible(duration: Duration, shutdown_flag: &Arc<AtomicBool>) -> bool {
-    let check_interval = Duration::from_millis(500);
-    let mut remaining = duration;
-
-    while remaining > Duration::ZERO {
-        if shutdown_flag.load(Ordering::Relaxed) {
-            return true;
-        }
-
-        let sleep_time = remaining.min(check_interval);
-        std::thread::sleep(sleep_time);
-        remaining = remaining.saturating_sub(sleep_time);
-    }
-
-    false
-}
-
 /// Installs a signal handler for SIGINT/SIGTERM.
 ///
 /// The first interrupt requests the runner's graceful shutdown path. The lock
@@ -598,7 +465,7 @@ fn install_signal_handler(shutdown_flag: Arc<AtomicBool>, interactive: bool) {
         if shutdown_flag.swap(true, Ordering::Relaxed) {
             eprintln!("harvester_batch: interrupted again — exiting immediately");
             // The process exits without unwinding on the second interrupt, so
-            // Drop cannot restore a cursor hidden by the dashboard.
+            // Drop cannot restore a cursor hidden by the progress block.
             let mut stdout = std::io::stdout();
             restore_cursor_before_immediate_exit(&mut stdout, interactive);
             std::process::exit(130);

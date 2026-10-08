@@ -1,38 +1,61 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use harvester_engine::llm::dto::SummaryEntities;
-use harvester_engine::llm::prompt::{PromptId, PromptTemplateOwned, PromptVersion};
-use harvester_engine::llm::types::ModelId;
+use harvester_engine::llm::prompt::{PromptId, PromptVersion};
+use harvester_engine::ArchiveDocAnnotations;
 use serde::{Deserialize, Serialize};
+
+/// The reducer-owned runtime projection written by the persistence worker.
+/// Capturing it while reducing keeps the host from reading state out of band.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PersistenceSnapshot {
+    pub completed: Vec<crate::SlimJobRecord>,
+    pub pending_intake: Vec<String>,
+    pub blacklist: crate::blacklist::BlacklistState,
+    pub fetch_time_recovery_done: bool,
+    pub job_list_mode: Option<crate::JobListMode>,
+    pub selected_article_url: Option<String>,
+}
+
+impl PersistenceSnapshot {
+    pub fn capture(state: &crate::AppState) -> Self {
+        Self {
+            completed: state.slim_completed_jobs_snapshot(),
+            pending_intake: state.pending_intake_urls().to_vec(),
+            blacklist: state.blacklist().clone(),
+            fetch_time_recovery_done: state.fetch_time_recovery_done,
+            job_list_mode: Some(state.job_list_mode()),
+            selected_article_url: state.remembered_article_url(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
+    LoadArticleLinks {
+        job_id: crate::JobId,
+        url: String,
+    },
+    StoreArticleLinks {
+        url: String,
+        links: Vec<harvester_engine::ExtractedLink>,
+    },
     EnqueueUrl {
         job_id: crate::JobId,
         url: String,
     },
-    LoadArticlesForBriefing {
-        ordered_urls: Vec<String>,
-        since_utc: Option<chrono::DateTime<chrono::Utc>>,
+    LoadProcessingConfiguration {
+        request_id: u64,
+        require_triage_context: bool,
     },
+    ResetCorpusScanIndex,
     LoadArticlesForTriage {
+        held: Vec<harvester_engine::HeldArticle>,
         request_id: u64,
         ordered_urls: Vec<String>,
         since_utc: Option<chrono::DateTime<chrono::Utc>>,
     },
     LoadPromptContexts,
-    SavePromptContextFile {
-        prompt_id: PromptId,
-        context_pairs: Vec<(String, String)>,
-    },
-    SavePromptTemplateFile {
-        prompt_id: PromptId,
-        system_template: String,
-        user_template: String,
-        description: String,
-        expected_format: String,
-    },
     LoadPromptTemplateFiles,
     LoadLlmMetadata,
     PollAllSources,
@@ -40,20 +63,16 @@ pub enum Effect {
         request_id: u64,
         prompt_id: PromptId,
         prompt_version: Option<PromptVersion>,
-        /// Per-run model override; `None` means use the stage/default model.
-        model_override: Option<ModelId>,
         input_content: String,
         context: Vec<(String, String)>,
-        template_override: Option<PromptTemplateOwned>,
         /// Extra key-value pairs inserted as individual template variables ({{key}}).
         /// NOT concatenated into the {{context}} block.
         extra_template_vars: Vec<(String, String)>,
     },
-    ResolvePromptLabInputFromUrl {
-        resolve_id: u64,
-        url: String,
+    SaveResults {
+        records: Vec<crate::SavedResult>,
     },
-    LoadPromptLabModelCatalog,
+    FlushResults,
     StartSession,
     StopFinish {
         policy: StopPolicy,
@@ -66,6 +85,8 @@ pub enum Effect {
         requested_checkpoint: Option<chrono::DateTime<chrono::Utc>>,
         use_summaries: bool,
         summaries: HashMap<String, String>,
+        annotations: HashMap<String, ArchiveDocAnnotations>,
+        priority_snapshot: HashMap<String, u8>,
     },
     OpenArchiveDialog {
         request_id: u64,
@@ -95,33 +116,8 @@ pub enum Effect {
         signal_candidate_scoring_total: u32,
         signal_candidate_token_estimates: crate::ArchiveTokenEstimates,
     },
-    DownloadLinkedPage {
-        job_id: crate::JobId,
-        link_index: u32,
-        url: String,
-    },
-    DeleteLinkedPage {
-        job_id: crate::JobId,
-        link_index: u32,
-        path: PathBuf,
-    },
-    PersistSummaryCache {
-        cache: crate::SummaryCache,
-    },
-    PersistSignalCandidateCache {
-        cache: crate::signal_candidate_cache::SignalCandidateCache,
-    },
     PersistSignalCandidateOverrides {
         overrides: std::collections::HashSet<crate::signal_candidate::OverrideKey>,
-    },
-    PersistTriageCache {
-        cache: crate::TriageCache,
-    },
-    /// Load briefing history from disk at startup.
-    LoadBriefingHistory,
-    /// Save briefing history to disk after a successful briefing.
-    SaveBriefingHistory {
-        entries: Vec<crate::briefing::BriefingHistoryEntry>,
     },
     /// Load the briefing time checkpoint from disk at startup.
     LoadBriefingCheckpoint,
@@ -134,18 +130,6 @@ pub enum Effect {
     OpenUrlInBrowser {
         url: String,
     },
-    /// Load the entity index from disk (full loading in Slice 3).
-    LoadEntityIndex,
-    /// Rebuild the entity index from scratch from the article archive (full implementation Slice 4).
-    RebuildEntityIndex,
-    /// Upsert one article's entity data into the entity index (full implementation Slice 3).
-    UpsertEntityIndexEntry {
-        url: String,
-        fetched_utc: Option<String>,
-        content_hash: Option<String>,
-        summary_entities: Option<SummaryEntities>,
-        themes: Option<Vec<String>>,
-    },
 
     // --- Import saved webpages ---
     /// Scan and import browser-saved .htm/.html files from `dir`.
@@ -154,15 +138,14 @@ pub enum Effect {
         dir: PathBuf,
         request_id: u64,
     },
-    /// Persist the window's outer dimensions to disk.
-    PersistWindowSize {
-        width: i32,
-        height: i32,
-    },
     /// Persist the Tauri desktop window's logical inner dimensions to disk.
     PersistDesktopWindowSize {
         width: i32,
         height: i32,
+    },
+    /// Persist the reducer-owned runtime projection through the effect runner.
+    PersistRuntimeState {
+        snapshot: PersistenceSnapshot,
     },
 }
 

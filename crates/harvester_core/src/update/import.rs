@@ -61,9 +61,3 @@ pub(super) fn handle_import_failed(
     state.import_session.failure_reason = Some(reason);
     Vec::new()
 }
-
-pub(super) fn handle_corpus_cleared(state: &mut AppState) -> Vec<Effect> {
-    engine_info!("[import-saved-web] corpus cleared");
-    state.import_session.clear();
-    Vec::new()
-}

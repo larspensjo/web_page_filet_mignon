@@ -1,7 +1,17 @@
 use crate::{AppState, Effect};
 use engine_logging::{engine_info, engine_warn};
+use harvester_engine::{archive_url_key, ArchiveDocAnnotations};
 
 pub(super) fn handle_archive_clicked(state: &mut AppState) -> Vec<Effect> {
+    if !state.export_available() {
+        engine_warn!(
+            "[archive-gate] action=open run_id={} run_state={:?}",
+            state.run_progress().map_or(0, |run| run.run_id),
+            state.run_state()
+        );
+        return Vec::new();
+    }
+    clear_export_unavailable_status(state);
     let request_id = state.allocate_next_archive_request_id();
     let corpus = state.archive_corpus(); // triage-only; pre-triage excluded
     let article_count = corpus.count();
@@ -22,21 +32,21 @@ pub(super) fn handle_archive_clicked(state: &mut AppState) -> Vec<Effect> {
     state.pin_archive_corpus(corpus);
     let since_utc = state.briefing_since_utc();
     state.pin_signal_candidate_selection(signal_candidate_snapshot.clone());
-    let signal_candidate_default = if matches!(state.triage().phase(), crate::TriagePhase::Complete)
-    {
+    let signal_candidate_default = {
         crate::signal_candidate::compute_dialog_default(
-            state.signal_candidate().completed_count(),
+            state.saved_signal_count(),
             state.signal_candidate().in_flight_count(),
             state.signal_candidate().failed_count(),
             signal_candidate_snapshot.selected_urls.len(),
         )
-    } else {
-        crate::signal_candidate::SignalCandidateDialogDefault::OffDisabled
     };
     let signal_candidate_count = signal_candidate_snapshot.selected_urls.len();
     let signal_candidate_scoring_done =
-        state.signal_candidate().completed_count() + state.signal_candidate().failed_count();
-    let signal_candidate_scoring_total = state.signal_candidate().enqueued_count();
+        state.saved_signal_count() + state.signal_candidate().failed_count();
+    let signal_candidate_scoring_total = state
+        .signal_candidate()
+        .enqueued_count()
+        .max(signal_candidate_scoring_done);
     vec![Effect::OpenArchiveDialog {
         request_id,
         article_count,
@@ -98,9 +108,22 @@ pub(super) fn handle_dialog_submitted(
     use_summaries: bool,
     use_signal_candidates: bool,
 ) -> Vec<Effect> {
+    if !state.export_available() {
+        engine_warn!(
+            "[archive-gate] action=submit request_id={} run_id={} run_state={:?}",
+            request_id,
+            state.run_progress().map_or(0, |run| run.run_id),
+            state.run_state()
+        );
+        state.set_briefing_checkpoint_status_message(Some(
+            crate::state::EXPORT_UNAVAILABLE_STATUS_MESSAGE.to_string(),
+        ));
+        return Vec::new();
+    }
     if request_id != state.archive_request_id() {
         return Vec::new();
     }
+    clear_export_unavailable_status(state);
     if !is_safe_archive_basename(&basename) {
         engine_warn!(
             "[archive-dialog] rejecting invalid basename request_id={} basename={}",
@@ -165,6 +188,8 @@ pub(super) fn handle_dialog_submitted(
     } else {
         std::collections::HashMap::new()
     };
+    let annotations = build_annotation_map(state, &ordered_urls);
+    let priority_snapshot = build_priority_snapshot(state);
     let mut effects = vec![Effect::ArchiveRequested {
         request_id,
         basename,
@@ -173,14 +198,16 @@ pub(super) fn handle_dialog_submitted(
         requested_checkpoint,
         use_summaries,
         summaries,
+        annotations,
+        priority_snapshot,
     }];
-    let had_signal_candidate_overrides = !state.signal_candidate().excluded().is_empty();
+    let had_signal_candidate_overrides = !state.signal_exclusions().excluded().is_empty();
     if set_checkpoint && had_signal_candidate_overrides {
         state
-            .signal_candidate_mut()
+            .signal_exclusions_mut()
             .set_excluded(Default::default());
         effects.push(Effect::PersistSignalCandidateOverrides {
-            overrides: state.signal_candidate().excluded().clone(),
+            overrides: state.signal_exclusions().excluded().clone(),
         });
         engine_info!(
             "[signal-overrides] cleared at archive-checkpoint request_id={}",
@@ -189,6 +216,56 @@ pub(super) fn handle_dialog_submitted(
         state.mark_dirty();
     }
     effects
+}
+
+fn clear_export_unavailable_status(state: &mut AppState) {
+    if state.briefing_checkpoint_status_message()
+        == Some(crate::state::EXPORT_UNAVAILABLE_STATUS_MESSAGE)
+    {
+        state.set_briefing_checkpoint_status_message(None);
+    }
+}
+
+fn build_priority_snapshot(state: &AppState) -> std::collections::HashMap<String, u8> {
+    state
+        .saved_results_entries()
+        .filter(|entry| entry.in_window)
+        .filter_map(|entry| {
+            entry
+                .triage
+                .as_ref()
+                .map(|(_, result)| (archive_url_key(&entry.article.url), result.priority))
+        })
+        .collect()
+}
+
+fn build_annotation_map(
+    state: &AppState,
+    ordered_urls: &[String],
+) -> std::collections::HashMap<String, ArchiveDocAnnotations> {
+    let mut annotations = std::collections::HashMap::new();
+    for url in ordered_urls {
+        let mut annotation = ArchiveDocAnnotations::default();
+        if let Some(entry) = state
+            .saved_results_for_url(url)
+            .filter(|entry| entry.in_window)
+        {
+            if let Some((key, result)) = &entry.triage {
+                annotation.priority = Some(result.priority);
+                annotation.tags = Some(result.tags.clone());
+                annotation.triage_model = Some(key.model_id.clone());
+            }
+            if let Some(result) = &entry.signal {
+                annotation.signal_key = Some(result.signal_key.clone());
+                annotation.signal_score = Some(result.signal_score);
+                annotation.themes = Some(result.themes.clone());
+            }
+        }
+        if annotation != ArchiveDocAnnotations::default() {
+            annotations.insert(archive_url_key(url), annotation);
+        }
+    }
+    annotations
 }
 
 pub(super) fn handle_export_completed(
@@ -253,10 +330,8 @@ fn build_summary_map(
 
     let mut map = std::collections::HashMap::new();
     for url in ordered_urls {
-        if let Some(hash) = state.triage().article_content_hash(url) {
-            if let Some(entry) = state.summary_cache().lookup_any_by_content_hash(hash) {
-                map.insert(archive_url_key(url), format_summary_body(&entry.result));
-            }
+        if let Some(summary) = state.newest_summary_for_url(url) {
+            map.insert(archive_url_key(url), format_summary_body(summary));
         }
     }
     map
@@ -276,16 +351,6 @@ fn format_summary_body(result: &crate::briefing::ArticleSummaryResult) -> String
 fn build_signal_candidate_snapshot(
     state: &AppState,
 ) -> crate::signal_candidate::SignalCandidateArchiveSelection {
-    if !matches!(state.triage().phase(), crate::TriagePhase::Complete) {
-        return crate::signal_candidate::SignalCandidateArchiveSelection::new(
-            Vec::new(),
-            state.signal_candidate_threshold(),
-            state.signal_candidate().override_fingerprint(),
-            signal_candidate_selection_fingerprint(state, &[]),
-            crate::ArchiveTokenEstimates::default(),
-            false,
-        );
-    }
     let selection = state.signal_candidate_selection();
     let token_estimates = state.archive_token_estimates(&selection.selected_urls);
     let cache_fingerprint = signal_candidate_selection_fingerprint(state, &selection.selected_urls);
@@ -293,7 +358,7 @@ fn build_signal_candidate_snapshot(
     crate::signal_candidate::SignalCandidateArchiveSelection::new(
         selection.selected_urls,
         state.signal_candidate_threshold(),
-        state.signal_candidate().override_fingerprint(),
+        state.signal_exclusions().override_fingerprint(),
         cache_fingerprint,
         token_estimates,
         state.signal_candidate().in_flight_count() > 0,
@@ -307,10 +372,9 @@ fn signal_candidate_selection_fingerprint(state: &AppState, urls: &[String]) -> 
     for url in urls {
         hasher.update(url.as_bytes());
         hasher.update(b"|");
-        if let Some((_, result)) = state
-            .signal_candidate()
-            .iter_completed()
-            .find(|(candidate_url, _)| *candidate_url == url)
+        if let Some(result) = state
+            .saved_results_for_url(url)
+            .and_then(|entry| entry.signal.as_ref())
         {
             hasher.update(result.signal_key.as_bytes());
             hasher.update(b"|");
@@ -327,4 +391,69 @@ fn signal_candidate_selection_fingerprint(state: &AppState, urls: &[String]) -> 
         hasher.update(b"\n");
     }
     crate::cache_utils::hex_digest(hasher.finalize())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::briefing::LoadedArticle;
+    use crate::triage::{ArticleTriageResult, TriageSession};
+    use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
+
+    #[test]
+    fn annotations_include_triage_empty_tags_and_zero_score_but_omit_unavailable_values() {
+        let url = "https://example.com/article";
+        let mut state = AppState::new();
+        let mut triage = TriageSession::new_loading(None);
+        triage.set_articles(vec![LoadedArticle {
+            url: url.into(),
+            source_title: None,
+            prepared_text: String::new(),
+            content_hash: "hash".into(),
+            fetched_utc: None,
+        }]);
+        triage.transition_to_triaging();
+        triage.complete_article_with_model(
+            0,
+            ArticleTriageResult {
+                category: "news".into(),
+                priority: 4,
+                tags: vec![],
+                rationale: String::new(),
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+            Some("stored-model".into()),
+        );
+        state.set_triage(triage);
+        state
+            .signal_candidate_mut()
+            .enqueue(url.into(), "fixture-input".to_string());
+        state.signal_candidate_mut().complete(
+            url,
+            SignalCandidateResult {
+                signal_score: 0,
+                signal_key: "event".into(),
+                themes: vec![],
+                draft_gist: String::new(),
+                source_tier: SourceTier::Tier1,
+                confidence: Confidence::Low,
+                reasoning: String::new(),
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+        );
+        crate::fixture_support::save_session_results(&mut state);
+        let annotations =
+            build_annotation_map(&state, &[url.into(), "https://example.com/none".into()]);
+        assert_eq!(annotations.len(), 1);
+        assert_eq!(annotations[&archive_url_key(url)].priority, Some(4));
+        assert_eq!(annotations[&archive_url_key(url)].tags, Some(vec![]));
+        assert_eq!(
+            annotations[&archive_url_key(url)].triage_model.as_deref(),
+            Some("stored-model")
+        );
+        assert_eq!(annotations[&archive_url_key(url)].signal_score, Some(0));
+        assert_eq!(annotations[&archive_url_key(url)].themes, Some(vec![]));
+    }
 }

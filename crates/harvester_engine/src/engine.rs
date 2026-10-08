@@ -14,7 +14,6 @@ use crate::decode::decode_html;
 use crate::fetch::{ChannelProgressSink, FetchSettings, Fetcher, ReqwestFetcher};
 use crate::frontmatter::build_markdown_document;
 use crate::persist::{AtomicFileWriter, PersistError};
-use crate::preview::prepare_preview_content;
 use crate::quota::{QuotaTracker, SessionQuotas};
 use crate::token::TokenCounter;
 use crate::url_policy::UrlPolicy;
@@ -70,8 +69,8 @@ impl EngineConfig {
 
 enum EngineCommand {
     Enqueue { job_id: JobId, url: String },
-    Stop,
-    Export,
+    Stop { immediate: bool },
+    Resume,
 }
 
 #[derive(Clone)]
@@ -99,12 +98,12 @@ impl EngineHandle {
         });
     }
 
-    pub fn stop(&self, _immediate: bool) {
-        let _ = self.cmd_tx.send(EngineCommand::Stop);
+    pub fn stop(&self, immediate: bool) {
+        let _ = self.cmd_tx.send(EngineCommand::Stop { immediate });
     }
 
-    pub fn request_export(&self) {
-        let _ = self.cmd_tx.send(EngineCommand::Export);
+    pub fn resume(&self) {
+        let _ = self.cmd_tx.send(EngineCommand::Resume);
     }
 
     pub fn try_recv(&self) -> Option<EngineEvent> {
@@ -128,25 +127,27 @@ fn worker_loop(
     ));
     let mut queue: VecDeque<(JobId, String)> = VecDeque::new();
     let mut accept_new = true;
-    let cancel_token = CancellationToken::new();
+    let mut cancel_token = CancellationToken::new();
     let mut quota_tracker = QuotaTracker::new(config.session_quotas.clone());
 
     loop {
         while let Ok(cmd) = cmd_rx.try_recv() {
             match cmd {
                 EngineCommand::Enqueue { job_id, url } => {
-                    if accept_new {
-                        queue.push_back((job_id, url));
-                    } else {
+                    if !accept_new {
                         let _ = event_tx.send(EngineEvent::JobCompleted {
                             job_id,
                             result: Err(FailureKind::Cancelled),
                         });
+                        continue;
                     }
+                    queue.push_back((job_id, url));
                 }
-                EngineCommand::Stop => {
+                EngineCommand::Stop { immediate } => {
                     accept_new = false;
-                    cancel_token.cancel();
+                    if immediate {
+                        cancel_token.cancel();
+                    }
                     // Cancel queued (not yet started) immediately.
                     for (job_id, _) in queue.drain(..) {
                         let _ = event_tx.send(EngineEvent::JobCompleted {
@@ -155,32 +156,15 @@ fn worker_loop(
                         });
                     }
                 }
-                EngineCommand::Export => {
-                    // Export happens when queue is empty / idle; stash command for later processing.
-                    queue.push_front((0, "__EXPORT__".to_string()));
+
+                EngineCommand::Resume => {
+                    cancel_token = CancellationToken::new();
+                    accept_new = true;
                 }
             }
         }
 
         if let Some((job_id, url)) = queue.pop_front() {
-            if url == "__EXPORT__" {
-                if queue.is_empty() {
-                    // Only export when no active jobs; run synchronously.
-                    if let Err(_err) = crate::export::build_concatenated_export(
-                        &config.output_dir,
-                        crate::export::ExportOptions::default(),
-                    ) {
-                        let _ = event_tx.send(EngineEvent::JobCompleted {
-                            job_id: 0,
-                            result: Err(FailureKind::ProcessingError),
-                        });
-                    }
-                } else {
-                    // Re-enqueue to try later.
-                    queue.push_back((job_id, url));
-                }
-                continue;
-            }
             if let Err(failure) = quota_tracker.check_url() {
                 let _ = event_tx.send(EngineEvent::JobCompleted {
                     job_id,
@@ -208,18 +192,20 @@ fn worker_loop(
                     // push back into the queue / handle stop.
                     match cmd {
                         EngineCommand::Enqueue { job_id, url } => {
-                            if accept_new {
-                                queue.push_back((job_id, url));
-                            } else {
+                            if !accept_new {
                                 let _ = event_tx.send(EngineEvent::JobCompleted {
                                     job_id,
                                     result: Err(FailureKind::Cancelled),
                                 });
+                                continue;
                             }
+                            queue.push_back((job_id, url));
                         }
-                        EngineCommand::Stop => {
+                        EngineCommand::Stop { immediate } => {
                             accept_new = false;
-                            cancel_token.cancel();
+                            if immediate {
+                                cancel_token.cancel();
+                            }
                             for (job_id, _) in queue.drain(..) {
                                 let _ = event_tx.send(EngineEvent::JobCompleted {
                                     job_id,
@@ -227,8 +213,10 @@ fn worker_loop(
                                 });
                             }
                         }
-                        EngineCommand::Export => {
-                            queue.push_front((0, "__EXPORT__".to_string()));
+
+                        EngineCommand::Resume => {
+                            cancel_token = CancellationToken::new();
+                            accept_new = true;
                         }
                     }
                 }
@@ -365,14 +353,11 @@ async fn run_job(
         return Err(failure);
     }
 
-    let preview_content = prepare_preview_content(&markdown);
-
     let _ = event_tx.send(EngineEvent::Progress(JobProgress {
         job_id,
         stage: Stage::Converting,
         bytes: None,
         tokens: None,
-        content_preview: Some(preview_content.clone()),
     }));
 
     if cancel_token.is_cancelled() {
@@ -407,7 +392,6 @@ async fn run_job(
         stage: Stage::Tokenizing,
         bytes: None,
         tokens: Some(tokens),
-        content_preview: None,
     }));
 
     if cancel_token.is_cancelled() {
@@ -458,7 +442,6 @@ async fn run_job(
                     final_url: fetch_output.metadata.final_url,
                     tokens: Some(token_count),
                     bytes_written: Some(doc_for_write.len() as u64),
-                    content_preview: Some(preview_content),
                     extracted_links: extracted_article.links,
                     fetched_utc: Some(fetched_utc_str),
                 }),

@@ -8,7 +8,7 @@ export type Stage =
 	| "Writing"
 	| "Done";
 export type JobResultKind = "Success" | { Failed: { reason: string } };
-export type JobOrigin = "Direct" | { Indirect: { source_job_id: number } };
+export type JobOrigin = "Direct";
 export type SelectedJobVisibility =
 	| "Visible"
 	| "OutsideScope"
@@ -25,15 +25,9 @@ export type FilterReason =
 export type JobFilterStatus =
 	| { HardExcluded: { reasons: FilterReason[] } }
 	| { ReviewNeeded: { reasons: FilterReason[] } }
-	| "ManuallyExcluded"
-	| "ManuallyIncluded"
 	| "AutoIncluded";
 
-export type BodyKey =
-	| "Preview"
-	| "TriageMarkdown"
-	| "SummaryMarkdown"
-	| "PollStatsMarkdown";
+export type BodyKey = "SummaryMarkdown";
 
 export type BodyRef = {
 	key: BodyKey;
@@ -60,7 +54,6 @@ export type JobListRowView = {
 	tokens: number | null;
 	bytes: number | null;
 	link_count: number;
-	downloaded_link_count: number;
 	origin: JobOrigin;
 	triage_annotation: TriageAnnotationView | null;
 	has_summary: boolean;
@@ -95,12 +88,6 @@ export type ExtractedLinkView = {
 	url: string;
 	label: string;
 	kind: "Hyperlink" | "Image" | "Email";
-	download_state:
-		| "NotDownloaded"
-		| "Downloading"
-		| { Downloaded: { path: string } }
-		| { Failed: { error: string } };
-	age_suspect: boolean;
 };
 
 export type DesktopJobListView = {
@@ -143,8 +130,10 @@ export type StageProgress = {
 		| "ScoringSignals";
 	status: "Pending" | "Active" | "Done" | "Failed";
 	completed: number;
+	reused: number;
 	failed: number;
 	total: number;
+	total_is_final: boolean;
 	started_at_utc: string | null;
 	ended_at_utc: string | null;
 };
@@ -167,6 +156,26 @@ export type RunProgressView = {
 	activity: ActivityEntry[];
 };
 
+export type UnfinishedWorkSummary = {
+	not_eligible: number;
+	in_progress: number;
+	needs_triage: number;
+	needs_summary: number;
+	needs_scoring: number;
+	complete: number;
+	articles_with_work: number;
+	estimated_calls: number;
+};
+
+export type UnfinishedWork = "Unknown" | { Known: UnfinishedWorkSummary };
+
+export type ReprocessNoticeView = {
+	articles: number;
+	estimated_calls: number;
+};
+
+export type RunState = "Idle" | "Active" | { Stopping: { in_flight: number } };
+
 export type RunCompletionNotice = {
 	new_result_count: number;
 	completed_at_utc: string;
@@ -175,8 +184,6 @@ export type RunCompletionNotice = {
 export type StopFinishButtonState =
 	| "Disabled"
 	| { Enabled: { policy: "Finish" | "Immediate" } };
-
-export type WorkspaceView = "Review" | "Trends" | "PollStats" | "Blacklist";
 
 export type ArchivePartialCoverageView = {
 	triaged: number;
@@ -234,35 +241,46 @@ export type ArchiveDialogRequest = {
 
 export type UiCommand = { ShowArchiveDialog: ArchiveDialogRequest };
 
+export type ArchiveMeterStatus =
+	| "Loading"
+	| "Unavailable"
+	| "NotScoredYet"
+	| "Scored";
+
+export type ArchiveMeterView = {
+	selected_count: number;
+	target: number;
+	token_estimate: number;
+	unsettled_count: number;
+	status: ArchiveMeterStatus;
+};
+
 export type SnapshotEnvelope = {
 	generation: number;
 	schema_version: number;
 	view: {
-		workspace_view: WorkspaceView;
 		job_count: number;
-		archive_filtered_count: number;
-		archive_token_estimate: number;
-		token_limit: number;
+		archive_meter: ArchiveMeterView;
 		archive_partial_coverage: ArchivePartialCoverageView | null;
-		raw_unprocessed_count: number;
 		llm_quota: LlmQuotaView;
 		last_paste_stats: LastPasteStats | null;
 		checkpoint_status_message: string | null;
-		reading_pane_mode: "RawText" | "Summary";
-		preview_text: BodyRef | null;
 		right_pane: {
-			triage_markdown: BodyRef | null;
 			summary_markdown: BodyRef | null;
-			poll_stats_markdown: BodyRef | null;
 		};
 		desktop_job_list: DesktopJobListView;
 		signal_candidate_rows: SignalCandidateRow[];
 		run_progress: RunProgressView;
+		archive_enabled: boolean;
+		run_state: RunState;
 		run_completion_notice: RunCompletionNotice | null;
-		poll_sources_enabled: boolean;
-		triage_can_start: boolean;
-		summaries_can_start: boolean;
+		run_enabled: boolean;
+		resume_enabled: boolean;
+		resume_disabled_reason: string | null;
+		ai_unavailable_message: string | null;
+		unfinished_work: UnfinishedWork;
+		reprocess_notice: ReprocessNoticeView | null;
 		stop_finish_button: StopFinishButtonState;
-	} & Record<string, unknown>;
+	};
 	fatal_message: string | null;
 };

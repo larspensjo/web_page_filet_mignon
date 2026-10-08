@@ -112,18 +112,6 @@ impl EffectRunner {
                             dedup_filtered: result.dedup_filtered,
                         });
                     }
-                    SourceType::Script { .. } => {
-                        engine_warn!("[poll-all] Script sources not yet supported: {}", source_id);
-                        engine_warn!(
-                            "[poll-all-timing] source={} kind=script status=unsupported elapsed_ms={}",
-                            source_id,
-                            source_started.elapsed().as_millis()
-                        );
-                        let _ = msg_tx.send(Msg::SourcePollFailed {
-                            source_id,
-                            error: "Script sources not implemented".to_string(),
-                        });
-                    }
                     SourceType::Rss { feed_url } => {
                         let mut context = RssPollContext {
                             seen_set: &mut seen_set,

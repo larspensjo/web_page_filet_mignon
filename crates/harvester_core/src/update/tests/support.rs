@@ -5,7 +5,6 @@ use super::*;
 use crate::briefing::LoadedArticle;
 use crate::briefing::{ArticleSummaryResult, BriefingSession};
 use crate::summary_cache::SummaryCacheKey;
-use crate::tabs::AppTab;
 use crate::LlmResultKind;
 use harvester_engine::llm::dto::SummaryEntities;
 use harvester_engine::llm::prompt::PromptId;
@@ -64,48 +63,30 @@ pub(super) fn with_summary_metadata(state: AppState) -> AppState {
     let mut active_versions = HashMap::new();
     active_versions.insert(PromptId::ArticleTriage, 1);
     active_versions.insert(PromptId::ArticleSummary, 1);
-    active_versions.insert(PromptId::BriefingExecutiveSummary, 1);
-    active_versions.insert(PromptId::BriefingNextItem, 1);
     let mut effective_models = HashMap::new();
     effective_models.insert(PromptId::ArticleTriage, "test-triage-model".to_string());
     effective_models.insert(PromptId::ArticleSummary, "test-model".to_string());
-    effective_models.insert(
-        PromptId::BriefingExecutiveSummary,
-        "test-briefing-model".to_string(),
-    );
-    effective_models.insert(
-        PromptId::BriefingNextItem,
-        "test-briefing-model".to_string(),
-    );
     let (state, _) = update(
         state,
         Msg::LlmMetadataLoaded {
             active_versions,
             effective_models,
-            templates: HashMap::new(),
         },
     );
     let (state, _) = update(state, Msg::PromptTemplateFilesLoaded);
-    let mut contexts = HashMap::new();
-    contexts.insert(
-        PromptId::BriefingExecutiveSummary,
-        vec![("policy".to_string(), "briefing context".to_string())],
-    );
-    contexts.insert(
-        PromptId::BriefingNextItem,
-        vec![("policy".to_string(), "briefing context".to_string())],
-    );
-    let (state, _) = update(state, Msg::PromptContextsLoaded { contexts });
+    let contexts = HashMap::new();
+    let (mut state, _) = update(state, Msg::PromptContextsLoaded { contexts });
+    seed_current_triage_cache(&mut state);
+    state.rebuild_saved_results();
+    state.rebuild_saved_results();
     state
 }
 
-pub(super) fn with_signal_candidate_metadata(state: AppState) -> AppState {
+pub(super) fn with_signal_candidate_metadata(mut state: AppState) -> AppState {
     let mut active_versions = HashMap::new();
     active_versions.insert(PromptId::ArticleTriage, 1);
     active_versions.insert(PromptId::ArticleSummary, 1);
     active_versions.insert(PromptId::ArticleSignalCandidate, 1);
-    active_versions.insert(PromptId::BriefingExecutiveSummary, 1);
-    active_versions.insert(PromptId::BriefingNextItem, 1);
     let mut effective_models = HashMap::new();
     effective_models.insert(PromptId::ArticleTriage, "test-triage-model".to_string());
     effective_models.insert(PromptId::ArticleSummary, "test-summary-model".to_string());
@@ -113,22 +94,13 @@ pub(super) fn with_signal_candidate_metadata(state: AppState) -> AppState {
         PromptId::ArticleSignalCandidate,
         "test-signal-model".to_string(),
     );
-    effective_models.insert(
-        PromptId::BriefingExecutiveSummary,
-        "test-briefing-model".to_string(),
-    );
-    effective_models.insert(
-        PromptId::BriefingNextItem,
-        "test-briefing-model".to_string(),
-    );
-    let (state, _) = update(
-        state,
-        Msg::LlmMetadataLoaded {
-            active_versions,
-            effective_models,
-            templates: HashMap::new(),
-        },
-    );
+    state.set_llm_metadata(active_versions, effective_models);
+    state.reconcile_ai_availability_from_metadata();
+    seed_current_triage_cache(&mut state);
+    state.start_summary_cache_run();
+    state.mark_briefing_metadata_ready();
+    state.rebuild_saved_results();
+    state.rebuild_saved_results();
     state
 }
 
@@ -136,19 +108,13 @@ pub(super) fn summary_json(title: &str) -> String {
     format!("{{\"title\":\"{title}\",\"summary\":\"Summary\",\"key_points\":[\"p1\"]}}")
 }
 
-pub(super) fn briefing_json(article_count: u32) -> String {
-    format!(
-        "{{\"executive_summary\":\"Exec\",\"top_stories\":[{{\"headline\":\"Story\",\"body\":\"Desc\"}}],\"article_count\":{article_count}}}"
-    )
-}
-
-pub(super) fn aggregate_briefing_metadata(
+pub(super) fn summary_metadata(
     model: &str,
     input_tokens: u32,
     output_tokens: u32,
 ) -> LlmRunMetadata {
     LlmRunMetadata::new(LlmRunMetadataInit {
-        prompt_id: PromptId::AggregateBriefing,
+        prompt_id: PromptId::ArticleSummary,
         prompt_version: 1,
         resolved_model: model.to_string(),
         input_bytes: 100,
@@ -181,7 +147,10 @@ pub(super) fn seed_summary_for_content_hash(state: &mut AppState, content_hash: 
             content_hash: content_hash.to_string(),
             prompt_id: PromptId::ArticleSummary,
             prompt_version: 1,
-            model_id: "test-model".to_string(),
+            model_id: state
+                .effective_model_for(PromptId::ArticleSummary)
+                .unwrap_or("test-model")
+                .to_string(),
             context_hash: crate::summary_cache::context_hash(
                 state.context_for(PromptId::ArticleSummary),
             ),
@@ -209,7 +178,7 @@ pub(super) fn complete_triage_state_for_test(n: usize) -> AppState {
                 .collect::<Vec<_>>()
                 .join(" "),
             content_hash: format!("hash-tc-{i}"),
-            fetched_utc: None,
+            fetched_utc: Some("2026-09-28T12:00:00Z".into()),
         })
         .collect();
     session.set_articles(articles);
@@ -235,6 +204,7 @@ pub(super) fn complete_triage_state_for_test(n: usize) -> AppState {
 
     let mut state = AppState::new();
     state.set_triage(session);
+    crate::fixture_support::save_session_results(&mut state);
     state
 }
 
@@ -261,11 +231,10 @@ pub(super) fn start_briefing_after_triage(
     }
     triage.complete();
     state.set_triage(triage);
-    state.select_tab(AppTab::Briefing);
-    state.request_briefing_orchestration();
     state.start_summary_cache_run();
     state.mark_briefing_metadata_ready();
-    state.set_briefing(BriefingSession::new_loading(None));
+    state.set_briefing(BriefingSession::new_loading());
+    crate::update::test_support::arm_admitted(&mut state);
     state
 }
 
@@ -280,17 +249,14 @@ pub(super) fn make_state_with_summarized_job_for_update() -> AppState {
         links: vec![],
         fetched_utc: None,
     }]);
-    let mut briefing = crate::briefing::BriefingSession::new_loading(None);
-    briefing.set_articles(
-        vec![LoadedArticle {
-            url: url.clone(),
-            source_title: None,
-            prepared_text: "text".to_string(),
-            content_hash: "hash".to_string(),
-            fetched_utc: None,
-        }],
-        "collection".to_string(),
-    );
+    let mut briefing = crate::briefing::BriefingSession::new_loading();
+    briefing.set_articles(vec![LoadedArticle {
+        url: url.clone(),
+        source_title: None,
+        prepared_text: "text".to_string(),
+        content_hash: "hash".to_string(),
+        fetched_utc: None,
+    }]);
     briefing.transition_to_summarizing();
     briefing.start_article(0, 1);
     briefing.complete_article(
@@ -305,7 +271,13 @@ pub(super) fn make_state_with_summarized_job_for_update() -> AppState {
         },
     );
     state.set_briefing(briefing);
-    let job_id = state.view().jobs.first().map(|j| j.job_id).unwrap_or(1);
+    let job_id = state
+        .view()
+        .desktop_job_list
+        .rows
+        .first()
+        .map(|j| j.job_id)
+        .unwrap_or(1);
     state.select_job(job_id);
     state
 }
@@ -354,41 +326,15 @@ pub(super) fn start_triage_for_test(
         state,
         Msg::TriageArticlesLoaded {
             request_id: triage_request_id,
-            articles,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
         },
     );
-    update(state, Msg::TriageClicked)
-}
-
-pub(super) fn prepare_type_url_snapshot(state: &mut AppState, snapshot: &str) {
-    state
-        .prompt_lab_mut()
-        .select_input_source(crate::prompt_lab::PromptLabInputSource::TypeUrl);
-    state
-        .prompt_lab_mut()
-        .set_url_input("https://example.com".to_string());
-    let resolve_id = state.allocate_next_prompt_lab_resolve_id();
-    state.prompt_lab_mut().begin_url_resolution(resolve_id);
-    state
-        .prompt_lab_mut()
-        .finish_url_resolution(resolve_id, Ok(snapshot.to_string()));
-}
-
-pub(super) fn dispatch_lab_run(state: AppState) -> (AppState, u64) {
-    let mut state = state;
-    prepare_type_url_snapshot(&mut state, "article content");
-    let (state, effects) = update(state, Msg::PromptLabRunRequested);
-    let request_id = effects
-        .iter()
-        .find_map(|e| {
-            if let Effect::RequestLlmCompletion { request_id, .. } = e {
-                Some(*request_id)
-            } else {
-                None
-            }
-        })
-        .expect("expected RequestLlmCompletion effect");
-    (state, request_id)
+    update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    )
 }
 
 pub(super) fn prime_llm_metadata(state: AppState) -> AppState {
@@ -401,7 +347,6 @@ pub(super) fn prime_llm_metadata(state: AppState) -> AppState {
         Msg::LlmMetadataLoaded {
             active_versions,
             effective_models,
-            templates: HashMap::new(),
         },
     );
     let (state, _) = update(
@@ -444,9 +389,8 @@ pub(super) fn add_completed_job_for_test(state: AppState, url: &str) -> AppState
         Msg::JobDone {
             job_id,
             result: JobResultKind::Success,
-            content_preview: None,
             extracted_links: Vec::new(),
-            fetched_utc: None,
+            fetched_utc: Some("2026-09-28T12:00:00Z".into()),
         },
     );
     apply_pending_pre_triage_refresh_evaluation(state)
@@ -475,7 +419,6 @@ pub(super) fn add_completed_job_with_tokens_for_test(
             stage: crate::Stage::Tokenizing,
             tokens: Some(tokens),
             bytes: None,
-            content_preview: None,
         },
     );
     let (state, _) = update(
@@ -483,9 +426,8 @@ pub(super) fn add_completed_job_with_tokens_for_test(
         Msg::JobDone {
             job_id,
             result: JobResultKind::Success,
-            content_preview: None,
             extracted_links: Vec::new(),
-            fetched_utc: None,
+            fetched_utc: Some("2026-09-28T12:00:00Z".into()),
         },
     );
     apply_pending_pre_triage_refresh_evaluation(state)
@@ -516,7 +458,7 @@ pub(super) fn loaded_pre_triage_articles(urls: &[&str]) -> Vec<LoadedArticle> {
                 .collect::<Vec<_>>()
                 .join(" "),
             content_hash: format!("hash-{url}"),
-            fetched_utc: None,
+            fetched_utc: Some("2026-09-28T12:00:00Z".into()),
         })
         .collect()
 }
@@ -531,7 +473,10 @@ pub(super) fn ready_pre_triage_state(urls: &[&str]) -> AppState {
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            articles: loaded_pre_triage_articles(urls),
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                loaded_pre_triage_articles(urls),
+                100_000,
+            ),
         },
     );
     assert!(matches!(
@@ -539,4 +484,35 @@ pub(super) fn ready_pre_triage_state(urls: &[&str]) -> AppState {
         crate::pre_triage_filter::PreTriagePhase::ReadyToTriage
     ));
     state
+}
+
+/// Hand-built completed triage fixtures must carry the current cache identity.
+pub(super) fn seed_current_triage_cache(state: &mut AppState) {
+    state.mark_triage_metadata_ready();
+    let results: Vec<_> = state
+        .triage()
+        .articles()
+        .iter()
+        .filter_map(|article| {
+            state
+                .triage()
+                .result_for_url(&article.url)
+                .map(|result| (article.content_hash.clone(), result.clone()))
+        })
+        .collect();
+    for (hash, result) in results {
+        state.store_triage_result(&hash, result);
+        let key = state.current_triage_cache_key(&hash);
+        let indices: Vec<_> = state
+            .triage()
+            .articles()
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.content_hash == hash)
+            .map(|(i, _)| i)
+            .collect();
+        for i in indices {
+            state.triage_mut().set_article_cache_key(i, key.clone());
+        }
+    }
 }

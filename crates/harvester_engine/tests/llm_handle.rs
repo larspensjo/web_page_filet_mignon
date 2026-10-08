@@ -1,14 +1,12 @@
 use std::sync::{Arc, RwLock};
 
-use serde_json::json;
 use tempfile::tempdir;
 
 use harvester_engine::llm::provider::LlmProvider;
 use harvester_engine::llm::{
-    content_hash, BlockingMockProvider, FinishReason, LlmCommand, LlmCompletionCommand,
-    LlmCompletionError, LlmConfig, LlmError, LlmEvent, LlmHandle, LlmQuotas, LlmResponse,
-    MockLlmProvider, ModelId, PricingRegistry, PromptId, PromptRegistry, ProviderKind,
-    ReplayProvider, ReplayRecord, TokenUsage,
+    BlockingMockProvider, FinishReason, LlmCommand, LlmCompletionCommand, LlmCompletionError,
+    LlmConfig, LlmError, LlmEvent, LlmHandle, LlmQuotas, LlmResponse, MockLlmProvider, ModelId,
+    PricingRegistry, PromptId, PromptRegistry, ProviderKind, TokenUsage,
 };
 
 fn make_config(
@@ -22,17 +20,14 @@ fn make_config(
         triage_model: None,
         summary_model: None,
         signal_candidate_model: None,
-        briefing_model: None,
         registry: Arc::clone(&registry),
         quotas: LlmQuotas::default(),
         output_dir: dir.path().to_path_buf(),
         pricing: PricingRegistry::new(),
         max_input_bytes: 10_000,
-        #[allow(deprecated)]
-        max_input_chars: 0,
         timestamp_utc: Arc::new(|| "2026-02-08T00:00:00Z".to_string()),
         session_id: "test-session".to_string(),
-        replay_cache: None,
+        replay_write_observer: None,
         max_concurrent_requests: 1,
     }
 }
@@ -60,10 +55,8 @@ fn llm_handle_dispatches_completion_event() {
             request_id: 7,
             prompt_id: PromptId::ArticleTriage,
             prompt_version: Some(1),
-            model_override: None,
             input_content: "document text".to_string(),
             context: vec![("key".to_string(), "value".to_string())],
-            template_override: None,
             extra_template_vars: vec![],
         })))
         .expect("LLM command should dispatch");
@@ -87,70 +80,6 @@ fn llm_handle_dispatches_completion_event() {
 }
 
 #[test]
-fn llm_handle_skips_provider_when_cache_hit() {
-    let provider = Arc::new(MockLlmProvider::new());
-    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
-    let registry = prompt_registry_arc();
-    let dir = tempdir().unwrap();
-
-    let input_content = "cached document";
-    let mut replay_provider = ReplayProvider::new();
-    replay_provider.insert(ReplayRecord {
-        request_id: "cached-session".to_string(),
-        input_content_hash: content_hash(input_content),
-        prompt_id: PromptId::ArticleSummary,
-        prompt_version: 2,
-        model_id: "openai::mock".to_string(),
-        timestamp_utc: "2026-02-08T00:00:00Z".to_string(),
-        rendered_system_message: "".to_string(),
-        rendered_user_message: "".to_string(),
-        raw_response: r#"{"title":"cached"}"#.to_string(),
-        usage: TokenUsage::new(1, 2),
-        validated_output: Some(json!({"title": "cached"})),
-        validation_error: None,
-        cost_microdollars: 0,
-        wall_ms: 0,
-        cache_status: "miss".to_string(),
-    });
-    let replay_cache = Arc::new(RwLock::new(replay_provider));
-
-    let mut config = make_config(provider_trait, registry, &dir);
-    config.replay_cache = Some(replay_cache.clone());
-
-    let handle = LlmHandle::new(config);
-    handle
-        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
-            request_id: 7,
-            prompt_id: PromptId::ArticleSummary,
-            prompt_version: Some(2),
-            model_override: None,
-            input_content: input_content.to_string(),
-            context: Vec::new(),
-            template_override: None,
-            extra_template_vars: vec![],
-        })))
-        .expect("LLM command should dispatch");
-
-    let event = recv_event(&handle);
-
-    match event {
-        LlmEvent::Completed { request_id, result } => {
-            assert_eq!(request_id, 7);
-            if let Ok(completion) = result {
-                assert_eq!(completion.metadata.prompt_id, PromptId::ArticleSummary);
-                assert_eq!(completion.metadata.prompt_version, 2);
-                assert_eq!(completion.output_json, r#"{"title":"cached"}"#.to_string());
-            } else {
-                panic!("cached completion failed");
-            }
-        }
-        LlmEvent::UsageUpdated { .. } => unreachable!(),
-    }
-
-    assert_eq!(provider.recorded_requests().len(), 0);
-}
-
-#[test]
 fn llm_handle_emits_usage_update_after_completion() {
     let provider = Arc::new(MockLlmProvider::new());
     let provider_trait: Arc<dyn LlmProvider> = provider.clone();
@@ -165,10 +94,8 @@ fn llm_handle_emits_usage_update_after_completion() {
             request_id: 7,
             prompt_id: PromptId::ArticleTriage,
             prompt_version: Some(1),
-            model_override: None,
             input_content: "document text".to_string(),
             context: Vec::new(),
-            template_override: None,
             extra_template_vars: vec![],
         })))
         .expect("LLM command should dispatch");
@@ -190,86 +117,6 @@ fn llm_handle_emits_usage_update_after_completion() {
         LlmEvent::UsageUpdated { usage } => assert_eq!(usage.calls, 1),
         LlmEvent::Completed { .. } => panic!("expected usage update after completion"),
     }
-}
-
-#[test]
-fn llm_handle_inserts_cache_after_successful_response() {
-    let provider = Arc::new(MockLlmProvider::new());
-    provider.queue_json_success(r#"{"title":"fresh","summary":"short","key_points":["one"]}"#);
-    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
-    let registry = prompt_registry_arc();
-    let dir = tempdir().unwrap();
-    let replay_cache = Arc::new(RwLock::new(ReplayProvider::new()));
-
-    let mut config = make_config(provider_trait, registry.clone(), &dir);
-    config.replay_cache = Some(Arc::clone(&replay_cache));
-
-    let handle = LlmHandle::new(config);
-    let input_content = "fresh document";
-
-    handle
-        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
-            request_id: 7,
-            prompt_id: PromptId::ArticleSummary,
-            prompt_version: None, // use active version (V4)
-            model_override: None,
-            input_content: input_content.to_string(),
-            context: Vec::new(),
-            template_override: None,
-            extra_template_vars: vec![],
-        })))
-        .expect("LLM command should dispatch");
-
-    let first_event = recv_event(&handle);
-
-    match first_event {
-        LlmEvent::Completed { result, .. } => {
-            assert!(result.is_ok());
-        }
-        LlmEvent::UsageUpdated { .. } => unreachable!(),
-    }
-
-    assert_eq!(provider.recorded_requests().len(), 1);
-
-    handle
-        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
-            request_id: 8,
-            prompt_id: PromptId::ArticleSummary,
-            prompt_version: None, // use active version (V4); should be a cache hit
-            model_override: None,
-            input_content: input_content.to_string(),
-            context: Vec::new(),
-            template_override: None,
-            extra_template_vars: vec![],
-        })))
-        .expect("LLM command should dispatch");
-
-    let second_event = recv_event(&handle);
-
-    match second_event {
-        LlmEvent::Completed { result, .. } => {
-            assert!(result.is_ok());
-        }
-        LlmEvent::UsageUpdated { .. } => unreachable!(),
-    }
-
-    assert_eq!(provider.recorded_requests().len(), 1);
-
-    let version = {
-        let guard = registry.read().unwrap();
-        guard
-            .active(PromptId::ArticleSummary)
-            .expect("summary prompt missing")
-            .version
-    };
-    let guard = replay_cache.read().unwrap();
-    assert!(guard
-        .lookup(
-            &content_hash(input_content),
-            PromptId::ArticleSummary,
-            version
-        )
-        .is_some());
 }
 
 /// Verify that the LLM worker never allows more than `max_concurrent_requests`
@@ -297,10 +144,8 @@ fn concurrent_requests_never_exceed_cap() {
                 request_id: i as u64 + 1,
                 prompt_id: PromptId::ArticleTriage,
                 prompt_version: Some(1),
-                model_override: None,
                 input_content: format!("document {i}"),
                 context: Vec::new(),
-                template_override: None,
                 extra_template_vars: vec![],
             })))
             .expect("send should succeed");
@@ -352,46 +197,7 @@ fn recv_event(handle: &LlmHandle) -> LlmEvent {
 }
 
 #[test]
-fn override_model_wins_over_stage_and_default() {
-    let provider = Arc::new(MockLlmProvider::new());
-    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
-    provider
-        .queue_json_success(r#"{"category":"news","priority":3,"tags":["a"],"rationale":"ok"}"#);
-
-    let registry = prompt_registry_arc();
-    let dir = tempdir().unwrap();
-    let mut config = make_config(provider_trait, registry, &dir);
-    // Stage model set to something different
-    config.triage_model = Some(ModelId::new(ProviderKind::OpenAi, "stage-model"));
-    let override_model = ModelId::new(ProviderKind::OpenAi, "mock");
-
-    let handle = LlmHandle::new(config);
-    handle
-        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
-            request_id: 1,
-            prompt_id: PromptId::ArticleTriage,
-            prompt_version: Some(1),
-            model_override: Some(override_model.clone()),
-            input_content: "document".to_string(),
-            context: vec![],
-            template_override: None,
-            extra_template_vars: vec![],
-        })))
-        .unwrap();
-
-    recv_event(&handle);
-    // The override model should have been sent to the provider (not the stage model).
-    let requests = provider.recorded_requests();
-    assert_eq!(requests.len(), 1);
-    assert_eq!(
-        requests[0].model(),
-        &override_model,
-        "override model should be sent to provider"
-    );
-}
-
-#[test]
-fn stage_model_wins_over_default_when_override_is_none() {
+fn stage_model_wins_over_default() {
     let provider = Arc::new(MockLlmProvider::new());
     let provider_trait: Arc<dyn LlmProvider> = provider.clone();
     provider
@@ -413,10 +219,8 @@ fn stage_model_wins_over_default_when_override_is_none() {
             request_id: 1,
             prompt_id: PromptId::ArticleTriage,
             prompt_version: Some(1),
-            model_override: None,
             input_content: "document".to_string(),
             context: vec![],
-            template_override: None,
             extra_template_vars: vec![],
         })))
         .unwrap();
@@ -429,184 +233,6 @@ fn stage_model_wins_over_default_when_override_is_none() {
         requests[0].model().model_name(),
         "stage-specific",
         "stage model should win when override is None"
-    );
-}
-
-#[test]
-fn unsupported_model_wrong_provider_fires_before_provider_call() {
-    let provider = Arc::new(MockLlmProvider::new());
-    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
-    let registry = prompt_registry_arc();
-    let dir = tempdir().unwrap();
-    let config = make_config(provider_trait, registry, &dir);
-    // default_model is OpenAi, but we try to send Anthropic
-    let bad_model = ModelId::new(ProviderKind::Anthropic, "claude-opus");
-
-    let handle = LlmHandle::new(config);
-    handle
-        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
-            request_id: 1,
-            prompt_id: PromptId::ArticleTriage,
-            prompt_version: Some(1),
-            model_override: Some(bad_model.clone()),
-            input_content: "document".to_string(),
-            context: vec![],
-            template_override: None,
-            extra_template_vars: vec![],
-        })))
-        .unwrap();
-
-    match recv_event(&handle) {
-        LlmEvent::Completed { result, .. } => {
-            assert!(
-                matches!(result, Err(LlmCompletionError::UnsupportedModel { .. })),
-                "wrong provider should yield UnsupportedModel"
-            );
-        }
-        LlmEvent::UsageUpdated { .. } => unreachable!(),
-    }
-    assert_eq!(
-        provider.recorded_requests().len(),
-        0,
-        "provider must not be called for wrong-provider override"
-    );
-}
-
-#[test]
-fn unsupported_model_unknown_name_fires_before_provider_call() {
-    let provider = Arc::new(MockLlmProvider::new());
-    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
-    let registry = prompt_registry_arc();
-    let dir = tempdir().unwrap();
-    let config = make_config(provider_trait, registry, &dir);
-    // Right provider but unknown name
-    let bad_model = ModelId::new(ProviderKind::OpenAi, "totally-unknown-model-xyz");
-
-    let handle = LlmHandle::new(config);
-    handle
-        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
-            request_id: 1,
-            prompt_id: PromptId::ArticleTriage,
-            prompt_version: Some(1),
-            model_override: Some(bad_model.clone()),
-            input_content: "document".to_string(),
-            context: vec![],
-            template_override: None,
-            extra_template_vars: vec![],
-        })))
-        .unwrap();
-
-    match recv_event(&handle) {
-        LlmEvent::Completed { result, .. } => {
-            assert!(
-                matches!(result, Err(LlmCompletionError::UnsupportedModel { .. })),
-                "unknown name should yield UnsupportedModel"
-            );
-        }
-        LlmEvent::UsageUpdated { .. } => unreachable!(),
-    }
-    assert_eq!(
-        provider.recorded_requests().len(),
-        0,
-        "provider must not be called for unknown-name override"
-    );
-}
-
-#[test]
-fn valid_override_cache_miss_records_override_in_metadata() {
-    let provider = Arc::new(MockLlmProvider::new());
-    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
-    provider
-        .queue_json_success(r#"{"category":"news","priority":3,"tags":["a"],"rationale":"ok"}"#);
-
-    let registry = prompt_registry_arc();
-    let dir = tempdir().unwrap();
-    let config = make_config(provider_trait, registry, &dir);
-    // "mock" is the default model name, so it's in the allow-list
-    let override_model = ModelId::new(ProviderKind::OpenAi, "mock");
-
-    let handle = LlmHandle::new(config);
-    handle
-        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
-            request_id: 1,
-            prompt_id: PromptId::ArticleTriage,
-            prompt_version: Some(1),
-            model_override: Some(override_model),
-            input_content: "document".to_string(),
-            context: vec![],
-            template_override: None,
-            extra_template_vars: vec![],
-        })))
-        .unwrap();
-
-    match recv_event(&handle) {
-        LlmEvent::Completed { result, .. } => {
-            let metadata = result.expect("should succeed").metadata;
-            assert_eq!(metadata.resolved_model, "mock");
-        }
-        LlmEvent::UsageUpdated { .. } => unreachable!(),
-    }
-}
-
-#[test]
-fn valid_override_cache_hit_records_override_in_metadata() {
-    let provider = Arc::new(MockLlmProvider::new());
-    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
-    let registry = prompt_registry_arc();
-    let dir = tempdir().unwrap();
-
-    let input_content = "cached content for override test";
-    let mut replay_provider = ReplayProvider::new();
-    replay_provider.insert(ReplayRecord {
-        request_id: "cached-session".to_string(),
-        input_content_hash: content_hash(input_content),
-        prompt_id: PromptId::ArticleTriage,
-        prompt_version: 1,
-        model_id: "openai::mock".to_string(),
-        timestamp_utc: "2026-02-08T00:00:00Z".to_string(),
-        rendered_system_message: "".to_string(),
-        rendered_user_message: "".to_string(),
-        raw_response: r#"{"category":"news","priority":3,"tags":["a"],"rationale":"ok"}"#
-            .to_string(),
-        usage: TokenUsage::new(1, 2),
-        validated_output: Some(
-            json!({"category":"news","priority":3,"tags":["a"],"rationale":"ok"}),
-        ),
-        validation_error: None,
-        cost_microdollars: 0,
-        wall_ms: 0,
-        cache_status: "miss".to_string(),
-    });
-    let replay_cache = Arc::new(RwLock::new(replay_provider));
-    let mut config = make_config(provider_trait, registry, &dir);
-    config.replay_cache = Some(replay_cache);
-
-    let override_model = ModelId::new(ProviderKind::OpenAi, "mock");
-    let handle = LlmHandle::new(config);
-    handle
-        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
-            request_id: 1,
-            prompt_id: PromptId::ArticleTriage,
-            prompt_version: Some(1),
-            model_override: Some(override_model),
-            input_content: input_content.to_string(),
-            context: vec![],
-            template_override: None,
-            extra_template_vars: vec![],
-        })))
-        .unwrap();
-
-    match recv_event(&handle) {
-        LlmEvent::Completed { result, .. } => {
-            let metadata = result.expect("cache hit should succeed").metadata;
-            assert_eq!(metadata.resolved_model, "mock");
-        }
-        LlmEvent::UsageUpdated { .. } => unreachable!(),
-    }
-    assert_eq!(
-        provider.recorded_requests().len(),
-        0,
-        "cache hit must skip provider"
     );
 }
 
@@ -659,10 +285,8 @@ fn retry_under_concurrency_pressure() {
             request_id: 100,
             prompt_id: PromptId::ArticleTriage,
             prompt_version: Some(1),
-            model_override: None,
             input_content: "filler document".to_string(),
             context: Vec::new(),
-            template_override: None,
             extra_template_vars: vec![],
         })))
         .expect("filler send should succeed");
@@ -682,10 +306,8 @@ fn retry_under_concurrency_pressure() {
             request_id: 200,
             prompt_id: PromptId::ArticleTriage,
             prompt_version: Some(1),
-            model_override: None,
             input_content: "retryable document".to_string(),
             context: Vec::new(),
-            template_override: None,
             extra_template_vars: vec![],
         })))
         .expect("retry send should succeed");
@@ -726,10 +348,8 @@ fn make_triage_command(request_id: u64) -> LlmCommand {
         request_id,
         prompt_id: PromptId::ArticleTriage,
         prompt_version: Some(1),
-        model_override: None,
         input_content: "document text".to_string(),
         context: vec![],
-        template_override: None,
         extra_template_vars: vec![],
     }))
 }

@@ -1,11 +1,11 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{JobId, JobListMode, Msg, ReadingPaneMode, TrendCategory, WorkspaceView};
+use crate::{JobId, JobListMode, Msg};
 
 /// The deliberately restricted frontend vocabulary.
 ///
-/// JSON uses adjacently tagged objects (`{"type":"PollSources"}` or
+/// JSON uses adjacently tagged objects (`{"type":"RunPipeline"}` or
 /// `{"type":"SelectJob","payload":{"job_id":1}}`). Unknown fields are
 /// rejected rather than ignored.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -14,9 +14,6 @@ pub enum UiIntent {
     SelectJob {
         job_id: JobId,
     },
-    SetWorkspaceView {
-        view: WorkspaceView,
-    },
     SetJobListMode {
         mode: JobListMode,
     },
@@ -24,23 +21,14 @@ pub enum UiIntent {
         text: String,
     },
     ClearJobsSearch,
-    RevealJobsSearch,
-    SetTrendCategory {
-        category: TrendCategory,
-    },
-    TrendsViewOpened,
     DismissRunFinishedNotice,
-    PollSources,
-    PollIndirectLinks,
     RunPipeline,
+    ResumeUnfinishedWork,
     StopOrFinish,
     OpenSelectedInBrowser,
     OpenExtractedLink {
         job_id: JobId,
         link_index: u32,
-    },
-    SetReadingPaneMode {
-        mode: ReadingPaneMode,
     },
     OpenArchiveDialog,
     SubmitArchiveDialog {
@@ -82,23 +70,21 @@ impl UiIntent {
         use UiIntent::*;
         let message = match self {
             SelectJob { job_id } => Msg::JobSelected { job_id },
-            SetWorkspaceView { view } => Msg::WorkspaceViewSet { view },
             SetJobListMode { mode } => Msg::JobListModeSet { mode },
             SetJobsSearchQuery { text } => Msg::JobsSearchQueryChanged(text),
             ClearJobsSearch => Msg::JobsSearchCleared,
-            RevealJobsSearch => Msg::JobsSearchRevealRequested,
-            SetTrendCategory { category } => Msg::TrendCategorySelected { category },
-            TrendsViewOpened => Msg::TrendsViewOpened,
             DismissRunFinishedNotice => Msg::RunFinishedNoticeDismissed,
-            PollSources => Msg::PollSourcesClicked,
-            PollIndirectLinks => Msg::PollIndirectLinks,
-            RunPipeline => Msg::PipelineRunRequested,
+            RunPipeline => Msg::PipelineRunRequested {
+                scope: crate::PipelineRunScope::Full,
+            },
+            ResumeUnfinishedWork => Msg::PipelineRunRequested {
+                scope: crate::PipelineRunScope::Resume,
+            },
             StopOrFinish => Msg::StopFinishClicked,
             OpenSelectedInBrowser => Msg::OpenInBrowserClicked,
             OpenExtractedLink { job_id, link_index } => {
                 Msg::ExtractedLinkOpenRequested { job_id, link_index }
             }
-            SetReadingPaneMode { mode } => Msg::ReadingPaneModeSet { mode },
             OpenArchiveDialog => Msg::ArchiveClicked,
             SubmitArchiveDialog {
                 request_id,
@@ -130,7 +116,7 @@ mod tests {
     use chrono::{DateTime, Utc};
 
     use super::{HostAction, IntentContext, IntentEffect, UiIntent};
-    use crate::{JobListMode, Msg, ReadingPaneMode, TrendCategory, WorkspaceView};
+    use crate::{JobListMode, Msg};
 
     #[test]
     fn every_ui_intent_maps_to_its_exact_effect() {
@@ -142,14 +128,6 @@ mod tests {
             (
                 UiIntent::SelectJob { job_id: 7 },
                 IntentEffect::Dispatch(Msg::JobSelected { job_id: 7 }),
-            ),
-            (
-                UiIntent::SetWorkspaceView {
-                    view: WorkspaceView::Blacklist,
-                },
-                IntentEffect::Dispatch(Msg::WorkspaceViewSet {
-                    view: WorkspaceView::Blacklist,
-                }),
             ),
             (
                 UiIntent::SetJobListMode {
@@ -178,36 +156,20 @@ mod tests {
                 IntentEffect::Dispatch(Msg::JobsSearchCleared),
             ),
             (
-                UiIntent::RevealJobsSearch,
-                IntentEffect::Dispatch(Msg::JobsSearchRevealRequested),
-            ),
-            (
-                UiIntent::SetTrendCategory {
-                    category: TrendCategory::Themes,
-                },
-                IntentEffect::Dispatch(Msg::TrendCategorySelected {
-                    category: TrendCategory::Themes,
-                }),
-            ),
-            (
-                UiIntent::TrendsViewOpened,
-                IntentEffect::Dispatch(Msg::TrendsViewOpened),
-            ),
-            (
                 UiIntent::DismissRunFinishedNotice,
                 IntentEffect::Dispatch(Msg::RunFinishedNoticeDismissed),
             ),
             (
-                UiIntent::PollSources,
-                IntentEffect::Dispatch(Msg::PollSourcesClicked),
-            ),
-            (
-                UiIntent::PollIndirectLinks,
-                IntentEffect::Dispatch(Msg::PollIndirectLinks),
-            ),
-            (
                 UiIntent::RunPipeline,
-                IntentEffect::Dispatch(Msg::PipelineRunRequested),
+                IntentEffect::Dispatch(Msg::PipelineRunRequested {
+                    scope: crate::PipelineRunScope::Full,
+                }),
+            ),
+            (
+                UiIntent::ResumeUnfinishedWork,
+                IntentEffect::Dispatch(Msg::PipelineRunRequested {
+                    scope: crate::PipelineRunScope::Resume,
+                }),
             ),
             (
                 UiIntent::StopOrFinish,
@@ -225,14 +187,6 @@ mod tests {
                 IntentEffect::Dispatch(Msg::ExtractedLinkOpenRequested {
                     job_id: 9,
                     link_index: 3,
-                }),
-            ),
-            (
-                UiIntent::SetReadingPaneMode {
-                    mode: ReadingPaneMode::RawText,
-                },
-                IntentEffect::Dispatch(Msg::ReadingPaneModeSet {
-                    mode: ReadingPaneMode::RawText,
                 }),
             ),
             (

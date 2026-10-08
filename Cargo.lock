@@ -1704,7 +1704,6 @@ dependencies = [
 name = "harvester_batch"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "async-trait",
  "chrono",
  "clap",
@@ -1714,13 +1713,12 @@ dependencies = [
  "harvester_core",
  "harvester_engine",
  "harvester_io",
+ "harvester_ui_bridge",
  "log",
  "openai_provider_kit",
- "ron",
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 2.0.20",
  "tokio",
  "unicode-width",
 ]
@@ -1813,6 +1811,7 @@ dependencies = [
  "ron",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
@@ -2651,16 +2650,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
-name = "mime_guess"
-version = "2.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7c44f8e672c00fe5308fa235f821cb4198414e1c77935c1ab6948d3fd78550e"
-dependencies = [
- "mime",
- "unicase",
-]
-
-[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3073,7 +3062,7 @@ dependencies = [
 
 [[package]]
 name = "openai_provider_kit"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "async-trait",
  "reqwest",
@@ -3657,7 +3646,6 @@ dependencies = [
  "hyper-util",
  "js-sys",
  "log",
- "mime_guess",
  "native-tls",
  "percent-encoding",
  "pin-project-lite",

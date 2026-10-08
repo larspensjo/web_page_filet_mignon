@@ -1,27 +1,22 @@
+#[cfg(test)]
 use std::collections::HashMap;
-use std::fs;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
-use chrono::Utc;
 use engine_logging::{engine_error, engine_info, engine_warn};
-use harvester_core::{Effect, LlmResultKind, LoadedArticle, Msg, StopPolicy};
-use harvester_engine::llm::load_context_file;
-use harvester_engine::llm::prompt::{PromptId, PromptTemplateOwned, PROMPT_VERSION_DRAFT};
-use harvester_engine::llm::prompt_context::{ContextMeta, PromptContextFile};
+use harvester_core::{Effect, LlmResultKind, Msg, StopPolicy};
+#[cfg(test)]
+use harvester_engine::llm::prompt::PromptId;
+#[cfg(test)]
+use harvester_engine::llm::prompt_context::ContextMeta;
+use harvester_engine::llm::prompt_context::PromptContextFile;
 use harvester_engine::llm::LlmCommand;
-use harvester_engine::{
-    build_triage_archive, import_saved_webpages, is_confined_to,
-    load_and_prepare_articles_filtered, scan_archive_article_metadata, ExportOptions,
-    ImportOptions,
-};
+use harvester_engine::{build_triage_archive, import_saved_webpages, ImportOptions};
 
-use super::worker::{run_triage_refresh_load, EntityIndexWorkerMsg};
+use super::worker::run_triage_refresh_load;
 use super::{truncate_url_for_log, EffectRunner};
-use crate::effect_helpers::{
-    build_local_model_catalog, download_link_page, prompt_context_filename,
-};
 
 pub(crate) fn ordered_context_pairs(ctx_file: &PromptContextFile) -> Vec<(String, String)> {
     let mut pairs: Vec<(String, String)> = ctx_file
@@ -36,6 +31,28 @@ pub(crate) fn ordered_context_pairs(ctx_file: &PromptContextFile) -> Vec<(String
 impl EffectRunner {
     pub(super) fn execute_effect(&self, effect: Effect) {
         match effect {
+            Effect::LoadArticleLinks { job_id, url } => {
+                let output = self.paths.output_dir.clone();
+                let tx = self.msg_tx.clone();
+                thread::spawn(move || {
+                    let links = crate::article_links::try_load_article_links(&output, &url);
+                    let _ = tx.send(Msg::ArticleLinksLoaded { job_id, url, links });
+                });
+            }
+            Effect::StoreArticleLinks { url, links } => {
+                self.persistence_sink.store_article_links(
+                    &self.paths.output_dir,
+                    url,
+                    links,
+                    self.file_write_observer.clone(),
+                );
+            }
+            Effect::SaveResults { records } => self.result_sink.enqueue(records),
+            Effect::FlushResults => {
+                if let Err(error) = self.result_sink.request_flush() {
+                    engine_error!("[results] flush failed: {}", error);
+                }
+            }
             Effect::EnqueueUrl { job_id, url } => {
                 engine_info!(
                     "EnqueueUrl job_id={} url_len={} url={}",
@@ -46,7 +63,7 @@ impl EffectRunner {
                 self.engine.enqueue(job_id, url);
             }
             Effect::StartSession => {
-                // no-op; engine starts on first enqueue
+                self.engine.resume();
             }
             Effect::StopFinish { policy } => {
                 let immediate = matches!(policy, StopPolicy::Immediate);
@@ -101,31 +118,49 @@ impl EffectRunner {
                 requested_checkpoint,
                 use_summaries,
                 summaries,
+                annotations,
+                priority_snapshot,
             } => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.paths.output_dir.clone();
                 thread::spawn(move || {
-                    let options = ExportOptions {
-                        output_filename: basename.clone(),
-                        manifest_filename: None,
-                        ..ExportOptions::default()
-                    };
                     match build_triage_archive(
                         &output_dir,
                         &basename,
                         &ordered_urls,
                         since_utc,
-                        options,
                         use_summaries,
                         &summaries,
+                        &annotations,
+                        &priority_snapshot,
                     ) {
                         Ok(summary) => {
-                            engine_info!(
-                                "[archive-dialog] export completed request_id={} docs={} path={}",
-                                request_id,
-                                summary.doc_count,
-                                summary.output_path.display()
-                            );
+                            if let (Some(window_count), Some(counts)) =
+                                (summary.window_count, summary.unexported_by_priority)
+                            {
+                                let [priority_5, priority_4, priority_3, priority_2, priority_1, unavailable] =
+                                    counts;
+                                engine_info!(
+                                    "[archive-dialog] export completed request_id={} docs={} window_count={} unexported_by_priority={{\"5\":{},\"4\":{},\"3\":{},\"2\":{},\"1\":{},\"unavailable\":{}}} path={}",
+                                    request_id,
+                                    summary.doc_count,
+                                    window_count,
+                                    priority_5,
+                                    priority_4,
+                                    priority_3,
+                                    priority_2,
+                                    priority_1,
+                                    unavailable,
+                                    summary.output_path.display()
+                                );
+                            } else {
+                                engine_info!(
+                                    "[archive-dialog] export completed request_id={} docs={} path={}",
+                                    request_id,
+                                    summary.doc_count,
+                                    summary.output_path.display()
+                                );
+                            }
                             let _ = msg_tx.send(Msg::ArchiveExportCompleted {
                                 request_id,
                                 path: summary.output_path,
@@ -157,350 +192,12 @@ impl EffectRunner {
             Effect::OpenUrlInBrowser { url } => {
                 self.platform_handler.open_url(&url);
             }
-            Effect::ResolvePromptLabInputFromUrl { resolve_id, url } => {
-                let msg_tx = self.msg_tx.clone();
-                let output_dir = self.paths.output_dir.clone();
-                let registry = self.prompt_registry.clone();
-                let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
-                thread::spawn(move || {
-                    engine_info!(
-                        "[prompt-lab] resolve requested resolve_id={} url={}",
-                        resolve_id,
-                        url
-                    );
-                    let guard = registry.read().unwrap();
-                    match load_and_prepare_articles_filtered(
-                        &output_dir,
-                        max_input_bytes,
-                        &guard,
-                        std::slice::from_ref(&url),
-                        None,
-                    ) {
-                        Ok((mut articles, _collection_text)) => {
-                            if let Some(article) = articles.pop() {
-                                let _ = msg_tx.send(Msg::PromptLabInputResolved {
-                                    resolve_id,
-                                    result: Ok(article.prepared_text),
-                                });
-                            } else {
-                                let reason = "article missing after resolution".to_string();
-                                engine_warn!("[prompt-lab] resolve failed: {}", reason);
-                                let _ = msg_tx.send(Msg::PromptLabInputResolved {
-                                    resolve_id,
-                                    result: Err(reason),
-                                });
-                            }
-                        }
-                        Err(reason) => {
-                            engine_warn!("[prompt-lab] resolve failed: {}", reason);
-                            let _ = msg_tx.send(Msg::PromptLabInputResolved {
-                                resolve_id,
-                                result: Err(reason),
-                            });
-                        }
-                    }
-                });
-            }
-            Effect::LoadPromptLabModelCatalog => {
-                let msg_tx = self.msg_tx.clone();
-                let provider = self.llm_provider.clone();
-                let default_provider_kind = self.llm_default_provider;
-                let effective_models = self.llm_metadata_models.clone();
-
-                thread::spawn(move || {
-                    engine_info!("[prompt-lab-model] loading model catalog");
-
-                    let local_fallback_models =
-                        build_local_model_catalog(default_provider_kind, &effective_models);
-
-                    let (models, source) = if let (Some(provider), Some(provider_kind)) =
-                        (provider, default_provider_kind)
-                    {
-                        match tokio::runtime::Runtime::new() {
-                            Ok(runtime) => match runtime.block_on(provider.list_models()) {
-                                Ok(mut model_names) => {
-                                    model_names.sort();
-                                    model_names.dedup();
-
-                                    engine_info!(
-                                        "[prompt-lab-model] remote discovery succeeded: {} models found: {}",
-                                        model_names.len(),
-                                        model_names.join(", ")
-                                    );
-
-                                    let models: Vec<_> = model_names
-                                        .into_iter()
-                                        .map(|name| {
-                                            harvester_engine::llm::types::ModelId::new(
-                                                provider_kind,
-                                                name,
-                                            )
-                                        })
-                                        .collect();
-                                    (models, harvester_core::ModelCatalogSource::Remote)
-                                }
-                                Err(err) => {
-                                    engine_warn!(
-                                        "[prompt-lab-model] remote discovery failed: {}",
-                                        err
-                                    );
-                                    (
-                                        local_fallback_models,
-                                        harvester_core::ModelCatalogSource::LocalFallback,
-                                    )
-                                }
-                            },
-                            Err(err) => {
-                                engine_warn!(
-                                    "[prompt-lab-model] tokio runtime creation failed: {}",
-                                    err
-                                );
-                                (
-                                    local_fallback_models,
-                                    harvester_core::ModelCatalogSource::LocalFallback,
-                                )
-                            }
-                        }
-                    } else {
-                        (
-                            local_fallback_models,
-                            harvester_core::ModelCatalogSource::LocalFallback,
-                        )
-                    };
-
-                    let _ = msg_tx.send(Msg::PromptLabModelCatalogLoaded { models, source });
-                });
-            }
-            Effect::DownloadLinkedPage {
-                job_id,
-                link_index,
-                url,
-            } => {
-                engine_info!(
-                    "DownloadLinkedPage job_id={} link_index={} url={}",
-                    job_id,
-                    link_index,
-                    url
-                );
-                let msg_tx = self.msg_tx.clone();
-                let output_dir = self.paths.output_dir.clone();
-                let url_policy = self.url_policy.clone();
-                let fetch_settings = self.fetch_settings.clone();
-                thread::spawn(move || {
-                    match download_link_page(&url, &output_dir, &url_policy, &fetch_settings) {
-                        Ok(path) => {
-                            engine_info!("Linked page saved: {}", path.display());
-                            let _ = msg_tx.send(Msg::LinkDownloadCompleted {
-                                job_id,
-                                link_index,
-                                path,
-                            });
-                        }
-                        Err(error) => {
-                            engine_warn!("Linked page download failed: {}", error);
-                            let _ = msg_tx.send(Msg::LinkDownloadFailed {
-                                job_id,
-                                link_index,
-                                error,
-                            });
-                        }
-                    }
-                });
-            }
-            Effect::DeleteLinkedPage {
-                job_id,
-                link_index,
-                path,
-            } => {
-                engine_info!(
-                    "Delete linked page job_id={} link_index={} path={}",
-                    job_id,
-                    link_index,
-                    path.display()
-                );
-                let msg_tx = self.msg_tx.clone();
-                let output_dir = self.paths.output_dir.clone();
-                thread::spawn(move || {
-                    if is_confined_to(&path, &output_dir) {
-                        let absolute_path = output_dir.join(&path);
-                        let _ = fs::remove_file(&absolute_path);
-                    } else {
-                        engine_warn!(
-                            "DeleteLinkedPage rejected unsafe path job_id={} link_index={} path={}",
-                            job_id,
-                            link_index,
-                            path.display()
-                        );
-                    }
-                    let _ = msg_tx.send(Msg::LinkDeleted { job_id, link_index });
-                });
-            }
-            Effect::SavePromptContextFile {
-                prompt_id,
-                mut context_pairs,
-            } => {
-                let msg_tx = self.msg_tx.clone();
-                let contexts_dir = self.paths.contexts_dir.clone();
-                thread::spawn(move || {
-                    if let Err(err) = fs::create_dir_all(&contexts_dir) {
-                        let reason = format!("failed to create contexts directory: {}", err);
-                        engine_error!(
-                            "[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}",
-                            reason,
-                            prompt_id
-                        );
-                        let _ = msg_tx.send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
-                        return;
-                    }
-
-                    let filename = prompt_context_filename(prompt_id);
-                    let path = contexts_dir.join(filename);
-
-                    let existing_meta = if path.exists() {
-                        match load_context_file(&path) {
-                            Ok(file) => file.meta,
-                            Err(err) => {
-                                let reason = format!("failed to read existing context: {}", err);
-                                engine_error!(
-                                    "[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}",
-                                    reason,
-                                    prompt_id
-                                );
-                                let _ = msg_tx
-                                    .send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
-                                return;
-                            }
-                        }
-                    } else {
-                        ContextMeta {
-                            prompt_id: prompt_id.to_string(),
-                            schema_version: 1,
-                            version: 0,
-                            updated: Utc::now().to_rfc3339(),
-                            description: None,
-                            changelog: None,
-                        }
-                    };
-
-                    let mut meta = existing_meta;
-                    meta.schema_version = 1;
-                    meta.prompt_id = prompt_id.to_string();
-                    meta.version = meta.version.saturating_add(1);
-                    meta.updated = Utc::now().to_rfc3339();
-
-                    context_pairs.sort_by(|a, b| a.0.cmp(&b.0));
-                    let variables = context_pairs.into_iter().collect::<HashMap<_, _>>();
-
-                    let ctx_file = PromptContextFile {
-                        meta: meta.clone(),
-                        variables,
-                    };
-
-                    let mut toml_string = match toml::to_string(&ctx_file) {
-                        Ok(serialized) => serialized,
-                        Err(err) => {
-                            let reason = format!("failed to serialize context: {}", err);
-                            engine_error!(
-                                "[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}",
-                                reason,
-                                prompt_id
-                            );
-                            let _ =
-                                msg_tx.send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
-                            return;
-                        }
-                    };
-                    toml_string.push('\n');
-
-                    let tmp_path = path.with_extension("toml.tmp");
-                    if let Err(err) = fs::write(&tmp_path, toml_string) {
-                        let reason = format!("failed to write temp file: {}", err);
-                        engine_error!(
-                            "[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}",
-                            reason,
-                            prompt_id
-                        );
-                        let _ = msg_tx.send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
-                        return;
-                    }
-
-                    if let Err(err) = fs::rename(&tmp_path, &path) {
-                        let reason = format!("failed to rename temp file: {}", err);
-                        engine_error!(
-                            "[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}",
-                            reason,
-                            prompt_id
-                        );
-                        let _ = msg_tx.send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
-                        return;
-                    }
-
-                    engine_info!(
-                        "[prompt-lab-context] Saved context for {:?} to {:?}",
-                        prompt_id,
-                        path
-                    );
-                    let _ = msg_tx.send(Msg::PromptLabContextSaved {
-                        prompt_id,
-                        path: path.display().to_string(),
-                        version: meta.version as u64,
-                    });
-                });
-            }
-            Effect::SavePromptTemplateFile {
-                prompt_id,
-                system_template,
-                user_template,
-                description,
-                expected_format,
-            } => {
-                let prompts_dir = self.paths.prompts_dir.clone();
-                let registry = self.prompt_registry.clone();
-                let msg_tx = self.msg_tx.clone();
-                thread::spawn(move || {
-                    match crate::save_prompt_template(
-                        &prompts_dir,
-                        prompt_id,
-                        &system_template,
-                        &user_template,
-                        &description,
-                        &expected_format,
-                    ) {
-                        Ok((version, path)) => {
-                            let overlay = PromptTemplateOwned {
-                                id: prompt_id,
-                                version,
-                                system_template: system_template.clone(),
-                                user_template: user_template.clone(),
-                                description: description.clone(),
-                                expected_format: expected_format.clone(),
-                            };
-                            if let Ok(mut reg) = registry.write() {
-                                reg.register_overlay(overlay);
-                            }
-                            engine_info!("[prompt-lab-template] Saved template prompt_id={:?} path={} version={}", prompt_id, path.display(), version);
-                            let _ = msg_tx.send(Msg::PromptLabTemplateSaved {
-                                prompt_id,
-                                version,
-                                path: path.display().to_string(),
-                            });
-                        }
-                        Err(reason) => {
-                            engine_error!("[prompt-lab-template] SavePromptTemplateFile failed prompt_id={:?} reason={}", prompt_id, reason);
-                            let _ =
-                                msg_tx.send(Msg::PromptLabTemplateSaveFailed { prompt_id, reason });
-                        }
-                    }
-                });
-            }
             Effect::RequestLlmCompletion {
                 request_id,
                 prompt_id,
                 prompt_version,
-                model_override,
                 input_content,
                 context,
-                template_override,
                 extra_template_vars,
             } => {
                 if let Some(handle) = &self.llm_handle {
@@ -509,10 +206,8 @@ impl EffectRunner {
                             request_id,
                             prompt_id,
                             prompt_version,
-                            model_override,
                             input_content,
                             context,
-                            template_override,
                             extra_template_vars,
                         },
                     ));
@@ -550,69 +245,57 @@ impl EffectRunner {
                     });
                 }
             }
-            Effect::LoadArticlesForBriefing {
-                ordered_urls,
-                since_utc,
+
+            Effect::LoadProcessingConfiguration {
+                request_id,
+                require_triage_context,
             } => {
                 let msg_tx = self.msg_tx.clone();
-                let output_dir = self.paths.output_dir.clone();
-                let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
+                let paths = self.paths.clone();
                 let registry = self.prompt_registry.clone();
+                let effective_models = self.llm_metadata_models.clone();
+                let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
                 thread::spawn(move || {
-                    let load_started = Instant::now();
                     engine_info!(
-                        "[articles-load] briefing start urls={} since_filter={}",
-                        ordered_urls.len(),
-                        since_utc.is_some()
+                        "[processing-configuration] request_id={} start require_triage_context={}",
+                        request_id,
+                        require_triage_context
                     );
-                    let guard = registry.read().unwrap();
-                    match load_and_prepare_articles_filtered(
-                        &output_dir,
+                    let result = super::configuration::load(
+                        &paths,
+                        &registry,
                         max_input_bytes,
-                        &guard,
-                        &ordered_urls,
-                        since_utc,
-                    ) {
-                        Ok((articles, collection_text)) => {
-                            let loaded_articles: Vec<LoadedArticle> = articles
-                                .into_iter()
-                                .map(|article| LoadedArticle {
-                                    url: article.url,
-                                    source_title: article.source_title,
-                                    prepared_text: article.prepared_text,
-                                    content_hash: article.content_hash,
-                                    fetched_utc: article.fetched_utc,
-                                })
-                                .collect();
-                            engine_info!(
-                                "[briefing-loader] prepared {} article(s)",
-                                loaded_articles.len()
-                            );
-                            engine_info!(
-                                "[articles-load] briefing done urls={} prepared={} elapsed_ms={}",
-                                ordered_urls.len(),
-                                loaded_articles.len(),
-                                load_started.elapsed().as_millis()
-                            );
-                            let _ = msg_tx.send(Msg::ArticlesLoaded {
-                                articles: loaded_articles,
-                                collection_text,
-                            });
+                        require_triage_context,
+                    );
+                    let msg = match result {
+                        Ok((contexts, active_versions, preparation_budget)) => {
+                            Msg::ProcessingConfigurationLoaded {
+                                request_id,
+                                contexts,
+                                active_versions,
+                                effective_models,
+                                preparation_budget,
+                            }
                         }
                         Err(reason) => {
                             engine_warn!(
-                                "[articles-load] briefing failed urls={} elapsed_ms={} reason={}",
-                                ordered_urls.len(),
-                                load_started.elapsed().as_millis(),
+                                "[processing-configuration] request_id={} failed: {}",
+                                request_id,
                                 reason
                             );
-                            engine_warn!("[briefing-loader] load failed: {}", reason);
-                            let _ = msg_tx.send(Msg::ArticlesLoadFailed { reason });
+                            Msg::ProcessingConfigurationFailed { request_id, reason }
                         }
-                    }
+                    };
+                    let _ = msg_tx.send(msg);
                 });
             }
+            Effect::ResetCorpusScanIndex => {
+                self.corpus_scan_reset_requested
+                    .store(true, Ordering::Release);
+                engine_info!("[corpus-index] reset requested after imported-corpus clear");
+            }
             Effect::LoadArticlesForTriage {
+                held,
                 request_id,
                 ordered_urls,
                 since_utc,
@@ -621,8 +304,13 @@ impl EffectRunner {
                 let output_dir = self.paths.output_dir.clone();
                 let registry = Arc::clone(&self.prompt_registry);
                 let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
+                let index = self.corpus_scan_index.clone();
+                let reset_requested = self.corpus_scan_reset_requested.clone();
                 thread::spawn(move || {
                     run_triage_refresh_load(
+                        index,
+                        reset_requested,
+                        held,
                         request_id,
                         ordered_urls,
                         since_utc,
@@ -637,59 +325,9 @@ impl EffectRunner {
                 let msg_tx = self.msg_tx.clone();
                 let contexts_dir = self.paths.contexts_dir.clone();
                 thread::spawn(move || {
-                    if !contexts_dir.exists() {
-                        let reason = format!(
-                            "required prompt contexts directory not found at {:?}",
-                            contexts_dir
-                        );
-                        engine_warn!("[PromptContext] {}", reason);
-                        let _ = msg_tx.send(Msg::PromptContextsLoadFailed { reason });
-                        return;
-                    }
-
-                    let mut contexts = HashMap::new();
-                    let mut required_context_failure = None;
-                    let prompt_ids = [
-                        PromptId::ArticleTriage,
-                        PromptId::ArticleSummary,
-                        PromptId::ArticleSignalCandidate,
-                        PromptId::AggregateBriefing,
-                        PromptId::BriefingExecutiveSummary,
-                        PromptId::BriefingNextItem,
-                    ];
-
-                    for prompt_id in prompt_ids {
-                        let filename = prompt_context_filename(prompt_id);
-                        let path = contexts_dir.join(filename);
-
-                        if !path.exists() {
-                            if prompt_id == PromptId::ArticleTriage {
-                                required_context_failure = Some(format!(
-                                    "required ArticleTriage context file missing at {:?}",
-                                    path
-                                ));
-                            }
-                            continue;
-                        }
-
-                        match load_context_file(&path) {
-                            Ok(ctx_file) => {
-                                contexts.insert(prompt_id, ordered_context_pairs(&ctx_file));
-                            }
-                            Err(e) => {
-                                if prompt_id == PromptId::ArticleTriage {
-                                    required_context_failure = Some(format!(
-                                        "required ArticleTriage context failed to load from {:?}: {}",
-                                        path, e
-                                    ));
-                                    continue;
-                                }
-                                engine_warn!("[PromptContext] Failed to load {:?}: {}", path, e);
-                            }
-                        }
-                    }
-
-                    if let Some(reason) = required_context_failure {
+                    let (contexts, failure) =
+                        super::configuration::load_contexts(&contexts_dir, true);
+                    if let Some(reason) = failure {
                         if !contexts.is_empty() {
                             let _ = msg_tx.send(Msg::PromptContextsLoaded { contexts });
                         }
@@ -705,138 +343,48 @@ impl EffectRunner {
                 let prompts_dir = self.paths.prompts_dir.clone();
                 let registry = self.prompt_registry.clone();
                 thread::spawn(move || {
-                    for entry in crate::load_prompt_templates(&prompts_dir) {
-                        let loaded_template = match entry {
-                            Ok(lt) => lt,
-                            Err(reason) => {
-                                engine_warn!(
-                                    "[prompt-lab-template] Failed to load saved template: {}",
-                                    reason
-                                );
-                                continue;
-                            }
-                        };
-
-                        if loaded_template.template_file.version == PROMPT_VERSION_DRAFT {
-                            engine_warn!("[prompt-lab-template] skipping draft saved template prompt_id={:?} path={}", loaded_template.prompt_id, loaded_template.path.display());
-                            continue;
-                        }
-
-                        let overlay = PromptTemplateOwned {
-                            id: loaded_template.prompt_id,
-                            version: loaded_template.template_file.version,
-                            system_template: loaded_template.template_file.system_template,
-                            user_template: loaded_template.template_file.user_template,
-                            description: loaded_template.template_file.description,
-                            expected_format: loaded_template.template_file.expected_format,
-                        };
-
-                        if let Ok(mut guard) = registry.write() {
-                            guard.register_overlay(overlay);
-                        }
-                        engine_info!("[prompt-lab-template] Loaded saved template prompt_id={:?} version={} path={}", loaded_template.prompt_id, loaded_template.template_file.version, loaded_template.path.display());
-                    }
+                    super::configuration::load_overlays(&prompts_dir, &registry);
                     let _ = msg_tx.send(Msg::PromptTemplateFilesLoaded);
                 });
             }
             Effect::LoadLlmMetadata => {
+                let prompts_dir = self.paths.prompts_dir.clone();
                 let msg_tx = self.msg_tx.clone();
                 let registry = self.prompt_registry.clone();
                 let models = self.llm_metadata_models.clone();
                 thread::spawn(move || {
-                    use harvester_core::PromptLabTemplateSnapshot;
-
-                    let (active_versions, templates) = {
+                    super::configuration::load_overlays(&prompts_dir, &registry);
+                    let active_versions = {
                         let guard = registry.read().unwrap();
-                        let versions = guard.active_versions_map();
-                        let prompt_ids = &[
-                            PromptId::ArticleTriage,
-                            PromptId::ArticleSummary,
-                            PromptId::ArticleSignalCandidate,
-                            PromptId::AggregateBriefing,
-                            PromptId::BriefingExecutiveSummary,
-                            PromptId::BriefingNextItem,
-                        ];
-                        let templates = prompt_ids
-                            .iter()
-                            .filter_map(|&prompt_id| {
-                                guard.active_effective(prompt_id).map(|effective| {
-                                    (
-                                        prompt_id,
-                                        PromptLabTemplateSnapshot {
-                                            template: effective.to_owned(),
-                                            source: effective.source(),
-                                        },
-                                    )
-                                })
-                            })
-                            .collect::<HashMap<_, _>>();
-                        (versions, templates)
+                        guard.active_versions_map()
                     };
                     let effective_models = models;
 
                     engine_info!(
-                        "[llm-metadata] metadata prepared (versions={}, models={} templates={})",
+                        "[llm-metadata] metadata prepared (versions={}, models={})",
                         active_versions.len(),
                         effective_models.len(),
-                        templates.len(),
                     );
 
                     let _ = msg_tx.send(Msg::LlmMetadataLoaded {
                         active_versions,
                         effective_models,
-                        templates,
                     });
                 });
             }
-            Effect::PersistSummaryCache { cache } => {
-                let msg_tx = self.msg_tx.clone();
-                let path = self.paths.summary_cache_path.clone();
-                thread::spawn(move || {
-                    match crate::persist_summary_cache(&cache, &path) {
-                        Ok(_) => {
-                            engine_info!("[summary-cache] Persisted cache to {:?}", path);
-                        }
-                        Err(err) => {
-                            engine_warn!(
-                                "[summary-cache] Failed to persist cache to {:?}: {}",
-                                path,
-                                err
-                            );
-                        }
-                    }
-                    // Fire-and-forget, no message sent
-                    let _ = msg_tx;
-                });
-            }
-            Effect::PersistSignalCandidateCache { cache } => {
-                let msg_tx = self.msg_tx.clone();
-                let path = self.paths.output_dir.join(".signal_candidate_cache.ron");
-                thread::spawn(move || {
-                    match crate::signal_candidate_cache_store::save(&path, &cache) {
-                        Ok(_) => {
-                            engine_info!("[signal-cache] Persisted cache to {:?}", path);
-                        }
-                        Err(err) => {
-                            engine_warn!(
-                                "[signal-cache] Failed to persist cache to {:?}: {}",
-                                path,
-                                err
-                            );
-                        }
-                    }
-                    let _ = msg_tx;
-                });
-            }
+
             Effect::PersistSignalCandidateOverrides { overrides } => {
                 let msg_tx = self.msg_tx.clone();
                 let path = self
                     .paths
                     .output_dir
                     .join(".signal_candidate_overrides.ron");
+                let observer = self.file_write_observer.clone();
                 thread::spawn(move || {
+                    let started = Instant::now();
                     match crate::signal_candidate_overrides_store::save(&path, &overrides) {
                         Ok(_) => {
+                            super::observe_file_write(&observer, &path, started.elapsed());
                             engine_info!("[signal-overrides] Persisted overrides to {:?}", path);
                         }
                         Err(err) => {
@@ -850,48 +398,11 @@ impl EffectRunner {
                     let _ = msg_tx;
                 });
             }
-            Effect::PersistTriageCache { cache } => {
-                let msg_tx = self.msg_tx.clone();
-                let path = self.paths.triage_cache_path.clone();
-                thread::spawn(move || {
-                    match crate::persist_triage_cache(&cache, &path) {
-                        Ok(_) => {
-                            engine_info!("[triage-cache] Persisted cache to {:?}", path);
-                        }
-                        Err(err) => {
-                            engine_warn!(
-                                "[triage-cache] Failed to persist cache to {:?}: {}",
-                                path,
-                                err
-                            );
-                        }
-                    }
-                    // Fire-and-forget, no message sent
-                    let _ = msg_tx;
-                });
-            }
+
             Effect::PollAllSources => {
                 self.execute_poll_all_sources();
             }
-            Effect::LoadBriefingHistory => {
-                let msg_tx = self.msg_tx.clone();
-                let path = self.paths.briefing_history_path.clone();
-                thread::spawn(move || {
-                    // load_briefing_history already returns [] and logs on failure —
-                    // always send BriefingHistoryLoaded (no separate failure Msg).
-                    let entries = crate::load_briefing_history(&path);
-                    let _ = msg_tx.send(Msg::BriefingHistoryLoaded { entries });
-                });
-            }
-            Effect::SaveBriefingHistory { entries } => {
-                let path = self.paths.briefing_history_path.clone();
-                thread::spawn(move || {
-                    if let Err(e) = crate::save_briefing_history(&path, &entries) {
-                        engine_error!("[briefing-history] Save failed: {}", e);
-                        // Non-fatal: no Msg sent on failure
-                    }
-                });
-            }
+
             Effect::LoadBriefingCheckpoint => {
                 let msg_tx = self.msg_tx.clone();
                 let path = self.paths.briefing_checkpoint_path.clone();
@@ -921,140 +432,18 @@ impl EffectRunner {
                     }
                 });
             }
-            Effect::LoadEntityIndex => {
-                let path = self.paths.entity_index_path.clone();
-                let msg_tx = self.msg_tx.clone();
-                thread::spawn(move || {
-                    let index = crate::entity_index_store::load_entity_index(&path);
-                    // `load_entity_index` already logs and returns default on parse/IO errors.
-                    // Distinguish parse failures from successful-but-empty by checking if the
-                    // file exists. If it does not exist, treat as a fresh (empty) index — loaded,
-                    // not failed.
-                    engine_info!(
-                        "[entity-index] LoadEntityIndex: {} entries",
-                        index.entries.len()
-                    );
-                    let _ = msg_tx.send(Msg::EntityIndexLoaded { index });
-                });
-            }
-            Effect::RebuildEntityIndex => {
-                let msg_tx = self.msg_tx.clone();
-                let output_dir = self.paths.output_dir.clone();
-                let triage_cache_path = self.paths.triage_cache_path.clone();
-                let summary_cache_path = self.paths.summary_cache_path.clone();
-                let entity_index_path = self.paths.entity_index_path.clone();
-                thread::spawn(move || {
-                    engine_info!("[entity-index] starting rebuild");
-
-                    // Step 1: scan archive for article metadata (url, fetched_utc, content_hash)
-                    let article_metas = match scan_archive_article_metadata(&output_dir) {
-                        Ok(metas) => metas,
-                        Err(e) => {
-                            engine_error!("[entity-index] rebuild: scan failed: {}", e);
-                            let _ = msg_tx.send(Msg::EntityIndexRebuildFailed {
-                                reason: format!("scan failed: {e}"),
-                            });
-                            return;
-                        }
-                    };
-
-                    // Step 2: load triage cache and build content_hash → tags map.
-                    // Use the first entry per content_hash (any version is fine for rebuild).
-                    let triage_cache =
-                        crate::triage_cache_store::load_triage_cache(&triage_cache_path);
-                    let mut themes_map: std::collections::HashMap<String, Vec<String>> =
-                        std::collections::HashMap::new();
-                    for (key, entry) in triage_cache.iter() {
-                        themes_map
-                            .entry(key.content_hash.clone())
-                            .or_insert_with(|| entry.result.tags.clone());
-                    }
-
-                    // Step 3: load summary cache and build content_hash → entities map.
-                    // Only V4+ entries will have non-empty entities; older entries → empty.
-                    let summary_cache =
-                        crate::summary_cache_store::load_summary_cache(&summary_cache_path);
-                    let mut entities_map: std::collections::HashMap<
-                        String,
-                        harvester_engine::llm::SummaryEntities,
-                    > = std::collections::HashMap::new();
-                    for (key, entry) in summary_cache.iter() {
-                        entities_map
-                            .entry(key.content_hash.clone())
-                            .or_insert_with(|| entry.result.entities.clone());
-                    }
-
-                    // Step 4: build EntityIndex by joining on content_hash.
-                    let mut index =
-                        crate::entity_index_store::load_entity_index(&entity_index_path);
-                    for meta in &article_metas {
-                        let content_hash = meta.content_hash.as_deref().unwrap_or("");
-                        let entities = entities_map.get(content_hash);
-                        let themes = themes_map.get(content_hash);
-                        let entry = harvester_core::entity_index::EntityIndexEntry {
-                            fetched_utc: meta.fetched_utc.clone(),
-                            content_hash: meta.content_hash.clone(),
-                            companies: entities.map(|e| e.companies.clone()).unwrap_or_default(),
-                            technologies: entities
-                                .map(|e| e.technologies.clone())
-                                .unwrap_or_default(),
-                            products: entities.map(|e| e.products.clone()).unwrap_or_default(),
-                            themes: themes.cloned().unwrap_or_default(),
-                        };
-                        index.entries.insert(meta.url.clone(), entry);
-                    }
-
-                    // Step 5: atomically write the rebuilt index.
-                    if let Err(e) =
-                        crate::entity_index_store::save_entity_index(&entity_index_path, &index)
-                    {
-                        engine_error!("[entity-index] rebuild: save failed: {}", e);
-                        let _ = msg_tx.send(Msg::EntityIndexRebuildFailed {
-                            reason: format!("save failed: {e}"),
-                        });
-                        return;
-                    }
-
-                    engine_info!(
-                        "[entity-index] rebuild complete: {} entries",
-                        index.entries.len()
-                    );
-                    let _ = msg_tx.send(Msg::EntityIndexRebuilt { index });
-                });
-            }
-            Effect::UpsertEntityIndexEntry {
-                url,
-                fetched_utc,
-                content_hash,
-                summary_entities,
-                themes,
-            } => {
-                let patch = crate::entity_index_store::EntityIndexPatch {
-                    fetched_utc,
-                    content_hash,
-                    summary_entities,
-                    themes,
-                };
-                if let Err(e) = self
-                    .entity_index_worker_tx
-                    .send(EntityIndexWorkerMsg::Upsert { url, patch })
-                {
-                    engine_error!("[entity-index] worker channel closed, upsert dropped: {e}");
-                }
-            }
-
-            // --- Window size persistence ---
-            Effect::PersistWindowSize { width, height } => {
-                let path = self.paths.state_path.clone();
-                thread::spawn(move || {
-                    crate::persist_window_size(&path, width, height);
-                    engine_info!("[window-size] Persisted {}x{} to {:?}", width, height, path);
-                });
-            }
             Effect::PersistDesktopWindowSize { width, height } => {
                 let path = self.paths.state_path.clone();
+                let tx = self.msg_tx.clone();
                 thread::spawn(move || {
-                    crate::persist_desktop_window_size(&path, width, height);
+                    crate::persistence::persist_desktop_window_size_with_notices(
+                        &path,
+                        width,
+                        height,
+                        |message| {
+                            let _ = tx.send(Msg::RuntimeStateNotice { message });
+                        },
+                    );
                     engine_info!(
                         "[desktop-window-size] Persisted logical inner size {}x{} to {:?}",
                         width,
@@ -1062,6 +451,9 @@ impl EffectRunner {
                         path
                     );
                 });
+            }
+            Effect::PersistRuntimeState { snapshot } => {
+                self.persistence_sink.enqueue(snapshot);
             }
 
             // --- Import saved webpages ---
@@ -1102,7 +494,7 @@ mod context_order_tests {
         variables.insert("mid".to_string(), "m".to_string());
         let pairs = ordered_context_pairs(&PromptContextFile {
             meta: ContextMeta {
-                prompt_id: PromptId::AggregateBriefing.to_string(),
+                prompt_id: PromptId::ArticleSummary.to_string(),
                 schema_version: 1,
                 version: 1,
                 updated: "2026-06-15".to_string(),

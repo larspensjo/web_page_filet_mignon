@@ -5,10 +5,10 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use harvester_core::{
     ActivityEntry, ActivityOutcome, AppViewModel, DesktopJobListView, JobFilterStatus, JobListMode,
-    JobListRowView, JobOrigin, JobResultKind, LinkDownloadState, LinkRowView, PipelineStage,
-    RunProgressView, ScoreBand, SelectedJobView, SelectedJobVisibility, SignalCandidateOutcome,
-    SignalCandidateRow, SignalCandidateRowState, Stage, StageProgress, StageStatus,
-    TriageAnnotationView, ACTIVITY_FEED_CAPACITY, DESKTOP_JOB_LIST_MAX_ROWS, MAX_EXTRACTED_LINKS,
+    JobListRowView, JobOrigin, JobResultKind, LinkRowView, PipelineStage, RunProgressView,
+    ScoreBand, SelectedJobView, SelectedJobVisibility, SignalCandidateOutcome, SignalCandidateRow,
+    SignalCandidateRowState, Stage, StageProgress, StageStatus, TriageAnnotationView,
+    ACTIVITY_FEED_CAPACITY, DESKTOP_JOB_LIST_MAX_ROWS, MAX_EXTRACTED_LINKS,
 };
 use harvester_engine::{llm::dto::SourceTier, LinkKind};
 use serde::{Deserialize, Serialize};
@@ -146,12 +146,14 @@ pub fn synthetic_view(case: ProbeCase, generation: u64) -> AppViewModel {
     };
     let results = matches!(case, ProbeCase::PopulatedResults);
     AppViewModel {
-        job_count: PROBE_CORPUS_JOBS,
-        job_list_mode: if results {
-            JobListMode::Results
-        } else {
-            JobListMode::SinceCheckpoint
+        archive_meter: harvester_core::ArchiveMeterView {
+            selected_count: 110,
+            target: harvester_core::ARCHIVE_ARTICLE_TARGET,
+            token_estimate: 60_000,
+            unsettled_count: 40,
+            status: harvester_core::ArchiveMeterStatus::Scored,
         },
+        job_count: PROBE_CORPUS_JOBS,
         desktop_job_list: DesktopJobListView {
             mode: if results {
                 JobListMode::Results
@@ -181,6 +183,7 @@ fn synthetic_run_progress(generation: u64) -> RunProgressView {
         .into_iter()
         .enumerate()
         .map(|(index, stage)| StageProgress {
+            total_is_final: true,
             stage,
             status: if index < 4 {
                 StageStatus::Done
@@ -188,6 +191,7 @@ fn synthetic_run_progress(generation: u64) -> RunProgressView {
                 StageStatus::Active
             },
             completed: (24 + index * 7) as u32,
+            reused: 0,
             failed: u32::from(index == 1),
             total: (30 + index * 8) as u32,
             started_at_utc: Some(probe_time(index as i64)),
@@ -203,7 +207,7 @@ fn synthetic_run_progress(generation: u64) -> RunProgressView {
             0 => ActivityOutcome::Started,
             1 => ActivityOutcome::Succeeded,
             2 => ActivityOutcome::Failed { reason: format!("Source returned a realistic transient response for probe activity {index}; retry exhaustion recorded safely.") },
-            _ => ActivityOutcome::Skipped { reason: format!("Article was deferred to the next batch cycle after policy evaluation {index}.") },
+            _ => ActivityOutcome::Skipped { reason: format!("Article was skipped after policy evaluation {index}.") },
         },
     }).collect();
     RunProgressView {
@@ -227,7 +231,6 @@ fn synthetic_job_list_row(index: usize, generation: u64) -> JobListRowView {
         tokens: Some(1_024 + index as u32),
         bytes: Some(32_768 + index as u64),
         link_count: 3,
-        downloaded_link_count: 1,
         origin: JobOrigin::Direct,
         triage_annotation: Some(TriageAnnotationView {
             priority: 3,
@@ -276,8 +279,6 @@ fn synthetic_selected_job(generation: u64, link_count: usize) -> SelectedJobView
                 ),
                 label: format!("Linked evidence {index} for the selected probe article"),
                 kind: LinkKind::Hyperlink,
-                download_state: LinkDownloadState::NotDownloaded,
-                age_suspect: false,
             })
             .collect(),
     }

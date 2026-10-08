@@ -6,7 +6,7 @@ use crate::signal_candidate_cache::{
     SignalCandidateCache, SignalCandidateCacheKey, SignalCandidateInputBundle,
 };
 use crate::triage::{ArticleTriageResult, TriageSession};
-use crate::update::update;
+use crate::update::test_support::update;
 use crate::{AppState, Effect, LlmResultKind, Msg, SummaryCacheKey};
 use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
 use harvester_engine::llm::prompt::PromptId;
@@ -61,8 +61,8 @@ fn seed_completed_summary_state() -> AppState {
         fetched_utc: Some("2026-05-25T12:00:00Z".to_string()),
     };
 
-    let mut briefing = BriefingSession::new_loading(None);
-    briefing.set_articles(vec![article.clone()], "collection".to_string());
+    let mut briefing = BriefingSession::new_loading();
+    briefing.set_articles(vec![article.clone()]);
     briefing.transition_to_summarizing();
     briefing.start_article(0, 11);
     briefing.complete_article(0, sample_summary_result());
@@ -143,7 +143,8 @@ fn set_signal_candidate_metadata_without_sweep(state: &mut AppState) {
         PromptId::ArticleSignalCandidate,
         "test-signal-model".to_string(),
     );
-    state.set_llm_metadata(active_versions, effective_models, HashMap::new());
+    state.set_llm_metadata(active_versions, effective_models);
+    super::support::seed_current_triage_cache(state);
 }
 
 fn prewarm_signal_candidate_cache(
@@ -176,7 +177,7 @@ fn prewarm_signal_candidate_cache(
         summary: summary.summary.as_str(),
         key_points: &key_points,
         upstream_summary_cache_digest: state
-            .summary_cache_key_for_url(url)
+            .current_summary_cache_key(&article.content_hash)
             .expect("summary cache key")
             .digest(),
     };
@@ -237,9 +238,10 @@ fn signal_candidate_session_starts_empty() {
 #[test]
 fn signal_candidate_completion_routes_to_session_and_persists_cache() {
     let mut state = AppState::new();
-    state
-        .signal_candidate_mut()
-        .enqueue("https://example.com/article".to_string());
+    state.signal_candidate_mut().enqueue(
+        "https://example.com/article".to_string(),
+        "fixture-input".to_string(),
+    );
     state
         .signal_candidate_mut()
         .mark_scoring("https://example.com/article", 9);
@@ -283,15 +285,16 @@ fn signal_candidate_completion_routes_to_session_and_persists_cache() {
     assert!(!state.signal_candidate_cache().is_empty());
     assert!(effects
         .iter()
-        .any(|effect| matches!(effect, Effect::PersistSignalCandidateCache { .. })));
+        .any(|effect| matches!(effect, Effect::SaveResults { .. })));
 }
 
 #[test]
 fn signal_candidate_validation_failure_marks_failed() {
     let mut state = AppState::new();
-    state
-        .signal_candidate_mut()
-        .enqueue("https://example.com/article".to_string());
+    state.signal_candidate_mut().enqueue(
+        "https://example.com/article".to_string(),
+        "fixture-input".to_string(),
+    );
     state
         .signal_candidate_mut()
         .mark_scoring("https://example.com/article", 8);
@@ -319,28 +322,32 @@ fn signal_candidate_validation_failure_marks_failed() {
 }
 
 #[test]
-fn signal_candidate_cache_loaded_sweeps_eligible_summary() {
+fn signal_candidate_cache_loaded_leaves_scoring_unadmitted_until_run() {
     let mut state = seed_completed_summary_state();
     set_signal_candidate_metadata_without_sweep(&mut state);
+    state.triage_mut().complete();
+    state.briefing_mut().complete_without_briefing();
     let (state, effects) = update(
         state,
         Msg::SignalCandidateCacheLoaded {
             cache: SignalCandidateCache::default(),
         },
     );
-
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        Effect::RequestLlmCompletion {
-            prompt_id: PromptId::ArticleSignalCandidate,
-            ..
-        }
-    )));
+    assert!(effects
+        .iter()
+        .all(|e| !matches!(e, Effect::RequestLlmCompletion { .. })));
+    assert!(state
+        .signal_candidate()
+        .state_for("https://example.com/article")
+        .is_none());
+    assert!(state.pipeline_activity().is_settled());
+    let (state, effects) = start_cached_run(state);
+    assert!(request_id_for_prompt(&effects, PromptId::ArticleSignalCandidate).is_some());
     assert!(matches!(
         state
             .signal_candidate()
             .state_for("https://example.com/article"),
-        Some(crate::signal_candidate::SignalCandidateState::Scoring { .. })
+        Some(crate::SignalCandidateState::Scoring { .. })
     ));
 }
 
@@ -395,6 +402,14 @@ fn signal_candidate_cache_loaded_reconstructs_from_cached_summary_without_briefi
         },
     );
 
+    assert!(effects
+        .iter()
+        .all(|e| !matches!(e, Effect::RequestLlmCompletion { .. })));
+    assert!(state
+        .signal_candidate()
+        .state_for("https://example.com/a")
+        .is_none());
+    let (state, effects) = start_cached_run(state);
     assert!(effects.iter().all(|effect| !matches!(
         effect,
         Effect::RequestLlmCompletion {
@@ -406,31 +421,27 @@ fn signal_candidate_cache_loaded_reconstructs_from_cached_summary_without_briefi
         state.signal_candidate().state_for("https://example.com/a"),
         Some(crate::signal_candidate::SignalCandidateState::Completed { .. })
     ));
-    assert!(!state.selected_job_has_summary());
+    assert!(state.selected_article_url().is_none());
 }
 
 #[test]
-fn triage_cache_hydration_sweeps_signal_candidates_after_metadata_and_summary_restore() {
+fn triage_cache_hydration_waits_for_explicit_scoring_admission() {
     let mut state = seed_cached_summary_only_state_for_signal_candidate();
     set_signal_candidate_metadata_without_sweep(&mut state);
-
-    let (state, effects) = update(
-        state,
-        Msg::TriageCacheHydrated {
-            cache: crate::triage_cache::TriageCache::default(),
-        },
-    );
-
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        Effect::RequestLlmCompletion {
-            prompt_id: PromptId::ArticleSignalCandidate,
-            ..
-        }
-    )));
+    let cache = state.triage_cache().clone();
+    let (state, effects) = update(state, Msg::TriageCacheHydrated { cache });
+    assert!(effects
+        .iter()
+        .all(|e| !matches!(e, Effect::RequestLlmCompletion { .. })));
+    assert!(state
+        .signal_candidate()
+        .state_for("https://example.com/a")
+        .is_none());
+    let (state, effects) = start_cached_run(state);
+    assert!(request_id_for_prompt(&effects, PromptId::ArticleSignalCandidate).is_some());
     assert!(matches!(
         state.signal_candidate().state_for("https://example.com/a"),
-        Some(crate::signal_candidate::SignalCandidateState::Scoring { .. })
+        Some(crate::SignalCandidateState::Scoring { .. })
     ));
 }
 
@@ -467,10 +478,15 @@ fn triage_cache_hit_enqueues_signal_candidate_scoring() {
         state,
         Msg::TriageArticlesLoaded {
             request_id: triage_request_id,
-            articles,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
         },
     );
-    let (state, effects) = update(state, Msg::TriageClicked);
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
 
     assert!(effects.iter().any(|effect| matches!(
         effect,
@@ -489,15 +505,9 @@ fn triage_cache_hit_enqueues_signal_candidate_scoring() {
 fn summary_completion_enqueues_signal_scoring() {
     let state = start_briefing_after_triage(AppState::new(), loaded_single_article().0.clone());
     let state = with_signal_candidate_metadata(state);
-    let (articles, collection_text) = loaded_single_article();
+    let (articles, _collection_text) = loaded_single_article();
 
-    let (state, effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text,
-        },
-    );
+    let (state, effects) = crate::update::test_support::summarize(state, articles);
     let summary_request_id =
         request_id_for_prompt(&effects, PromptId::ArticleSummary).expect("summary request");
 
@@ -530,145 +540,6 @@ fn summary_completion_enqueues_signal_scoring() {
 }
 
 #[test]
-fn deferred_only_signal_work_is_settled() {
-    let state = start_briefing_after_triage(AppState::new(), loaded_single_article().0.clone());
-    let mut state = with_signal_candidate_metadata(state);
-    state.request_summary_preparation();
-    let (articles, collection_text) = loaded_single_article();
-    let (state, effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text,
-        },
-    );
-    let summary_request_id =
-        request_id_for_prompt(&effects, PromptId::ArticleSummary).expect("summary request");
-    let (state, effects) = update(
-        state,
-        Msg::LlmCompleted {
-            request_id: summary_request_id,
-            result: LlmResultKind::Success {
-                output_json: summary_json("Article A"),
-                input_tokens: 10,
-                output_tokens: 5,
-                prompt_version: 1,
-                resolved_model: "test-summary-model".to_string(),
-            },
-            metadata: None,
-        },
-    );
-    let signal_request_id =
-        request_id_for_prompt(&effects, PromptId::ArticleSignalCandidate).expect("signal request");
-    let (state, _) = update(
-        state,
-        Msg::LlmCompleted {
-            request_id: signal_request_id,
-            result: LlmResultKind::DeferredToBatch,
-            metadata: None,
-        },
-    );
-
-    assert!(matches!(
-        state.signal_candidate().state_for("https://example.com/a"),
-        Some(crate::signal_candidate::SignalCandidateState::Deferred)
-    ));
-    assert_eq!(state.batch_status(), crate::BatchStatus::Settled);
-}
-
-#[test]
-fn deferred_signal_round_trip_rearms_directly_and_completes_from_collected_cache() {
-    let state = start_briefing_after_triage(AppState::new(), loaded_single_article().0.clone());
-    let mut state = with_signal_candidate_metadata(state);
-    state.request_summary_preparation();
-    let (articles, collection_text) = loaded_single_article();
-    let (state, effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text,
-        },
-    );
-    let summary_request_id =
-        request_id_for_prompt(&effects, PromptId::ArticleSummary).expect("summary request");
-    let (state, effects) = update(
-        state,
-        Msg::LlmCompleted {
-            request_id: summary_request_id,
-            result: LlmResultKind::Success {
-                output_json: summary_json("Article A"),
-                input_tokens: 10,
-                output_tokens: 5,
-                prompt_version: 1,
-                resolved_model: "test-summary-model".to_string(),
-            },
-            metadata: None,
-        },
-    );
-    let signal_request_id =
-        request_id_for_prompt(&effects, PromptId::ArticleSignalCandidate).expect("signal request");
-    let key = state
-        .frozen_batch_key_for_request(signal_request_id)
-        .expect("frozen signal key");
-    let (state, _) = update(
-        state,
-        Msg::LlmCompleted {
-            request_id: signal_request_id,
-            result: LlmResultKind::DeferredToBatch,
-            metadata: None,
-        },
-    );
-    assert!(matches!(
-        state.signal_candidate().state_for("https://example.com/a"),
-        Some(crate::signal_candidate::SignalCandidateState::Deferred)
-    ));
-    assert_eq!(state.signal_candidate().in_flight_count(), 0);
-    assert_eq!(state.signal_candidate().failed_count(), 0);
-    assert!(matches!(
-        state.llm_request_state(signal_request_id),
-        Some(crate::LlmRequestState::Deferred { .. })
-    ));
-    assert_eq!(state.batch_status(), crate::BatchStatus::Settled);
-
-    let (state, effects) = update(
-        state,
-        Msg::BatchResultsCollected {
-            entries: vec![crate::CollectedEntry {
-                batch_id: "batch-signal".to_string(),
-                custom_id: "signal-line".to_string(),
-                stage: crate::StageKind::SignalCandidate,
-                key,
-                created_at_utc: "2026-07-19T00:00:00Z".to_string(),
-                outcome: crate::CollectedOutcome::Success {
-                    raw_output_json: signal_result_json(),
-                    usage: harvester_engine::llm::TokenUsage::new(20, 8),
-                    resolved_model: "test-signal-model".to_string(),
-                },
-            }],
-        },
-    );
-    assert_eq!(
-        effects
-            .iter()
-            .filter(|effect| matches!(effect, Effect::PersistSignalCandidateCache { .. }))
-            .count(),
-        1
-    );
-    let (state, effects) = update(state, Msg::RearmDeferredBatchStages);
-    assert!(effects.iter().all(|effect| !matches!(
-        effect,
-        Effect::RequestLlmCompletion {
-            prompt_id: PromptId::ArticleSignalCandidate,
-            ..
-        }
-    )));
-    assert!(matches!(
-        state.signal_candidate().state_for("https://example.com/a"),
-        Some(crate::signal_candidate::SignalCandidateState::Completed { .. })
-    ));
-}
-
-#[test]
 fn summary_cache_hit_reuses_signal_candidate_cache_without_snapshot_leak() {
     super::init_logging();
     let mut state = start_briefing_after_triage(AppState::new(), loaded_single_article().0.clone());
@@ -683,15 +554,9 @@ fn summary_cache_hit_reuses_signal_candidate_cache_without_snapshot_leak() {
     prewarm_summary_cache_for_single_article(&mut state, &summary_model);
     let (articles, _) = loaded_single_article();
     prewarm_signal_candidate_cache(&mut state, &articles[0], 3);
-    let (articles, collection_text) = loaded_single_article();
+    let (articles, _collection_text) = loaded_single_article();
 
-    let (state, effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text,
-        },
-    );
+    let (state, effects) = crate::update::test_support::summarize(state, articles);
 
     assert!(effects.iter().all(|effect| !matches!(
         effect,
@@ -725,7 +590,7 @@ fn summary_cache_hit_reuses_signal_candidate_cache_without_snapshot_leak() {
 }
 
 #[test]
-fn summary_cache_key_for_url_uses_parsed_rfc3339_order() {
+fn current_summary_key_uses_current_metadata_instead_of_historical_timestamp() {
     let mut state = AppState::new();
     let article = LoadedArticle {
         url: "https://example.com/article".to_string(),
@@ -768,9 +633,25 @@ fn summary_cache_key_for_url_uses_parsed_rfc3339_order() {
         "2026-05-25T08:00:00-04:00".to_string(),
     );
 
+    state.set_llm_metadata(
+        [(PromptId::ArticleSummary, 1)].into(),
+        [(PromptId::ArticleSummary, "model-a".to_string())].into(),
+    );
+
     assert_eq!(
-        state.summary_cache_key_for_url("https://example.com/article"),
-        Some(lexically_earlier_but_newer)
+        state.current_summary_cache_key("shared-hash").unwrap(),
+        SummaryCacheKey::try_new(
+            "shared-hash",
+            PromptId::ArticleSummary,
+            Some(1),
+            Some("model-a"),
+            &[]
+        )
+        .unwrap()
+    );
+    assert_ne!(
+        state.current_summary_cache_key("shared-hash").unwrap(),
+        lexically_earlier_but_newer
     );
 }
 
@@ -789,8 +670,12 @@ fn signal_candidate_persisted_with_dated_model_variant_is_cache_hit_after_reload
             cache: SignalCandidateCache::default(),
         },
     );
+    assert!(effects
+        .iter()
+        .all(|e| !matches!(e, Effect::RequestLlmCompletion { .. })));
+    let (state, effects) = start_cached_run(state);
     let signal_request_id = request_id_for_prompt(&effects, PromptId::ArticleSignalCandidate)
-        .expect("signal request emitted by initial sweep");
+        .expect("signal request emitted by explicit run");
 
     let (state, _effects) = update(
         state,
@@ -826,6 +711,10 @@ fn signal_candidate_persisted_with_dated_model_variant_is_cache_hit_after_reload
         },
     );
 
+    assert!(effects
+        .iter()
+        .all(|e| !matches!(e, Effect::RequestLlmCompletion { .. })));
+    let (next_state, effects) = start_cached_run(next_state);
     assert!(
         effects.iter().all(|effect| !matches!(
             effect,
@@ -859,5 +748,109 @@ fn signal_candidate_overrides_loaded_sets_exclusions() {
     );
 
     assert!(effects.is_empty());
-    assert_eq!(state.signal_candidate().excluded().len(), 1);
+    assert_eq!(state.signal_exclusions().excluded().len(), 1);
+}
+
+fn start_cached_run(mut state: AppState) -> (AppState, Vec<Effect>) {
+    let articles = state
+        .triage()
+        .articles()
+        .iter()
+        .map(|a| LoadedArticle {
+            url: a.url.clone(),
+            source_title: a.source_title.clone(),
+            prepared_text: std::iter::repeat_n("contentword", 220)
+                .collect::<Vec<_>>()
+                .join(" "),
+            content_hash: a.content_hash.clone(),
+            fetched_utc: a.fetched_utc.clone(),
+        })
+        .collect();
+    state.set_pre_triage(crate::pre_triage_filter::PreTriageSession::load_articles(
+        articles,
+        &crate::pre_triage_filter::PreTriagePolicy::default(),
+    ));
+    state.set_ai_availability(crate::AiAvailability::Available);
+    state.take_pre_triage_refresh_evaluation_request();
+    update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    )
+}
+
+#[test]
+fn signal_completion_emits_exact_record_before_other_work_settles() {
+    let mut state = AppState::new();
+    state.signal_candidate_mut().enqueue(
+        "https://example.com/article".to_string(),
+        "fixture-input".to_string(),
+    );
+    state
+        .signal_candidate_mut()
+        .mark_scoring("https://example.com/article", 9);
+    state.record_pending_llm_request(9, PromptId::ArticleSignalCandidate);
+    state.set_signal_candidate_input_snapshot(
+        "https://example.com/article",
+        crate::update::signal_candidate::SignalCandidateInputSnapshot {
+            outlet: "Example Outlet".to_string(),
+            title: "Example article".to_string(),
+            published_at: "2026-05-25T12:00:00Z".to_string(),
+            triage_priority: 3,
+            triage_tags_sorted: vec!["ai".to_string(), "chips".to_string()],
+            summary: "Example summary".to_string(),
+            key_points: vec!["Point one".to_string(), "Point two".to_string()],
+            upstream_summary_cache_digest: "digest".to_string(),
+            context: Vec::new(),
+            prompt_version: 1,
+            model_id: "test-signal-model".to_string(),
+        },
+    );
+
+    state.signal_candidate_mut().enqueue(
+        "https://example.com/still-scoring".into(),
+        "other-input".into(),
+    );
+    state
+        .signal_candidate_mut()
+        .mark_scoring("https://example.com/still-scoring", 10);
+    state.record_pending_llm_request(10, PromptId::ArticleSignalCandidate);
+    let (state, effects) = crate::update(
+        state,
+        Msg::LlmCompleted {
+            request_id: 9,
+            result: LlmResultKind::Success {
+                output_json: signal_result_json(),
+                input_tokens: 100,
+                output_tokens: 10,
+                prompt_version: 1,
+                resolved_model: "test-signal-model".to_string(),
+            },
+            metadata: None,
+        },
+    );
+
+    assert_eq!(state.signal_candidate().completed_count(), 1);
+    assert!(state
+        .signal_candidate_input_snapshot("https://example.com/article")
+        .is_none());
+    assert!(!state.signal_candidate_cache().is_empty());
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::SaveResults { .. })));
+    assert_eq!(state.signal_candidate().in_flight_count(), 1);
+    let records: Vec<_> = effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::SaveResults { records } => Some(records),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert_eq!(records.len(), 1);
+    let crate::SavedResult::SignalCandidate(key, entry) = records[0] else {
+        panic!("signal record expected")
+    };
+    assert_eq!(state.signal_candidate_cache().get(key), Some(entry));
 }

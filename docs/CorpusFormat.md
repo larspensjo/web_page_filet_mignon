@@ -24,13 +24,9 @@ Current marker shape:
     "articles": ["*.md", "linked/*.md"],
     "generated_artifacts": [
       "archive.md",
-      "archive-*.md",
-      "export.txt",
-      "manifest.json",
-      "summary_refresh_reports/",
-      ".summary_refresh_last.json"
+      "archive-*.md"
     ],
-    "internal_state": [".*.ron", "llm_results/", "logs/"]
+    "internal_state": [".*.ron", ".*.jsonl", ".article_links/", "llm_results/", "logs/"]
   }
 }
 ```
@@ -52,16 +48,37 @@ Schema version 1 exposes harvested articles as Markdown files:
 - The Markdown body starts after the closing `---` delimiter and following blank
   space.
 
-Generated archive/export files are not article records even when they use
+Generated archive files are not article records even when they use
 Markdown extensions. Readers should ignore files listed in
 `layout.generated_artifacts`.
 
+`archive.md` uses its own [archive export contract](ArchiveExportFormat.md),
+not `CORPUS_SCHEMA_VERSION`. Corpus scans also identify a custom-named archive
+by either first-byte signature: `===== DOC START =====` or the index-only
+signature `===== ARCHIVE INDEX =====`.
+
 ## Private Files
 
-Hidden `.ron` files, `llm_results/`, `logs/`, and refresh reports are outside the
+Hidden `.ron` and `.jsonl` files, `.article_links/`, `llm_results/`, and `logs/` are outside the
 public corpus contract. External readers must not depend on them. The
 `.sources.ron` file is the user-editable source registry; it lives in the output
 folder so corpus backups preserve ingestion configuration as well as state.
+
+Paid results live in `.triage_cache.jsonl`, `.summary_cache.jsonl`, and
+`.signal_candidate_cache.jsonl`. Their RON predecessors remain untouched backups.
+The internal-state pattern `.*.jsonl` also covers migration files such as
+`.summary_cache.migrating-20260928T120000.000000001.jsonl` and torn-tail sidecars such
+as `.summary_cache.torn-20260928T120000.000000001.jsonl`; triage and signal-candidate
+stores use the same suffixes. Migration publishes only a complete, verified file.
+On recovery, stale migration files are removed before migration is retried, and
+unterminated tails are preserved in sidecars before truncation. These are private
+state artifacts, never corpus articles. Adding their marker pattern is compatible
+and does not change `CORPUS_SCHEMA_VERSION`.
+
+Harvester no longer reads or writes aggregate briefing history, stale-summary refresh reports,
+`export.txt`, or `manifest.json`. Existing files remain untouched. Summary stores skip retired
+`AggregateBriefing` entries with a warning identifying the store and skipped count, while
+loading all supported entries through both JSONL and RON migration.
 
 ## Versioning Rules
 
@@ -77,7 +94,12 @@ Do not bump the version for compatible additions, for example:
 
 - adding optional frontmatter keys;
 - adding new internal cache files;
-- adding generated artifacts that readers can ignore by consulting the marker.
+- adding generated artifacts that readers can ignore by consulting the marker;
+- removing retired generated artifacts whose patterns cannot match article records.
+
+The retired `export.txt`, `manifest.json`, `summary_refresh_reports/` and
+`.summary_refresh_last.json` patterns cannot match root or linked Markdown articles.
+Removing them leaves article classification unchanged and keeps schema version 1.
 
 When bumping the corpus schema:
 
@@ -85,3 +107,22 @@ When bumping the corpus schema:
 2. Update this document and the README output summary.
 3. Add or update regression tests for the new marker/layout.
 4. Record the decision in `docs/DecisionLog.md`.
+
+Extracted links are private state under `.article_links/`, one atomic JSON array
+per article named by the SHA-256 of its canonical archive URL key. Records contain
+`url`, `text` (optional anchor text) and `kind`. Empty link lists have no file;
+loading a missing file returns an empty list. Temporary link files remain inside
+that directory. Runtime state contains slim completed-job records and retains
+pending intake, desktop geometry and legacy window dimensions. The original
+`.harvester_state.pre-slim.ron` is left for the owner. Pinned migration temporaries
+`.harvester_state.pre-slim-partial-<timestamp>.ron` and
+`.harvester_state.slim-partial-<timestamp>.ron` match the existing `.*.ron`
+internal-state pattern. Adding `.article_links/` cannot change article classification
+and does not bump `CORPUS_SCHEMA_VERSION` (still 1).
+
+Restored or unparseable active runtime state is preserved in an additional verified
+`.harvester_state.pre-slim-<UTC timestamp>-<collision counter>.ron` backup when needed.
+These owner backups match `.*.ron` and are never overwritten or treated as partials.
+The optional `fetch_time_recovery_done` runtime-state field defaults to false for old
+files and records completion even if some jobs remain without recoverable dates;
+older builds ignore it. Article classification and schema version remain unchanged.

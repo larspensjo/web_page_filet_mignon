@@ -1,17 +1,13 @@
-use std::collections::HashMap;
-use std::io;
-use std::path::{Path, PathBuf};
-
 use harvester_core::{SignalCandidateCache, SignalCandidateCacheEntry, SignalCandidateCacheKey};
+#[cfg(test)]
 use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
+#[cfg(test)]
 use harvester_engine::llm::prompt::PromptId;
-use harvester_engine::{ensure_output_dir, AtomicFileWriter};
 use serde::{Deserialize, Serialize};
-
-const CURRENT_FORMAT_VERSION: u32 = 1;
+use std::{io, path::Path};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct PersistedKey {
+pub(crate) struct PersistedKey {
     signal_input_hash: String,
     prompt_id: String,
     prompt_version: u32,
@@ -33,160 +29,47 @@ struct PersistedResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct PersistedEntry {
+pub(crate) struct PersistedEntry {
     result: PersistedResult,
     created_at_utc: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PersistedFile {
-    #[serde(default = "default_version")]
-    version: u32,
-    entries: Vec<(PersistedKey, PersistedEntry)>,
-}
-
-fn default_version() -> u32 {
-    CURRENT_FORMAT_VERSION
-}
-
-pub fn save(path: &Path, cache: &SignalCandidateCache) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        ensure_output_dir(parent).map_err(io::Error::other)?;
-    }
-    let persisted = to_persisted(cache);
-    let ron_text = ron::ser::to_string_pretty(&persisted, ron::ser::PrettyConfig::default())
-        .map_err(|err| io::Error::other(err.to_string()))?;
-    let parent_dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let filename = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(".signal_candidate_cache.ron");
-    AtomicFileWriter::new(PathBuf::from(parent_dir))
-        .write(filename, &ron_text)
-        .map_err(|err| io::Error::other(err.to_string()))?;
-    Ok(())
+pub(crate) fn legacy(
+    path: &Path,
+) -> io::Result<Vec<(SignalCandidateCacheKey, SignalCandidateCacheEntry)>> {
+    crate::result_store::read_ron::<
+        SignalCandidateCacheKey,
+        SignalCandidateCacheEntry,
+        PersistedKey,
+        PersistedEntry,
+    >(path)
 }
 
 pub fn load(path: &Path) -> io::Result<SignalCandidateCache> {
-    if !path.exists() {
-        return Ok(SignalCandidateCache::default());
+    let records = crate::result_store::load::<
+        SignalCandidateCacheKey,
+        SignalCandidateCacheEntry,
+        PersistedKey,
+        PersistedEntry,
+    >(path, legacy)?;
+    let mut cache = SignalCandidateCache::default();
+    for (key, entry) in records {
+        cache.insert(key, entry);
     }
-    let text = std::fs::read_to_string(path)?;
-    let persisted: PersistedFile = ron::from_str(&text)
-        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
-    if persisted.version != CURRENT_FORMAT_VERSION {
-        engine_logging::engine_warn!(
-            "[signal-cache] discarding unknown cache version {} at {:?}",
-            persisted.version,
-            path
-        );
-        return Ok(SignalCandidateCache::default());
-    }
-    from_persisted(persisted).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+    Ok(cache)
 }
 
-fn to_persisted(cache: &SignalCandidateCache) -> PersistedFile {
-    PersistedFile {
-        version: CURRENT_FORMAT_VERSION,
-        entries: cache
-            .entries
-            .iter()
-            .map(|(key, entry)| {
-                (
-                    PersistedKey {
-                        signal_input_hash: key.signal_input_hash.clone(),
-                        prompt_id: key.prompt_id.to_string(),
-                        prompt_version: key.prompt_version,
-                        model_id: key.model_id.clone(),
-                        context_hash: key.context_hash.clone(),
-                    },
-                    PersistedEntry {
-                        result: PersistedResult {
-                            signal_score: entry.result.signal_score,
-                            signal_key: entry.result.signal_key.clone(),
-                            themes: entry.result.themes.clone(),
-                            draft_gist: entry.result.draft_gist.clone(),
-                            source_tier: source_tier_str(entry.result.source_tier).to_string(),
-                            confidence: confidence_str(entry.result.confidence).to_string(),
-                            reasoning: entry.result.reasoning.clone(),
-                            input_tokens: entry.result.input_tokens,
-                            output_tokens: entry.result.output_tokens,
-                        },
-                        created_at_utc: entry.created_at_utc.clone(),
-                    },
-                )
-            })
-            .collect(),
-    }
-}
-
-fn from_persisted(persisted: PersistedFile) -> Result<SignalCandidateCache, String> {
-    let mut entries = HashMap::with_capacity(persisted.entries.len());
-    for (persisted_key, persisted_entry) in persisted.entries {
-        let prompt_id = match persisted_key.prompt_id.as_str() {
-            "ArticleSignalCandidate" => PromptId::ArticleSignalCandidate,
-            other => return Err(format!("unknown prompt_id in signal cache: {other}")),
-        };
-        let result = SignalCandidateResult {
-            signal_score: persisted_entry.result.signal_score,
-            signal_key: persisted_entry.result.signal_key,
-            themes: persisted_entry.result.themes,
-            draft_gist: persisted_entry.result.draft_gist,
-            source_tier: source_tier_from_str(&persisted_entry.result.source_tier)?,
-            confidence: confidence_from_str(&persisted_entry.result.confidence)?,
-            reasoning: persisted_entry.result.reasoning,
-            input_tokens: persisted_entry.result.input_tokens,
-            output_tokens: persisted_entry.result.output_tokens,
-        };
-        entries.insert(
-            SignalCandidateCacheKey {
-                signal_input_hash: persisted_key.signal_input_hash,
-                prompt_id,
-                prompt_version: persisted_key.prompt_version,
-                model_id: persisted_key.model_id,
-                context_hash: persisted_key.context_hash,
-            },
-            SignalCandidateCacheEntry {
-                result,
-                created_at_utc: persisted_entry.created_at_utc,
-            },
-        );
-    }
-    Ok(SignalCandidateCache { entries })
-}
-
-fn source_tier_str(tier: SourceTier) -> &'static str {
-    match tier {
-        SourceTier::Tier1 => "Tier1",
-        SourceTier::Tier2 => "Tier2",
-        SourceTier::Tier3 => "Tier3",
-    }
-}
-
-fn source_tier_from_str(value: &str) -> Result<SourceTier, String> {
-    match value {
-        "Tier1" => Ok(SourceTier::Tier1),
-        "Tier2" => Ok(SourceTier::Tier2),
-        "Tier3" => Ok(SourceTier::Tier3),
-        other => Err(format!("unknown source_tier: {other}")),
-    }
-}
-
-fn confidence_str(confidence: Confidence) -> &'static str {
-    match confidence {
-        Confidence::High => "High",
-        Confidence::Medium => "Medium",
-        Confidence::Low => "Low",
-    }
-}
-
-fn confidence_from_str(value: &str) -> Result<Confidence, String> {
-    match value {
-        "High" => Ok(Confidence::High),
-        "Medium" => Ok(Confidence::Medium),
-        "Low" => Ok(Confidence::Low),
-        other => Err(format!("unknown confidence: {other}")),
-    }
+/// Append the supplied entries. Production completions use the runner's ordered sink.
+#[cfg(test)]
+pub(crate) fn save(path: &Path, cache: &SignalCandidateCache) -> io::Result<()> {
+    let records: Vec<_> = cache.entries.iter().collect();
+    crate::result_store::AppendFile::open::<
+        SignalCandidateCacheKey,
+        SignalCandidateCacheEntry,
+        PersistedKey,
+        PersistedEntry,
+    >(path, legacy)?
+    .append::<_, _, PersistedKey, PersistedEntry>(&records)
 }
 
 #[cfg(test)]

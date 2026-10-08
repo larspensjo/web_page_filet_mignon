@@ -1,7 +1,7 @@
 use engine_logging::engine_warn;
 use harvester_core::UiIntent;
 
-pub const IPC_SCHEMA_VERSION: u32 = 6;
+pub const IPC_SCHEMA_VERSION: u32 = 15;
 
 pub fn decode_intent(command_name: &str, payload: &[u8]) -> Result<UiIntent, serde_json::Error> {
     serde_json::from_slice(payload).map_err(|error| {
@@ -43,6 +43,20 @@ mod tests {
     }
 
     #[test]
+    fn round_trips_pipeline_intents() {
+        for intent in [UiIntent::RunPipeline, UiIntent::ResumeUnfinishedWork] {
+            let encoded = serde_json::to_vec(&intent).unwrap();
+            assert_eq!(decode_intent("dispatch_intent", &encoded).unwrap(), intent);
+        }
+    }
+
+    #[test]
+    fn removed_poll_sources_intent_fails_closed() {
+        let payload = br#"{"type":"PollSources"}"#;
+        assert!(decode_intent("dispatch_intent", payload).is_err());
+    }
+
+    #[test]
     fn decodes_last_24_hours_job_list_mode() {
         let payload = br#"{"type":"SetJobListMode","payload":{"mode":"Last24Hours"}}"#;
         assert_eq!(
@@ -64,5 +78,36 @@ mod tests {
             .and_then(|line| line.strip_suffix(';'))
             .and_then(|number| number.parse::<u32>().ok());
         assert_eq!(parsed, Some(IPC_SCHEMA_VERSION));
+    }
+}
+
+#[cfg(test)]
+mod retired_surface_tests {
+    use super::*;
+
+    #[test]
+    fn removed_desktop_intents_fail_closed() {
+        for payload in [
+            r#"{"type":"RevealJobsSearch"}"#,
+            r#"{"type":"SetWorkspaceView","payload":{"view":"Review"}}"#,
+            r#"{"type":"SetTrendCategory","payload":{"category":"Companies"}}"#,
+            r#"{"type":"TrendsViewOpened"}"#,
+            r#"{"type":"PollIndirectLinks"}"#,
+            r#"{"type":"SetReadingPaneMode","payload":{"mode":"Summary"}}"#,
+            r#"{"type":"SetAppTab","payload":{"tab":"Trends"}}"#,
+            r#"{"type":"SetLeftTab","payload":{"tab":"Jobs"}}"#,
+        ] {
+            assert!(
+                decode_intent("dispatch_intent", payload.as_bytes()).is_err(),
+                "{payload}"
+            );
+        }
+    }
+
+    #[test]
+    fn removed_body_keys_fail_closed() {
+        for key in ["Preview", "TriageMarkdown", "PollStatsMarkdown"] {
+            assert!(serde_json::from_value::<crate::BodyKey>(serde_json::json!(key)).is_err());
+        }
     }
 }

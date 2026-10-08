@@ -8,9 +8,13 @@ fn signal_candidate_rows_leave_gists_empty_for_scoring_and_failed_states() {
 
     insert_done_job(&mut state, 1, &scoring_url);
     insert_done_job(&mut state, 2, &failed_url);
-    state.signal_candidate_mut().enqueue(scoring_url.clone());
+    state
+        .signal_candidate_mut()
+        .enqueue(scoring_url.clone(), "fixture-input".to_string());
     state.signal_candidate_mut().mark_scoring(&scoring_url, 7);
-    state.signal_candidate_mut().enqueue(failed_url.clone());
+    state
+        .signal_candidate_mut()
+        .enqueue(failed_url.clone(), "fixture-input".to_string());
     state.signal_candidate_mut().fail(&failed_url, "boom");
 
     let rows = state.build_signal_candidate_rows();
@@ -28,7 +32,9 @@ fn complete_candidate(
     gist: &str,
 ) {
     use harvester_engine::llm::dto::{Confidence, SignalCandidateResult};
-    state.signal_candidate_mut().enqueue(url.to_string());
+    state
+        .signal_candidate_mut()
+        .enqueue(url.to_string(), "fixture-input".to_string());
     state.signal_candidate_mut().mark_scoring(url, 1);
     state.signal_candidate_mut().complete(
         url,
@@ -44,6 +50,7 @@ fn complete_candidate(
             output_tokens: 10,
         },
     );
+    crate::fixture_support::save_session_results(state);
 }
 
 fn outcome_for<'a>(
@@ -170,7 +177,7 @@ fn outcome_marks_excluded_clusters() {
         .active_version_for(harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate)
         .unwrap_or_default();
     state
-        .signal_candidate_mut()
+        .signal_exclusions_mut()
         .add_exclusion(crate::signal_candidate::OverrideKey {
             signal_key: "drop-me".to_string(),
             prompt_id: harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate.to_string(),

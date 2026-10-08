@@ -113,7 +113,6 @@ pub fn poll_curated_source(
     }
 }
 
-#[allow(dead_code)]
 pub fn poll_rss_source(
     source_id: SourceId,
     feed_bytes: &[u8],
@@ -129,18 +128,15 @@ pub fn poll_rss_source(
     })?;
 
     let parsed = entries.len();
-    let unseen_entries = seen_set.filter_unseen_entries(source_id.as_str(), entries);
-    let dedup_filtered = parsed - unseen_entries.len();
-    let poll_items: Vec<RssPollItem> = unseen_entries
+    let (unseen_entries, dedup_filtered) = seen_set.filter_unseen_entries_limited(
+        source_id.as_str(),
+        entries,
+        max_urls_per_poll.unwrap_or(usize::MAX),
+    );
+    let selected_urls = unseen_entries
         .into_iter()
         .filter_map(|entry| entry.into_poll_item())
-        .collect();
-
-    let limit = max_urls_per_poll.unwrap_or(poll_items.len());
-    let selected_urls = poll_items
-        .into_iter()
-        .take(limit)
-        .map(|item| item.url)
+        .map(|item: RssPollItem| item.url)
         .collect();
 
     Ok(SourcePollResult {
@@ -292,25 +288,14 @@ mod tests {
     #[test]
     fn poll_rss_source_applies_max_after_dedup() {
         let mut seen = RssSeenSet::new();
-        let initial = rss_feed_content(&[
-            ("g1", Some("https://example.com/1")),
-            ("g2", Some("https://example.com/2")),
-        ]);
-        let _ = poll_rss_source(
-            SourceId::new("rss").unwrap(),
-            &initial,
-            "https://example.com/feed",
-            &mut seen,
-            None,
-        );
-
         let next = rss_feed_content(&[
             ("g1", Some("https://example.com/1")),
             ("g2", Some("https://example.com/2")),
             ("g3", Some("https://example.com/3")),
             ("g4", Some("https://example.com/4")),
+            ("g5", Some("https://example.com/5")),
         ]);
-        let result = poll_rss_source(
+        let first = poll_rss_source(
             SourceId::new("rss").unwrap(),
             &next,
             "https://example.com/feed",
@@ -318,7 +303,17 @@ mod tests {
             Some(1),
         )
         .expect("poll success");
-        assert_eq!(result.urls, vec!["https://example.com/3"]);
+        assert_eq!(first.urls, vec!["https://example.com/1"]);
+
+        let second = poll_rss_source(
+            SourceId::new("rss").unwrap(),
+            &next,
+            "https://example.com/feed",
+            &mut seen,
+            Some(1),
+        )
+        .expect("second poll success");
+        assert_eq!(second.urls, vec!["https://example.com/2"]);
     }
 
     #[test]

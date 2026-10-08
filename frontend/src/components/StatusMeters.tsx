@@ -4,8 +4,6 @@ import { formatCompactTokens } from "./jobPresentation";
 
 type MeterView = SnapshotEnvelope["view"];
 
-const TOKEN_ATTENTION_PERCENT = 80;
-
 type Tone = "muted" | "attention" | "warning";
 
 function Meter({
@@ -42,12 +40,6 @@ function Meter({
 	);
 }
 
-export function tokenMeterTone(percent: number): Tone {
-	if (percent >= 100) return "warning";
-	if (percent >= TOKEN_ATTENTION_PERCENT) return "attention";
-	return "muted";
-}
-
 export function quotaTone(severity: MeterView["llm_quota"]["severity"]): Tone {
 	switch (severity) {
 		case "Normal":
@@ -61,25 +53,50 @@ export function quotaTone(severity: MeterView["llm_quota"]["severity"]): Tone {
 	}
 }
 
-/** The spec's single labelled meters: muted by default, vivid only near thresholds. */
+/** Core supplies the archive selection and backlog; the desktop formats their status. */
 export function StatusMeters({ view }: { view: MeterView }) {
-	const limit = view.token_limit;
+	const meter = view.archive_meter;
 	const percent =
-		limit > 0 ? Math.min(100, (view.archive_token_estimate / limit) * 100) : 0;
-	const coverage = view.archive_partial_coverage;
-	const detail = coverage
-		? `${coverage.triaged} of ${coverage.actionable_total} triaged`
-		: `${view.archive_filtered_count} filtered · ${view.raw_unprocessed_count} raw`;
+		meter.target > 0
+			? Math.min(100, (meter.selected_count / meter.target) * 100)
+			: 0;
+	let detail: string;
+	switch (meter.status) {
+		case "Loading":
+			detail = "Loading saved results…";
+			break;
+		case "Unavailable":
+			detail = "Saved results unavailable";
+			break;
+		case "NotScoredYet":
+			detail = "Not scored yet";
+			break;
+		case "Scored":
+			detail =
+				meter.selected_count > 0
+					? `~${formatCompactTokens(meter.token_estimate)} tokens`
+					: "None selected yet";
+			break;
+	}
+	if (
+		meter.unsettled_count > 0 &&
+		meter.status !== "Loading" &&
+		meter.status !== "Unavailable"
+	) {
+		const backlog =
+			view.run_state === "Idle" ? "unfinished" : "still processing";
+		detail += ` · ${meter.unsettled_count} ${backlog}`;
+	}
 	const quota = view.llm_quota;
 
 	return (
 		<div className="status-meters">
 			<Meter
-				name="archive-tokens"
-				label={`Archive ${formatCompactTokens(view.archive_token_estimate)} / ${formatCompactTokens(limit)} tokens`}
+				name="archive-articles"
+				label={`${meter.selected_count} / ${meter.target} articles`}
 				detail={detail}
 				percent={percent}
-				tone={tokenMeterTone(percent)}
+				tone={meter.selected_count >= meter.target ? "attention" : "muted"}
 			/>
 			<Meter
 				name="llm-quota"

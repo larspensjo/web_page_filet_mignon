@@ -21,9 +21,7 @@ pub struct RuntimePaths {
     pub signal_candidate_overrides_path: PathBuf,
     pub seen_set_path: PathBuf,
     pub state_path: PathBuf,
-    pub briefing_history_path: PathBuf,
     pub briefing_checkpoint_path: PathBuf,
-    pub entity_index_path: PathBuf,
     pub brave_seen_set_path: PathBuf,
     pub brave_metadata_path: PathBuf,
     pub blacklist_path: PathBuf,
@@ -37,15 +35,13 @@ impl RuntimePaths {
         contexts_dir: PathBuf,
         prompts_dir: PathBuf,
     ) -> Self {
-        let summary_cache_path = output_dir.join(".summary_cache.ron");
-        let triage_cache_path = output_dir.join(".triage_cache.ron");
-        let signal_candidate_cache_path = output_dir.join(".signal_candidate_cache.ron");
+        let summary_cache_path = output_dir.join(".summary_cache.jsonl");
+        let triage_cache_path = output_dir.join(".triage_cache.jsonl");
+        let signal_candidate_cache_path = output_dir.join(".signal_candidate_cache.jsonl");
         let signal_candidate_overrides_path = output_dir.join(".signal_candidate_overrides.ron");
         let seen_set_path = output_dir.join(".seen_set.ron");
         let state_path = output_dir.join(".harvester_state.ron");
-        let briefing_history_path = output_dir.join(".briefing_history.ron");
         let briefing_checkpoint_path = output_dir.join(".briefing_checkpoint.ron");
-        let entity_index_path = output_dir.join(".entity_index.ron");
         let brave_seen_set_path = output_dir.join(".brave_seen_set.ron");
         let brave_metadata_path = output_dir.join(".brave_metadata.ron");
         let blacklist_path = crate::blacklist_store::default_blacklist_path(&output_dir);
@@ -61,9 +57,7 @@ impl RuntimePaths {
             signal_candidate_overrides_path,
             seen_set_path,
             state_path,
-            briefing_history_path,
             briefing_checkpoint_path,
-            entity_index_path,
             brave_seen_set_path,
             brave_metadata_path,
             blacklist_path,
@@ -90,39 +84,24 @@ mod tests {
     use harvester_core::{ArticleSummaryResult, SummaryCache, SummaryCacheEntry, SummaryCacheKey};
     use harvester_engine::llm::prompt::PromptId;
     use harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI;
-    use std::path::PathBuf;
     use tempfile::tempdir;
 
     #[test]
-    fn default_paths_use_ron_extensions() {
+    fn default_paths_use_jsonl_for_paid_results() {
         let dir = tempdir().expect("tempdir");
         let paths = RuntimePaths::with_defaults(dir.path().to_path_buf());
 
-        assert!(paths.summary_cache_path.ends_with(".summary_cache.ron"));
-        assert!(paths.triage_cache_path.ends_with(".triage_cache.ron"));
+        assert!(paths.summary_cache_path.ends_with(".summary_cache.jsonl"));
+        assert!(paths.triage_cache_path.ends_with(".triage_cache.jsonl"));
         assert!(paths
             .signal_candidate_cache_path
-            .ends_with(".signal_candidate_cache.ron"));
+            .ends_with(".signal_candidate_cache.jsonl"));
         assert!(paths
             .signal_candidate_overrides_path
             .ends_with(".signal_candidate_overrides.ron"));
         assert!(paths.seen_set_path.ends_with(".seen_set.ron"));
         assert!(paths.state_path.ends_with(".harvester_state.ron"));
         assert_eq!(paths.sources_path, dir.path().join(".sources.ron"));
-    }
-
-    #[test]
-    fn briefing_history_path_is_in_output_dir() {
-        let paths = RuntimePaths::new(
-            PathBuf::from("/tmp/out"),
-            PathBuf::from("/tmp/sources.ron"),
-            PathBuf::from("/tmp/contexts"),
-            PathBuf::from("/tmp/prompts"),
-        );
-        assert_eq!(
-            paths.briefing_history_path,
-            PathBuf::from("/tmp/out/.briefing_history.ron")
-        );
     }
 
     #[test]
@@ -153,7 +132,7 @@ mod tests {
         cache.insert(key.clone(), entry);
 
         persist_summary_cache(&cache, &paths.summary_cache_path).expect("persist");
-        let reloaded = load_summary_cache(&paths.summary_cache_path);
+        let reloaded = load_summary_cache(&paths.summary_cache_path).unwrap();
 
         assert!(reloaded.lookup(&key).is_some());
     }

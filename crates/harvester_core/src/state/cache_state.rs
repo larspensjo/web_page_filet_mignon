@@ -1,6 +1,6 @@
 use super::{AppState, TriageCacheLookupResult};
 use crate::context_hash;
-use crate::summary_cache::SummaryCache;
+use crate::summary_cache::{SummaryCache, SummaryCacheKey, SummaryCacheKeyError};
 use crate::triage::ArticleTriageResult;
 use crate::triage_cache::{TriageCache, TriageCacheKey};
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
@@ -96,15 +96,28 @@ impl AppState {
             result,
             created_at_utc,
         };
-        self.summary_cache.insert(key, entry);
+        self.note_unfinished_inputs_changed();
+        self.pending_results
+            .push(crate::SavedResult::Summary(key.clone(), entry.clone()));
+        let previous_created_at = self
+            .saved_newest_summaries
+            .get(&key.content_hash)
+            .and_then(|key| self.summary_cache.lookup(key))
+            .map(|entry| entry.created_at_utc.clone());
+        self.summary_cache.insert(key.clone(), entry);
+        self.refresh_saved_newest_summary(&key, previous_created_at.as_deref());
     }
 
     /// Replace the entire summary cache (used for hydration).
     pub(crate) fn set_summary_cache(&mut self, cache: SummaryCache) {
+        self.note_unfinished_global_inputs_changed();
         self.summary_cache = cache;
+        self.rebuild_saved_newest_summaries();
+        self.rebuild_saved_results();
     }
 
     pub(crate) fn start_summary_cache_run(&mut self) {
+        self.note_unfinished_global_inputs_changed();
         self.summary_cache_metrics = SummaryCacheMetrics::default();
         self.summary_cache_metadata_snapshot = None;
         self.summary_cache_warmup_logged = false;
@@ -131,6 +144,7 @@ impl AppState {
         };
         self.summary_cache_metadata_snapshot = snapshot;
         self.briefing_metadata_state = MetadataLoadState::Ready;
+        self.note_unfinished_global_inputs_changed();
     }
 
     pub(crate) fn is_briefing_metadata_ready(&self) -> bool {
@@ -141,6 +155,40 @@ impl AppState {
         self.summary_cache_metadata_snapshot
             .as_ref()
             .map(|snapshot| (snapshot.prompt_version, snapshot.model_id.as_str()))
+    }
+
+    pub(crate) fn current_summary_cache_key(
+        &self,
+        content_hash: &str,
+    ) -> Result<SummaryCacheKey, SummaryCacheKeyError> {
+        self.current_summary_cache_key_with_context_hash(
+            content_hash,
+            &context_hash(self.context_for(PromptId::ArticleSummary)),
+        )
+    }
+
+    pub(crate) fn current_summary_cache_key_with_context_hash(
+        &self,
+        content_hash: &str,
+        context_hash: &str,
+    ) -> Result<SummaryCacheKey, SummaryCacheKeyError> {
+        let metadata = self.summary_cache_metadata().or_else(|| {
+            if self.is_briefing_metadata_ready() {
+                None
+            } else {
+                Some((
+                    self.active_version_for(PromptId::ArticleSummary)?,
+                    self.effective_model_for(PromptId::ArticleSummary)?,
+                ))
+            }
+        });
+        SummaryCacheKey::try_new_with_context_hash(
+            content_hash,
+            PromptId::ArticleSummary,
+            metadata.map(|(version, _)| version),
+            metadata.map(|(_, model)| model),
+            context_hash,
+        )
     }
 
     pub(crate) fn summary_cache_warmup_logged(&self) -> bool {
@@ -168,6 +216,10 @@ impl AppState {
     }
 
     pub(crate) fn finalize_summary_cache_run(&mut self) {
+        if self.pipeline_run_armed() {
+            return;
+        }
+        self.note_unfinished_global_inputs_changed();
         self.briefing_metadata_state = MetadataLoadState::Idle;
         self.summary_cache_metadata_snapshot = None;
         self.summary_cache_warmup_logged = false;
@@ -178,21 +230,15 @@ impl AppState {
         &self.summary_cache
     }
 
-    pub(crate) fn set_triage_cache(&mut self, cache: TriageCache) {
+    pub(crate) fn set_triage_cache(&mut self, mut cache: TriageCache) {
+        self.note_unfinished_global_inputs_changed();
+        cache.rebuild_alias_index();
         self.triage_cache = cache;
+        self.rebuild_saved_results();
     }
 
     pub fn triage_cache(&self) -> &TriageCache {
         &self.triage_cache
-    }
-
-    /// Whether the live prompt metadata still addresses the frozen paid-work
-    /// key. Collection still stores under the frozen key; callers use this to
-    /// report results that can no longer be consumed by the current pipeline.
-    pub fn frozen_batch_key_is_current(&self, key: &crate::FrozenBatchKey) -> bool {
-        self.active_version_for(key.prompt_id) == Some(key.prompt_version)
-            && self.effective_model_for(key.prompt_id) == Some(key.model_id.as_str())
-            && context_hash(self.context_for(key.prompt_id)) == key.context_hash
     }
 
     pub(crate) fn start_triage_cache_run(&mut self) {
@@ -201,10 +247,12 @@ impl AppState {
     }
 
     pub(crate) fn mark_triage_metadata_pending(&mut self) {
+        self.note_unfinished_global_inputs_changed();
         self.triage_metadata_state = MetadataLoadState::Pending;
     }
 
     pub(crate) fn mark_triage_metadata_ready(&mut self) {
+        self.note_unfinished_global_inputs_changed();
         if self.prompt_contexts_load_failed() {
             self.triage_metadata_state = MetadataLoadState::Pending;
             self.triage_cache_metadata_snapshot = None;
@@ -249,44 +297,60 @@ impl AppState {
             })
     }
 
-    pub(crate) fn try_reuse_triage(&self, content_hash: &str) -> TriageCacheLookupResult<'_> {
-        let snapshot = match &self.triage_cache_metadata_snapshot {
-            Some(snapshot) => snapshot,
-            None => return TriageCacheLookupResult::KeyUnavailable,
-        };
-        let key = match TriageCacheKey::try_new_with_context_hash(
+    pub(crate) fn current_triage_cache_key(&self, content_hash: &str) -> Option<TriageCacheKey> {
+        if let Some((version, model, context_hash)) = self.triage_cache_metadata() {
+            return TriageCacheKey::try_new_with_context_hash(
+                content_hash,
+                PromptId::ArticleTriage,
+                Some(version),
+                Some(model),
+                context_hash,
+            )
+            .ok();
+        }
+        if self.triage_metadata_ready() {
+            return None;
+        }
+        TriageCacheKey::try_new(
             content_hash,
             PromptId::ArticleTriage,
-            Some(snapshot.prompt_version),
-            Some(snapshot.model_id.as_str()),
-            &snapshot.context_hash,
-        ) {
-            Ok(key) => key,
-            Err(_) => return TriageCacheLookupResult::KeyUnavailable,
+            self.active_version_for(PromptId::ArticleTriage),
+            self.effective_model_for(PromptId::ArticleTriage),
+            self.context_for(PromptId::ArticleTriage),
+        )
+        .ok()
+    }
+
+    pub(crate) fn try_reuse_triage(&self, content_hash: &str) -> TriageCacheLookupResult<'_> {
+        let key = match self.current_triage_cache_key(content_hash) {
+            Some(key) if self.triage_cache_metadata_snapshot.is_some() => key,
+            _ => return TriageCacheLookupResult::KeyUnavailable,
         };
         match self.triage_cache.lookup(&key) {
-            Some(result) => TriageCacheLookupResult::Hit(result),
+            Some((stored_key, result)) => TriageCacheLookupResult::Hit {
+                result,
+                stored_model_id: &stored_key.model_id,
+            },
             None => TriageCacheLookupResult::Miss,
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn store_triage_result(&mut self, content_hash: &str, result: ArticleTriageResult) {
-        let snapshot = match &self.triage_cache_metadata_snapshot {
-            Some(snapshot) => snapshot,
-            None => return,
-        };
-        let key = match TriageCacheKey::try_new_with_context_hash(
-            content_hash,
-            PromptId::ArticleTriage,
-            Some(snapshot.prompt_version),
-            Some(snapshot.model_id.as_str()),
-            &snapshot.context_hash,
-        ) {
-            Ok(key) => key,
-            Err(_) => return,
-        };
+        let _ = self.store_triage_result_with_model(content_hash, result);
+    }
 
-        self.triage_cache.insert(key, result);
+    pub(crate) fn store_triage_result_with_model(
+        &mut self,
+        content_hash: &str,
+        result: ArticleTriageResult,
+    ) -> Option<String> {
+        self.triage_cache_metadata_snapshot.as_ref()?;
+        let key = self.current_triage_cache_key(content_hash)?;
+
+        let stored_model_id = key.model_id.clone();
+        self.store_frozen_triage_result(key, result, chrono::Utc::now().to_rfc3339());
+        Some(stored_model_id)
     }
 
     pub(crate) fn store_frozen_triage_result(
@@ -295,13 +359,16 @@ impl AppState {
         result: ArticleTriageResult,
         created_at_utc: String,
     ) {
-        self.triage_cache.insert_entry(
-            key,
-            crate::triage_cache::TriageCacheEntry {
-                result,
-                created_at_utc,
-            },
-        );
+        self.note_unfinished_inputs_changed();
+        let content_hash = key.content_hash.clone();
+        let entry = crate::TriageCacheEntry {
+            result,
+            created_at_utc,
+        };
+        self.pending_results
+            .push(crate::SavedResult::Triage(key.clone(), entry.clone()));
+        self.triage_cache.insert_entry(key, entry);
+        self.refresh_saved_hash(&content_hash);
     }
 
     pub(crate) fn record_triage_cache_hit(&mut self) {

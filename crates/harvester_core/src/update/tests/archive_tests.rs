@@ -51,6 +51,204 @@ fn archive_clicked_emits_open_dialog_with_request_id_and_article_count() {
     }
 }
 
+fn archive_submit_message(request_id: u64) -> Msg {
+    Msg::ArchiveDialogSubmitted {
+        request_id,
+        basename: "archive.md".into(),
+        set_checkpoint: false,
+        submitted_at: chrono::Utc::now(),
+        use_summaries: false,
+        use_signal_candidates: false,
+    }
+}
+
+fn archive_request_id(effects: &[Effect]) -> u64 {
+    effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::OpenArchiveDialog { request_id, .. } => Some(*request_id),
+            _ => None,
+        })
+        .expect("ArchiveClicked opens a dialog")
+}
+
+#[test]
+fn archive_submit_and_open_are_gated_while_run_is_active() {
+    init_logging();
+    let state = complete_triage_state_for_test(1);
+    let (state, open_effects) = update(state, Msg::ArchiveClicked);
+    let request_id = archive_request_id(&open_effects);
+    let (state, _) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
+    assert_eq!(state.run_state(), crate::RunState::Active);
+    assert!(!state.export_available());
+
+    let (state, effects) = update(state, Msg::ArchiveClicked);
+    assert!(effects.is_empty());
+    assert_eq!(state.archive_request_id(), request_id);
+
+    let (state, effects) = update(state, archive_submit_message(request_id));
+    assert!(effects
+        .iter()
+        .all(|effect| !matches!(effect, Effect::ArchiveRequested { .. })));
+    assert_eq!(
+        state.briefing_checkpoint_status_message(),
+        Some("Export is unavailable while a run is in progress")
+    );
+}
+
+#[test]
+fn archive_submit_is_gated_until_a_stopping_run_finishes_draining() {
+    init_logging();
+    let state = complete_triage_state_for_test(1);
+    let (state, _) = update(
+        state,
+        Msg::AiAvailabilityDetected {
+            availability: crate::AiAvailability::Unavailable {
+                reason: crate::AiUnavailableReason::MissingApiKey,
+            },
+        },
+    );
+    let (state, open_effects) = update(state, Msg::ArchiveClicked);
+    let request_id = archive_request_id(&open_effects);
+    let (state, _) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
+    let (state, _) = update(state, Msg::PollStarted { total: 1 });
+    let (state, effects) = update(state, Msg::StopFinishClicked);
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::StopFinish { .. })));
+    assert_eq!(
+        state.run_state(),
+        crate::RunState::Stopping { in_flight: 1 }
+    );
+    assert!(!state.export_available());
+
+    let (state, effects) = update(state, archive_submit_message(request_id));
+    assert!(effects
+        .iter()
+        .all(|effect| !matches!(effect, Effect::ArchiveRequested { .. })));
+    assert_eq!(
+        state.briefing_checkpoint_status_message(),
+        Some("Export is unavailable while a run is in progress")
+    );
+    let (state, _) = update(state, Msg::AllSourcesPollEnded);
+    assert_eq!(state.run_state(), crate::RunState::Idle);
+    assert_eq!(state.briefing_checkpoint_status_message(), None);
+}
+
+#[test]
+fn archive_actions_preserve_pending_checkpoint_save_status() {
+    init_logging();
+    let (state, _) = update(
+        AppState::new(),
+        Msg::BriefingCheckpointSet(Some("2026-03-22T00:00:00Z".into())),
+    );
+    assert_eq!(
+        state.briefing_checkpoint_status_message(),
+        Some("Checkpoint saving...")
+    );
+    let (state, open_effects) = update(state, Msg::ArchiveClicked);
+    assert_eq!(
+        state.briefing_checkpoint_status_message(),
+        Some("Checkpoint saving...")
+    );
+    let request_id = archive_request_id(&open_effects);
+    let (state, _) = update(state, archive_submit_message(request_id));
+    assert_eq!(
+        state.briefing_checkpoint_status_message(),
+        Some("Checkpoint saving...")
+    );
+}
+
+#[test]
+fn archive_succeeds_after_terminal_with_failed_summary_and_unfinished_work() {
+    init_logging();
+    let article = loaded_pre_triage_articles(&["https://archive-gate.invalid/article"]).remove(0);
+    let mut state = with_signal_candidate_metadata(ready_pre_triage_state(&[&article.url]));
+    state.set_llm_max_in_flight(1);
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
+    let (state, effects) =
+        crate::fixture_support::complete_processing_start(state, effects, 100_000);
+    let triage_id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::RequestLlmCompletion {
+                request_id,
+                prompt_id: harvester_engine::llm::prompt::PromptId::ArticleTriage,
+                ..
+            } => Some(*request_id),
+            _ => None,
+        })
+        .expect("triage starts");
+    let (state, effects) = update(state, triage_success(triage_id));
+    let summary_id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::RequestLlmCompletion {
+                request_id,
+                prompt_id: harvester_engine::llm::prompt::PromptId::ArticleSummary,
+                ..
+            } => Some(*request_id),
+            _ => None,
+        })
+        .expect("summary starts");
+    let (state, _) = update(
+        state,
+        Msg::LlmCompleted {
+            request_id: summary_id,
+            result: LlmResultKind::Failed {
+                reason: "summary fixture failure".into(),
+            },
+            metadata: None,
+        },
+    );
+    let (state, _) = update(
+        state,
+        Msg::EvaluatePreTriageRefresh {
+            ordered_urls: vec![article.url.clone()],
+            triggered_by_job_done: false,
+        },
+    );
+    let (state, refresh_id) = tick_until_dispatch(state);
+    let (state, _) = update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id: refresh_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(vec![article], 100_000),
+        },
+    );
+    assert!(state.run_progress().unwrap().terminal);
+    assert_eq!(state.briefing().failed_summary_count(), 1);
+    let unfinished = state.unfinished_work();
+    assert!(
+        matches!(unfinished, crate::UnfinishedWork::Known(work) if work.articles_with_work > 0),
+        "failed summary should leave nonzero unfinished work, got {unfinished:?}"
+    );
+    assert!(state.view().archive_enabled);
+
+    let (state, effects) = update(state, Msg::ArchiveClicked);
+    let request_id = archive_request_id(&effects);
+    let (state, effects) = update(state, archive_submit_message(request_id));
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::ArchiveRequested { .. })));
+    assert!(state.export_available());
+}
+
 #[test]
 fn archive_clicked_with_triage_complete_and_pre_triage_ready_sets_pending_count() {
     init_logging();
@@ -58,17 +256,30 @@ fn archive_clicked_with_triage_complete_and_pre_triage_ready_sets_pending_count(
     let url = "https://pending.com/1";
     let state = add_completed_job_for_test(state, url);
     let (state, request_id) = tick_until_dispatch(state);
+    let retained = state
+        .triage()
+        .articles()
+        .iter()
+        .map(|a| LoadedArticle {
+            url: a.url.clone(),
+            source_title: a.source_title.clone(),
+            prepared_text: a.prepared_text.clone(),
+            content_hash: a.content_hash.clone(),
+            fetched_utc: a.fetched_utc.clone(),
+        })
+        .collect::<Vec<_>>();
     let (state, _) = update(
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            articles: loaded_pre_triage_articles(&[url]),
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                retained
+                    .into_iter()
+                    .chain(loaded_pre_triage_articles(&[url]))
+                    .collect(),
+                100_000,
+            ),
         },
-    );
-    assert_eq!(
-        state.current_working_corpus().source(),
-        crate::working_corpus::CurrentWorkingCorpusSource::PreTriageReady,
-        "working corpus should be PreTriageReady — archive corpus is different"
     );
 
     let (_, effects) = update(state, Msg::ArchiveClicked);
@@ -194,7 +405,7 @@ fn archive_token_estimates_uses_summary_output_tokens_when_available() {
 }
 
 #[test]
-fn view_job_rows_include_cached_summary_tokens() {
+fn view_job_rows_hide_stale_cached_summary_tokens() {
     use crate::briefing::ArticleSummaryResult;
     use crate::summary_cache::SummaryCacheKey;
     use harvester_engine::llm::dto::SummaryEntities;
@@ -225,18 +436,19 @@ fn view_job_rows_include_cached_summary_tokens() {
 
     let view = state.view();
     let row = view
-        .jobs
+        .desktop_job_list
+        .rows
         .iter()
         .find(|job| job.url == url)
         .expect("expected matching job row");
 
     assert_eq!(row.tokens, Some(500));
-    assert_eq!(row.summary_tokens, Some(42));
-    assert!(row.has_summary);
+    assert_eq!(row.summary_tokens, None);
+    assert!(!row.has_summary);
 }
 
 #[test]
-fn view_job_rows_use_pre_triage_content_hash_for_cached_summary_tokens() {
+fn view_job_rows_hide_stale_pre_triage_cached_summary_tokens() {
     use crate::briefing::{ArticleSummaryResult, LoadedArticle};
     use crate::pre_triage_filter::{PreTriagePolicy, PreTriageSession};
     use crate::summary_cache::SummaryCacheKey;
@@ -281,14 +493,15 @@ fn view_job_rows_use_pre_triage_content_hash_for_cached_summary_tokens() {
 
     let view = state.view();
     let row = view
-        .jobs
+        .desktop_job_list
+        .rows
         .iter()
         .find(|job| job.url == url)
         .expect("expected matching job row");
 
     assert_eq!(row.tokens, Some(500));
-    assert_eq!(row.summary_tokens, Some(42));
-    assert!(row.has_summary);
+    assert_eq!(row.summary_tokens, None);
+    assert!(!row.has_summary);
 }
 
 #[test]
@@ -415,7 +628,7 @@ fn consume_interactive_pre_triage_articles_for_triage_returns_articles_and_reset
 }
 
 #[test]
-fn triage_clicked_consumes_reviewing_pre_triage_into_triage_session() {
+fn resume_run_consumes_reviewing_pre_triage_into_triage_session() {
     init_logging();
     let review_content: String = std::iter::repeat_n("longword", 100)
         .collect::<Vec<_>>()
@@ -445,15 +658,7 @@ fn triage_clicked_consumes_reviewing_pre_triage_into_triage_session() {
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            articles,
-        },
-    );
-    let key = state.pre_triage().entries()[0].key.clone();
-    let (state, _) = update(
-        state,
-        Msg::PreTriageDecisionSet {
-            key,
-            decision: crate::pre_triage_filter::ManualDecision::Exclude,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
         },
     );
     assert!(
@@ -464,12 +669,17 @@ fn triage_clicked_consumes_reviewing_pre_triage_into_triage_session() {
         "one unresolved review item should keep pre-triage in Reviewing"
     );
     assert!(
-        state.view().triage_can_start,
+        state.view().run_enabled,
         "Reviewing phase with tentative included articles must allow triage start"
     );
 
     let state = prime_llm_metadata(state);
-    let (state, effects) = update(state, Msg::TriageClicked);
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
 
     assert!(!effects.is_empty(), "triage should dispatch from Reviewing");
     assert!(
@@ -477,18 +687,26 @@ fn triage_clicked_consumes_reviewing_pre_triage_into_triage_session() {
             state.pre_triage().phase(),
             crate::pre_triage_filter::PreTriagePhase::Idle
         ),
-        "pre-triage must reset to Idle after TriageClicked"
+        "pre-triage must reset to Idle after a Resume run"
     );
     assert_eq!(
         state.triage().articles().len(),
-        1,
-        "only the tentatively included article should be handed to triage"
+        2,
+        "automatic pre-triage includes both review articles without retired overrides"
     );
-    assert_eq!(state.triage().articles()[0].url, url2);
+    assert_eq!(
+        state
+            .triage()
+            .articles()
+            .iter()
+            .map(|article| article.url.as_str())
+            .collect::<Vec<_>>(),
+        vec![url1, url2]
+    );
 }
 
 #[test]
-fn triage_clicked_consumes_ready_pre_triage_into_triage_session() {
+fn resume_run_consumes_ready_pre_triage_into_triage_session() {
     init_logging();
     let urls = &["https://handoff.com/1", "https://handoff.com/2"];
     let state = ready_pre_triage_state(urls);
@@ -499,14 +717,19 @@ fn triage_clicked_consumes_ready_pre_triage_into_triage_session() {
         crate::pre_triage_filter::PreTriagePhase::ReadyToTriage
     ));
 
-    let (state, _effects) = update(state, Msg::TriageClicked);
+    let (state, _effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
 
     assert!(
         matches!(
             state.pre_triage().phase(),
             crate::pre_triage_filter::PreTriagePhase::Idle
         ),
-        "pre-triage must reset to Idle after TriageClicked"
+        "pre-triage must reset to Idle after a Resume run"
     );
     assert!(
         state.pre_triage().resolved_included_urls().is_empty(),
@@ -533,64 +756,78 @@ fn triage_clicked_consumes_ready_pre_triage_into_triage_session() {
 }
 
 #[test]
-fn triage_clicked_sets_current_working_corpus_to_unavailable_until_triage_completes() {
+fn resume_run_makes_archive_corpus_available_when_triage_completes() {
     init_logging();
     let urls = &["https://corpus-src.com/1"];
     let state = ready_pre_triage_state(urls);
     let state = prime_llm_metadata(state);
 
-    assert_eq!(
-        state.current_working_corpus().source(),
-        crate::working_corpus::CurrentWorkingCorpusSource::PreTriageReady,
-        "source must be PreTriageReady before TriageClicked"
-    );
-
-    let (state, effects) = update(state, Msg::TriageClicked);
-    assert_eq!(
-        state.current_working_corpus().source(),
-        crate::working_corpus::CurrentWorkingCorpusSource::Unavailable,
-        "source must be Unavailable while triage is in-flight"
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
     );
 
     let state = complete_all_triage_llm_requests(state, effects);
-
-    assert_eq!(
-        state.current_working_corpus().source(),
-        crate::working_corpus::CurrentWorkingCorpusSource::TriageComplete,
-        "source must be TriageComplete after triage finishes"
-    );
+    assert_eq!(state.triage().phase(), &crate::TriagePhase::Complete);
+    assert_eq!(state.archive_corpus().count(), 1);
 }
 
 #[test]
-fn archive_clicked_after_triage_start_has_zero_pending_pre_triage_count() {
+fn archive_clicked_after_triage_start_is_gated_while_run_active() {
     init_logging();
     let urls = &["https://archive-handoff.com/1"];
     let state = ready_pre_triage_state(urls);
     let state = prime_llm_metadata(state);
 
-    let (state, effects) = update(state, Msg::TriageClicked);
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
     let state = complete_all_triage_llm_requests(state, effects);
 
+    assert_eq!(state.run_state(), crate::RunState::Active);
+    let (state, archive_effects) = update(state, Msg::ArchiveClicked);
+    assert!(archive_effects.is_empty());
+    assert!(!state.view().archive_enabled);
+    let (mut state, _) = update(state, Msg::StopFinishClicked);
+    let in_flight = state
+        .briefing()
+        .articles()
+        .iter()
+        .filter_map(|article| match article.summary_state {
+            crate::briefing::ArticleSummaryState::InProgress { request_id } => Some(request_id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for request_id in in_flight {
+        (state, _) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id,
+                result: crate::LlmResultKind::Failed {
+                    reason: "summary fixture drain".into(),
+                },
+                metadata: None,
+            },
+        );
+    }
+    assert_eq!(state.run_state(), crate::RunState::Idle);
     let (_, archive_effects) = update(state, Msg::ArchiveClicked);
     let pending_count = archive_effects
         .iter()
-        .find_map(|e| {
-            if let Effect::OpenArchiveDialog {
+        .find_map(|effect| match effect {
+            Effect::OpenArchiveDialog {
                 pending_pre_triage_count,
                 ..
-            } = e
-            {
-                Some(*pending_pre_triage_count)
-            } else {
-                None
-            }
+            } => Some(*pending_pre_triage_count),
+            _ => None,
         })
-        .expect("expected OpenArchiveDialog effect");
-
-    assert_eq!(
-        pending_count, 0,
-        "pending_pre_triage_count must be 0 after reducer handoff path"
-    );
+        .expect("expected OpenArchiveDialog after run settled");
+    assert_eq!(pending_count, 0);
 }
 
 #[test]
@@ -600,13 +837,18 @@ fn pre_triage_refresh_after_triage_start_repopulates_pre_triage_without_mutating
     let state = ready_pre_triage_state(urls);
     let state = prime_llm_metadata(state);
 
-    let (state, _effects) = update(state, Msg::TriageClicked);
+    let (state, _effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
     assert!(
         matches!(
             state.pre_triage().phase(),
             crate::pre_triage_filter::PreTriagePhase::Idle
         ),
-        "pre-triage must be Idle after TriageClicked"
+        "pre-triage must be Idle after a Resume run"
     );
 
     let triage_article_count_before = state.triage().articles().len();
@@ -614,13 +856,15 @@ fn pre_triage_refresh_after_triage_start_repopulates_pre_triage_without_mutating
 
     let new_url = "https://repopulate.com/new-article";
     let state = add_completed_job_for_test(state, new_url);
+    assert_eq!(state.triage().articles().len(), triage_article_count_before);
     let (state, request_id) = tick_until_dispatch(state);
+    assert_eq!(state.triage().articles().len(), triage_article_count_before);
     let new_articles = loaded_pre_triage_articles(&[new_url]);
     let (state, _) = update(
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            articles: new_articles,
+            delta: harvester_engine::TriageArticleDelta::full_window(new_articles, 100_000),
         },
     );
 
@@ -684,7 +928,7 @@ fn archive_clicked_with_pre_triage_reviewing_has_zero_pending_count() {
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            articles,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
         },
     );
     assert!(
@@ -693,14 +937,6 @@ fn archive_clicked_with_pre_triage_reviewing_has_zero_pending_count() {
             crate::pre_triage_filter::PreTriagePhase::Reviewing
         ),
         "unresolved review articles should derive Reviewing immediately after load"
-    );
-    let key = state.pre_triage().entries()[0].key.clone();
-    let (state, _) = update(
-        state,
-        Msg::PreTriageDecisionSet {
-            key,
-            decision: crate::pre_triage_filter::ManualDecision::Include,
-        },
     );
     assert!(
         matches!(
@@ -843,6 +1079,8 @@ fn archive_dialog_submitted_validates_basename_and_checkpoint_flag() {
             requested_checkpoint,
             use_summaries,
             summaries,
+            annotations: _,
+            priority_snapshot: _,
         } => {
             assert_eq!(request_id, 1);
             assert_eq!(basename, "custom-archive.md");
@@ -854,6 +1092,337 @@ fn archive_dialog_submitted_validates_basename_and_checkpoint_flag() {
         }
         _ => unreachable!(),
     }
+}
+
+#[test]
+fn archive_dialog_submitted_emits_triage_and_signal_annotations() {
+    use harvester_engine::archive_url_key;
+
+    init_logging();
+    let mut state = complete_triage_state_for_test(2);
+    complete_signal_candidate(&mut state, 1, 0, "zero-event");
+    crate::fixture_support::save_session_results(&mut state);
+    let (state, _) = update(state, Msg::ArchiveClicked);
+    let request_id = state.archive_request_id();
+    let (_state, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".to_string(),
+            set_checkpoint: false,
+            submitted_at: chrono::Utc::now(),
+            use_summaries: false,
+            use_signal_candidates: false,
+        },
+    );
+
+    let (ordered_urls, annotations) = effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::ArchiveRequested {
+                ordered_urls,
+                annotations,
+                ..
+            } => Some((ordered_urls, annotations)),
+            _ => None,
+        })
+        .expect("ArchiveRequested effect expected");
+    assert_eq!(ordered_urls.len(), 2);
+    let triaged = &annotations[&archive_url_key("https://triage-complete.com/0")];
+    assert_eq!(triaged.priority, Some(3));
+    assert_eq!(triaged.tags, Some(vec![]));
+    assert_eq!(triaged.triage_model.as_deref(), Some("fixture-triage"));
+    assert!(triaged.signal_key.is_none());
+    let scored = &annotations[&archive_url_key("https://triage-complete.com/1")];
+    assert_eq!(scored.priority, Some(3));
+    assert_eq!(scored.signal_key.as_deref(), Some("zero-event"));
+    assert_eq!(scored.signal_score, Some(0));
+}
+
+#[test]
+fn archive_submit_priority_snapshot_includes_unselected_completed_result() {
+    use harvester_engine::archive_url_key;
+
+    init_logging();
+    let mut state = complete_triage_state_for_test(2);
+    complete_signal_candidate(&mut state, 0, 80, "selected-event");
+    crate::fixture_support::save_session_results(&mut state);
+    let (state, _) = update(state, Msg::ArchiveClicked);
+    let request_id = state.archive_request_id();
+    let (_state, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".to_string(),
+            set_checkpoint: false,
+            submitted_at: chrono::Utc::now(),
+            use_summaries: false,
+            use_signal_candidates: true,
+        },
+    );
+
+    let (ordered_urls, priority_snapshot) = effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::ArchiveRequested {
+                ordered_urls,
+                priority_snapshot,
+                ..
+            } => Some((ordered_urls, priority_snapshot)),
+            _ => None,
+        })
+        .expect("ArchiveRequested effect expected");
+    assert_eq!(ordered_urls, vec!["https://triage-complete.com/0"]);
+    assert_eq!(
+        priority_snapshot.get(&archive_url_key("https://triage-complete.com/1")),
+        Some(&3),
+        "snapshot must include completed triage results outside the exported selection"
+    );
+    assert_eq!(
+        priority_snapshot.get(&archive_url_key("https://triage-complete.com/0")),
+        Some(&3),
+        "snapshot must also include the exported selection's own triage results"
+    );
+    assert_eq!(
+        priority_snapshot.len(),
+        2,
+        "snapshot must cover every completed triage result the session holds"
+    );
+}
+
+#[test]
+fn archive_submit_priority_snapshot_includes_manually_excluded_candidate() {
+    use harvester_engine::archive_url_key;
+
+    init_logging();
+    let mut state = complete_triage_state_for_test(2);
+    complete_signal_candidate(&mut state, 0, 80, "selected-event");
+    complete_signal_candidate(&mut state, 1, 90, "excluded-event");
+    crate::fixture_support::save_session_results(&mut state);
+    let (state, _) = update(
+        state,
+        Msg::ToggleSignalCandidateExclusion {
+            signal_key: "excluded-event".to_string(),
+        },
+    );
+    assert_eq!(state.signal_exclusions().excluded().len(), 1);
+
+    let (state, _) = update(state, Msg::ArchiveClicked);
+    let request_id = state.archive_request_id();
+    let (_state, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".to_string(),
+            set_checkpoint: false,
+            submitted_at: chrono::Utc::now(),
+            use_summaries: false,
+            use_signal_candidates: true,
+        },
+    );
+
+    let (ordered_urls, priority_snapshot) = effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::ArchiveRequested {
+                ordered_urls,
+                priority_snapshot,
+                ..
+            } => Some((ordered_urls, priority_snapshot)),
+            _ => None,
+        })
+        .expect("ArchiveRequested effect expected");
+    assert_eq!(ordered_urls, vec!["https://triage-complete.com/0"]);
+    assert!(!ordered_urls.contains(&"https://triage-complete.com/1".to_string()));
+    assert_eq!(
+        priority_snapshot.get(&archive_url_key("https://triage-complete.com/1")),
+        Some(&3),
+        "manually excluded completed triage results must remain in the snapshot"
+    );
+}
+
+#[test]
+fn archive_annotations_are_read_at_submit_after_scoring_without_changing_pinned_selection() {
+    use harvester_engine::archive_url_key;
+    use harvester_engine::llm::prompt::PromptId;
+
+    init_logging();
+    let mut state = with_signal_candidate_metadata(complete_triage_state_for_test(2));
+    seed_summaries_for_triage_hashes(&mut state, 2);
+    let (mut state, _) = update(state, Msg::ArchiveClicked);
+    let request_id = state.archive_request_id();
+    let url = "https://triage-complete.com/0";
+    state
+        .signal_candidate_mut()
+        .enqueue(url.to_string(), "fixture-input".to_string());
+    state.signal_candidate_mut().mark_scoring(url, 77);
+    state.record_pending_llm_request(77, PromptId::ArticleSignalCandidate);
+    let snapshot = crate::update::signal_candidate::build_input_snapshot(&state, url)
+        .expect("current upstream fixture");
+    state.set_signal_candidate_input_snapshot(url, snapshot);
+
+    crate::fixture_support::save_session_results(&mut state);
+    let (state, _) = update(
+        state,
+        Msg::LlmCompleted {
+            request_id: 77,
+            result: LlmResultKind::Success {
+                output_json: r#"{
+                    "signal_score": 84,
+                    "signal_key": "late-event",
+                    "themes": ["late-theme"],
+                    "draft_gist": "Example outlet reports a concrete AI infrastructure event.",
+                    "source_tier": "Tier1",
+                    "confidence": "High",
+                    "reasoning": "Concrete event."
+                }"#
+                .to_string(),
+                input_tokens: 10,
+                output_tokens: 5,
+                prompt_version: 1,
+                resolved_model: "signal-model".to_string(),
+            },
+            metadata: None,
+        },
+    );
+    let (_state, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".to_string(),
+            set_checkpoint: false,
+            submitted_at: chrono::Utc::now(),
+            use_summaries: false,
+            use_signal_candidates: false,
+        },
+    );
+
+    let (ordered_urls, annotations) = effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::ArchiveRequested {
+                ordered_urls,
+                annotations,
+                ..
+            } => Some((ordered_urls, annotations)),
+            _ => None,
+        })
+        .expect("ArchiveRequested effect expected");
+    assert_eq!(
+        ordered_urls,
+        vec![
+            "https://triage-complete.com/0".to_string(),
+            "https://triage-complete.com/1".to_string()
+        ]
+    );
+    let annotation = &annotations[&archive_url_key(url)];
+    assert_eq!(annotation.signal_key.as_deref(), Some("late-event"));
+    assert_eq!(annotation.signal_score, Some(84));
+    assert_eq!(annotation.themes, Some(vec!["late-theme".to_string()]));
+}
+
+#[test]
+fn compatible_triage_cache_hit_exports_the_stored_model_id() {
+    use harvester_engine::archive_url_key;
+    use harvester_engine::llm::prompt::PromptId;
+
+    init_logging();
+    let mut state = prime_llm_metadata(AppState::new());
+    state.store_triage_result(
+        "hash-0",
+        crate::triage::ArticleTriageResult {
+            category: "news".to_string(),
+            priority: 4,
+            tags: vec!["cached".to_string()],
+            rationale: "cached".to_string(),
+            input_tokens: 1,
+            output_tokens: 1,
+        },
+    );
+    let mut active_versions = std::collections::HashMap::new();
+    active_versions.insert(PromptId::ArticleTriage, 1);
+    let mut effective_models = std::collections::HashMap::new();
+    effective_models.insert(PromptId::ArticleTriage, "test-model-2026-03-31".to_string());
+    let (state, _) = update(
+        state,
+        Msg::LlmMetadataLoaded {
+            active_versions,
+            effective_models,
+        },
+    );
+    let mut state = state;
+    let load_request_id = state.alloc_triage_request_id();
+    state.set_triage_in_flight(load_request_id);
+    let (state, _) = update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id: load_request_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                loaded_triage_articles(1),
+                100_000,
+            ),
+        },
+    );
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
+    let (mut state, effects) =
+        crate::fixture_support::complete_processing_start(state, effects, 100_000);
+    if let Some(summary_id) = effects.iter().find_map(|effect| match effect {
+        Effect::RequestLlmCompletion {
+            request_id,
+            prompt_id: harvester_engine::llm::prompt::PromptId::ArticleSummary,
+            ..
+        } => Some(*request_id),
+        _ => None,
+    }) {
+        let (next, _) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: summary_id,
+                result: LlmResultKind::Failed {
+                    reason: "summary fixture failure".into(),
+                },
+                metadata: None,
+            },
+        );
+        state = next;
+    }
+    assert!(state.run_progress().unwrap().terminal);
+    assert_eq!(
+        state.triage().triage_model_for_url("https://example.com/0"),
+        Some("test-model")
+    );
+
+    let (state, _) = update(state, Msg::ArchiveClicked);
+    let request_id = state.archive_request_id();
+    let (_state, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".to_string(),
+            set_checkpoint: false,
+            submitted_at: chrono::Utc::now(),
+            use_summaries: false,
+            use_signal_candidates: false,
+        },
+    );
+    let annotations = effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::ArchiveRequested { annotations, .. } => Some(annotations),
+            _ => None,
+        })
+        .expect("ArchiveRequested effect expected");
+    assert_eq!(
+        annotations[&archive_url_key("https://example.com/0")]
+            .triage_model
+            .as_deref(),
+        Some("test-model")
+    );
 }
 
 #[test]
@@ -1267,11 +1836,29 @@ fn refresh_between_open_and_submit_uses_pinned_snapshot() {
     let pre_triage_url = "https://pretriage.com/1";
     let state = add_completed_job_for_test(state, pre_triage_url);
     let (state, request_id2) = tick_until_dispatch(state);
+    let retained = state
+        .triage()
+        .articles()
+        .iter()
+        .map(|a| LoadedArticle {
+            url: a.url.clone(),
+            source_title: a.source_title.clone(),
+            prepared_text: a.prepared_text.clone(),
+            content_hash: a.content_hash.clone(),
+            fetched_utc: a.fetched_utc.clone(),
+        })
+        .collect::<Vec<_>>();
     let (state, _) = update(
         state,
         Msg::TriageArticlesLoaded {
             request_id: request_id2,
-            articles: loaded_pre_triage_articles(&[pre_triage_url]),
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                retained
+                    .into_iter()
+                    .chain(loaded_pre_triage_articles(&[pre_triage_url]))
+                    .collect(),
+                100_000,
+            ),
         },
     );
     assert_eq!(
@@ -1315,13 +1902,6 @@ fn parity_a_pre_triage_ready_archive_count_is_zero_pending_count_is_nonzero() {
     let since = chrono::DateTime::parse_from_rfc3339("2026-03-22T00:00:00Z")
         .unwrap()
         .with_timezone(&chrono::Utc);
-
-    let corpus = state.current_working_corpus();
-    assert_eq!(
-        corpus.source(),
-        crate::working_corpus::CurrentWorkingCorpusSource::PreTriageReady,
-        "source must be PreTriageReady"
-    );
 
     let (state, open_effects) = update(state, Msg::ArchiveClicked);
     let request_id = state.archive_request_id();
@@ -1379,14 +1959,8 @@ fn parity_b_triage_complete_corpus_count_dialog_count_urls_match() {
         .unwrap()
         .with_timezone(&chrono::Utc);
 
-    let corpus = state.current_working_corpus();
-    assert_eq!(
-        corpus.source(),
-        crate::working_corpus::CurrentWorkingCorpusSource::TriageComplete,
-        "source must be TriageComplete when pre-triage is idle"
-    );
-    let expected_count = corpus.count();
-    let expected_urls: Vec<String> = corpus.ordered_urls().to_vec();
+    let expected_count = state.archive_corpus().count();
+    let expected_urls: Vec<String> = state.archive_corpus().ordered_urls().to_vec();
     assert!(
         expected_count > 0,
         "corpus must be non-empty for a meaningful parity test"
@@ -1450,18 +2024,12 @@ fn checkpoint_set_does_not_reduce_corpus_count_to_zero() {
         "checkpoint must be set before the test"
     );
 
-    let corpus = state.current_working_corpus();
-    assert_eq!(
-        corpus.source(),
-        crate::working_corpus::CurrentWorkingCorpusSource::TriageComplete,
-        "corpus source must be TriageComplete"
-    );
     assert!(
-        corpus.count() > 0,
+        state.archive_corpus().count() > 0,
         "corpus count must be non-zero even when briefing checkpoint is set"
     );
-    let expected_count = corpus.count();
-    let expected_urls: Vec<String> = corpus.ordered_urls().to_vec();
+    let expected_count = state.archive_corpus().count();
+    let expected_urls: Vec<String> = state.archive_corpus().ordered_urls().to_vec();
 
     let (state, open_effects) = update(state, Msg::ArchiveClicked);
     let dialog_since_utc = open_effects
@@ -1532,9 +2100,10 @@ fn archive_clicked_reports_signal_candidate_snapshot() {
 
     init_logging();
     let mut state = complete_triage_state_for_test(1);
-    state
-        .signal_candidate_mut()
-        .enqueue("https://signal.example/a".to_string());
+    state.signal_candidate_mut().enqueue(
+        "https://signal.example/a".to_string(),
+        "fixture-input".to_string(),
+    );
     state
         .signal_candidate_mut()
         .mark_scoring("https://signal.example/a", 7);
@@ -1553,6 +2122,7 @@ fn archive_clicked_reports_signal_candidate_snapshot() {
         },
     );
 
+    crate::fixture_support::save_session_results(&mut state);
     let (state, effects) = update(state, Msg::ArchiveClicked);
     let effect = effects
         .into_iter()
@@ -1576,7 +2146,11 @@ fn archive_clicked_reports_signal_candidate_snapshot() {
             assert_eq!(signal_candidate_scoring_total, 1);
             assert_eq!(
                 signal_candidate_token_estimates,
-                crate::ArchiveTokenEstimates::default()
+                crate::ArchiveTokenEstimates {
+                    full_tokens: 0,
+                    summary_tokens: 1,
+                    summary_coverage: 1
+                }
             );
         }
         _ => unreachable!(),
@@ -1597,9 +2171,10 @@ fn archive_dialog_submit_uses_pinned_signal_candidate_snapshot_and_clears_overri
 
     init_logging();
     let mut state = complete_triage_state_for_test(1);
-    state
-        .signal_candidate_mut()
-        .enqueue("https://signal.example/a".to_string());
+    state.signal_candidate_mut().enqueue(
+        "https://signal.example/a".to_string(),
+        "fixture-input".to_string(),
+    );
     state
         .signal_candidate_mut()
         .mark_scoring("https://signal.example/a", 7);
@@ -1618,6 +2193,7 @@ fn archive_dialog_submit_uses_pinned_signal_candidate_snapshot_and_clears_overri
         },
     );
 
+    crate::fixture_support::save_session_results(&mut state);
     let (state, _) = update(
         state,
         Msg::ToggleSignalCandidateExclusion {
@@ -1626,9 +2202,10 @@ fn archive_dialog_submit_uses_pinned_signal_candidate_snapshot_and_clears_overri
     );
     let (mut state, _) = update(state, Msg::ArchiveClicked);
 
-    state
-        .signal_candidate_mut()
-        .enqueue("https://signal.example/b".to_string());
+    state.signal_candidate_mut().enqueue(
+        "https://signal.example/b".to_string(),
+        "fixture-input".to_string(),
+    );
     state
         .signal_candidate_mut()
         .mark_scoring("https://signal.example/b", 8);
@@ -1680,7 +2257,7 @@ fn archive_dialog_submit_uses_pinned_signal_candidate_snapshot_and_clears_overri
         Effect::PersistSignalCandidateOverrides { overrides } if overrides.is_empty()
     )));
     assert!(
-        state.signal_candidate().excluded().is_empty(),
+        state.signal_exclusions().excluded().is_empty(),
         "checkpoint submit must clear signal-candidate overrides"
     );
 }
@@ -1692,9 +2269,10 @@ fn archive_dialog_submit_with_empty_candidate_snapshot_exports_empty_selection_w
 
     init_logging();
     let mut state = complete_triage_state_for_test(1);
-    state
-        .signal_candidate_mut()
-        .enqueue("https://triage-complete.com/0".to_string());
+    state.signal_candidate_mut().enqueue(
+        "https://triage-complete.com/0".to_string(),
+        "fixture-input".to_string(),
+    );
     state
         .signal_candidate_mut()
         .mark_scoring("https://triage-complete.com/0", 7);
@@ -1777,7 +2355,9 @@ fn signal_candidate_selection_applies_threshold_and_order() {
 
     for (i, score, key) in [(0usize, 80u8, "cluster-a"), (1usize, 30u8, "cluster-b")] {
         let url = format!("https://triage-complete.com/{i}");
-        state.signal_candidate_mut().enqueue(url.clone());
+        state
+            .signal_candidate_mut()
+            .enqueue(url.clone(), "fixture-input".to_string());
         state
             .signal_candidate_mut()
             .mark_scoring(&url, i as u64 + 1);
@@ -1797,6 +2377,7 @@ fn signal_candidate_selection_applies_threshold_and_order() {
         );
     }
 
+    crate::fixture_support::save_session_results(&mut state);
     let selection = state.signal_candidate_selection();
     assert_eq!(
         selection.selected_urls,
@@ -1815,7 +2396,9 @@ fn archive_final_selection_signal_filtered_matches_shared_selection() {
     state = with_signal_candidate_metadata(state);
     for (i, score, key) in [(0usize, 80u8, "cluster-a"), (1usize, 30u8, "cluster-b")] {
         let url = format!("https://triage-complete.com/{i}");
-        state.signal_candidate_mut().enqueue(url.clone());
+        state
+            .signal_candidate_mut()
+            .enqueue(url.clone(), "fixture-input".to_string());
         state
             .signal_candidate_mut()
             .mark_scoring(&url, i as u64 + 1);
@@ -1835,6 +2418,7 @@ fn archive_final_selection_signal_filtered_matches_shared_selection() {
         );
     }
 
+    crate::fixture_support::save_session_results(&mut state);
     let final_selection = state.archive_final_selection();
     assert_eq!(
         final_selection.source,
@@ -1861,7 +2445,9 @@ fn archive_final_selection_settled_empty_falls_back_to_full_corpus() {
     state = with_signal_candidate_metadata(state);
     for i in 0..2usize {
         let url = format!("https://triage-complete.com/{i}");
-        state.signal_candidate_mut().enqueue(url.clone());
+        state
+            .signal_candidate_mut()
+            .enqueue(url.clone(), "fixture-input".to_string());
         state
             .signal_candidate_mut()
             .mark_scoring(&url, i as u64 + 1);
@@ -1881,6 +2467,7 @@ fn archive_final_selection_settled_empty_falls_back_to_full_corpus() {
         );
     }
 
+    crate::fixture_support::save_session_results(&mut state);
     let final_selection = state.archive_final_selection();
     assert_eq!(
         final_selection.source,
@@ -1915,17 +2502,14 @@ fn summary_failed_for_url_returns_true_for_failed_summary() {
 
     init_logging();
     let url = "https://triage-complete.com/0";
-    let mut briefing = BriefingSession::new_loading(None);
-    briefing.set_articles(
-        vec![LoadedArticle {
-            url: url.to_string(),
-            source_title: None,
-            prepared_text: "text".to_string(),
-            content_hash: "hash-tc-0".to_string(),
-            fetched_utc: None,
-        }],
-        "collection".to_string(),
-    );
+    let mut briefing = BriefingSession::new_loading();
+    briefing.set_articles(vec![LoadedArticle {
+        url: url.to_string(),
+        source_title: None,
+        prepared_text: "text".to_string(),
+        content_hash: "hash-tc-0".to_string(),
+        fetched_utc: None,
+    }]);
     briefing.transition_to_summarizing();
     briefing.start_article(0, 1);
     briefing.fail_article(0, "network".to_string());
@@ -1954,132 +2538,13 @@ fn summaries_can_start_false_when_briefing_active() {
 
     init_logging();
     let mut state = complete_triage_state_for_test(2);
-    state.set_briefing(BriefingSession::new_loading(None));
+    state.set_briefing(BriefingSession::new_loading());
     assert!(!state.briefing().can_start());
     assert!(!state.summaries_can_start());
 }
 
 #[test]
-fn briefing_generate_readiness_triage_or_corpus_not_ready_when_empty() {
-    use crate::state::BriefingGenerateReadiness;
-
-    init_logging();
-    let state = AppState::new();
-    assert!(matches!(
-        state.briefing_generate_readiness(),
-        BriefingGenerateReadiness::TriageOrCorpusNotReady
-    ));
-}
-
-#[test]
-fn briefing_generate_readiness_summaries_not_settled() {
-    use crate::state::BriefingGenerateReadiness;
-
-    init_logging();
-    let state = complete_triage_state_for_test(2);
-    assert!(matches!(
-        state.briefing_generate_readiness(),
-        BriefingGenerateReadiness::SummariesNotSettled
-    ));
-}
-
-#[test]
-fn briefing_generate_readiness_ready_when_failed_summary_does_not_block() {
-    use crate::briefing::{ArticleSummaryResult, BriefingSession, LoadedArticle};
-    use crate::state::BriefingGenerateReadiness;
-    use crate::summary_cache::SummaryCacheKey;
-    use harvester_engine::llm::dto::SummaryEntities;
-    use harvester_engine::llm::prompt::PromptId;
-
-    init_logging();
-    let mut state = complete_triage_state_for_test(2);
-
-    state.store_summary_result(
-        SummaryCacheKey {
-            content_hash: "hash-tc-0".to_string(),
-            prompt_id: PromptId::ArticleSummary,
-            prompt_version: 1,
-            model_id: "test-summary-model".to_string(),
-            context_hash: "ctx".to_string(),
-        },
-        ArticleSummaryResult {
-            title: "A".to_string(),
-            summary: "s".to_string(),
-            key_points: vec![],
-            input_tokens: 1,
-            output_tokens: 1,
-            entities: SummaryEntities::default(),
-        },
-        "2026-05-01T00:00:00Z".to_string(),
-    );
-
-    let mut briefing = BriefingSession::new_loading(None);
-    briefing.set_articles(
-        vec![LoadedArticle {
-            url: "https://triage-complete.com/1".to_string(),
-            source_title: None,
-            prepared_text: "t".to_string(),
-            content_hash: "hash-tc-1".to_string(),
-            fetched_utc: None,
-        }],
-        "c".to_string(),
-    );
-    briefing.transition_to_summarizing();
-    briefing.start_article(0, 1);
-    briefing.fail_article(0, "network".to_string());
-    briefing.complete_without_briefing();
-    state.set_briefing(briefing);
-
-    assert!(matches!(
-        state.briefing_generate_readiness(),
-        BriefingGenerateReadiness::Ready { .. }
-    ));
-}
-
-#[test]
-fn briefing_generate_readiness_signal_scoring_in_progress() {
-    use crate::briefing::ArticleSummaryResult;
-    use crate::state::BriefingGenerateReadiness;
-    use crate::summary_cache::SummaryCacheKey;
-    use harvester_engine::llm::dto::SummaryEntities;
-    use harvester_engine::llm::prompt::PromptId;
-
-    init_logging();
-    let mut state = complete_triage_state_for_test(2);
-
-    for i in 0..2usize {
-        state.store_summary_result(
-            SummaryCacheKey {
-                content_hash: format!("hash-tc-{i}"),
-                prompt_id: PromptId::ArticleSummary,
-                prompt_version: 1,
-                model_id: "test-summary-model".to_string(),
-                context_hash: "ctx".to_string(),
-            },
-            ArticleSummaryResult {
-                title: "A".to_string(),
-                summary: "s".to_string(),
-                key_points: vec![],
-                input_tokens: 1,
-                output_tokens: 1,
-                entities: SummaryEntities::default(),
-            },
-            "2026-05-01T00:00:00Z".to_string(),
-        );
-    }
-
-    let url = "https://triage-complete.com/0".to_string();
-    state.signal_candidate_mut().enqueue(url);
-    assert!(state.signal_candidate().in_flight_count() > 0);
-
-    assert!(matches!(
-        state.briefing_generate_readiness(),
-        BriefingGenerateReadiness::SignalScoringInProgress
-    ));
-}
-
-#[test]
-fn view_exposes_archive_token_estimate_and_article_counts() {
+fn view_exposes_selected_meter_without_triage_or_download_fallback() {
     use crate::briefing::ArticleSummaryResult;
     use crate::summary_cache::SummaryCacheKey;
     use crate::{JobResultKind, Stage};
@@ -2104,8 +2569,8 @@ fn view_exposes_archive_token_estimate_and_article_counts() {
         (state, job_id)
     }
 
-    // (1) One article in the completed triage corpus, downloaded (500 raw tokens)
-    //     and summarized (42 output tokens). In the archive corpus; NOT raw.
+    // (1) One article in the completed triage corpus, downloaded (500 tokens)
+    //     and summarized (42 output tokens), but not scored.
     let triaged_url = "https://triage-complete.com/0".to_string();
     let state = complete_triage_state_for_test(1);
     let mut state = add_completed_job_with_tokens_for_test(state, &triaged_url, 500);
@@ -2128,8 +2593,8 @@ fn view_exposes_archive_token_estimate_and_article_counts() {
         "2026-04-01T00:00:00Z".to_string(),
     );
 
-    // (2) A successful downloaded job that is NOT in the archive corpus.
-    //     With the correct implementation this must NOT count as raw.
+    // (2) A successful download outside the triaged archive corpus. Neither
+    //     download can count toward the meter without a saved current-key score.
     let state = add_completed_job_with_tokens_for_test(state, "https://fresh.example.com/new", 300);
 
     // (3) A FAILED job that still carries tokens (apply_done does not clear them).
@@ -2141,7 +2606,6 @@ fn view_exposes_archive_token_estimate_and_article_counts() {
             stage: Stage::Tokenizing,
             tokens: Some(700),
             bytes: None,
-            content_preview: None,
         },
     );
     let (state, _) = update(
@@ -2151,7 +2615,7 @@ fn view_exposes_archive_token_estimate_and_article_counts() {
             result: JobResultKind::Failed {
                 reason: "boom".to_string(),
             },
-            content_preview: None,
+
             extracted_links: Vec::new(),
             fetched_utc: None,
         },
@@ -2166,131 +2630,27 @@ fn view_exposes_archive_token_estimate_and_article_counts() {
             stage: Stage::Tokenizing,
             tokens: Some(800),
             bytes: None,
-            content_preview: None,
         },
     );
 
     // (5) A QUEUED job: enqueued only, no tokens, not done.
     let (state, _queued_id) = enqueue(state, "https://queued.example.com/x");
 
+    let state = crate::fixture_support::complete_archive_meter_startup(state);
     let view = state.view();
 
-    // Estimate = summary-mode archive size over the filtered corpus only.
-    assert_eq!(view.archive_token_estimate, 42);
-    // Filtered corpus has exactly the one triaged article.
-    assert_eq!(view.archive_filtered_count, 1);
-    // The single archive article (1) is fully summarized. Job (2) has no summary
-    // but is outside the archive corpus — it must not be counted as raw.
-    assert_eq!(view.raw_unprocessed_count, 0);
-}
-
-#[test]
-fn raw_unprocessed_count_is_archive_corpus_articles_without_summary() {
-    use crate::briefing::ArticleSummaryResult;
-    use crate::summary_cache::SummaryCacheKey;
-    use harvester_engine::llm::dto::SummaryEntities;
-    use harvester_engine::llm::prompt::PromptId;
-
-    init_logging();
-
-    // Two archive-corpus articles: one summarized, one not.
-    let url_summarized = "https://triage-complete.com/0".to_string();
-    let url_raw = "https://triage-complete.com/1".to_string();
-    let state = complete_triage_state_for_test(2);
-    let state = add_completed_job_with_tokens_for_test(state, &url_summarized, 400);
-    let mut state = add_completed_job_with_tokens_for_test(state, &url_raw, 600);
-
-    state.store_summary_result(
-        SummaryCacheKey {
-            content_hash: "hash-tc-0".to_string(),
-            prompt_id: PromptId::ArticleSummary,
-            prompt_version: 4,
-            model_id: "model".to_string(),
-            context_hash: "ctx".to_string(),
-        },
-        ArticleSummaryResult {
-            title: "Summarized".to_string(),
-            summary: "s".to_string(),
-            key_points: vec![],
-            input_tokens: 100,
-            output_tokens: 30,
-            entities: SummaryEntities::default(),
-        },
-        "2026-04-01T00:00:00Z".to_string(),
+    assert_eq!(view.archive_meter.selected_count, 0);
+    assert_eq!(view.archive_meter.token_estimate, 0);
+    assert_eq!(
+        view.archive_meter.status,
+        crate::ArchiveMeterStatus::NotScoredYet
     );
-
-    let view = state.view();
-
-    assert_eq!(view.archive_filtered_count, 2);
-    // url_raw is in the archive corpus but has no summary → counts as 1 raw.
-    assert_eq!(view.raw_unprocessed_count, 1);
-}
-
-#[test]
-fn signal_candidate_mode_keeps_raw_count_over_full_archive_corpus() {
-    use crate::briefing::ArticleSummaryResult;
-    use crate::summary_cache::SummaryCacheKey;
-    use harvester_engine::llm::dto::{
-        Confidence, SignalCandidateResult, SourceTier, SummaryEntities,
-    };
-    use harvester_engine::llm::prompt::PromptId;
-
-    init_logging();
-
-    // Three triaged articles in the archive corpus. Only article /0 is summarized
-    // and promoted to a settled signal candidate; /1 and /2 remain unsummarized.
-    let url_candidate = "https://triage-complete.com/0".to_string();
-    let state = complete_triage_state_for_test(3);
-    let state = add_completed_job_with_tokens_for_test(state, &url_candidate, 400);
-    let state = add_completed_job_with_tokens_for_test(state, "https://triage-complete.com/1", 500);
-    let mut state =
-        add_completed_job_with_tokens_for_test(state, "https://triage-complete.com/2", 600);
-
-    state.store_summary_result(
-        SummaryCacheKey {
-            content_hash: "hash-tc-0".to_string(),
-            prompt_id: PromptId::ArticleSummary,
-            prompt_version: 4,
-            model_id: "model".to_string(),
-            context_hash: "ctx".to_string(),
-        },
-        ArticleSummaryResult {
-            title: "Candidate".to_string(),
-            summary: "s".to_string(),
-            key_points: vec![],
-            input_tokens: 100,
-            output_tokens: 30,
-            entities: SummaryEntities::default(),
-        },
-        "2026-04-01T00:00:00Z".to_string(),
-    );
-
-    // Settle a single signal candidate (article /0). All scoring done, none in flight,
-    // so the meter switches to the signal-candidate export subset.
-    state.signal_candidate_mut().enqueue(url_candidate.clone());
-    state.signal_candidate_mut().mark_scoring(&url_candidate, 1);
-    state.signal_candidate_mut().complete(
-        &url_candidate,
-        SignalCandidateResult {
-            signal_score: 90,
-            signal_key: "cluster-a".to_string(),
-            themes: vec!["theme".to_string()],
-            draft_gist: "gist".to_string(),
-            source_tier: SourceTier::Tier1,
-            confidence: Confidence::High,
-            reasoning: "reason".to_string(),
-            input_tokens: 10,
-            output_tokens: 2,
-        },
-    );
-
-    let view = state.view();
-
-    // Bar/filtered reflect the export subset: the single selected candidate.
-    assert_eq!(view.archive_filtered_count, 1);
-    assert_eq!(view.archive_token_estimate, 30);
-    // Raw stays the full-corpus backlog: /1 and /2 have no summary → 2 raw.
-    assert_eq!(view.raw_unprocessed_count, 2);
+    let (_, effects) = update(state, Msg::ArchiveClicked);
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, Effect::OpenArchiveDialog {
+        article_count: 1, token_estimates, ..
+    } if token_estimates.summary_tokens == 42)));
 }
 
 /// Seed the persisted triage cache with a completed result for each URL, keyed
@@ -2313,7 +2673,7 @@ fn seed_triage_cache_for_urls(state: &mut AppState, urls: &[&str], priority: u8)
 }
 
 #[test]
-fn archive_counts_derive_from_triage_cache_at_startup_without_running_triage() {
+fn startup_triage_coverage_does_not_fall_back_into_meter_selection() {
     init_logging();
     // Reproduces the startup state: completed jobs restored, pre-triage rebuilt to
     // ReadyToTriage, triage metadata + a fully-covering triage cache hydrated — but
@@ -2323,20 +2683,23 @@ fn archive_counts_derive_from_triage_cache_at_startup_without_running_triage() {
     state = prime_llm_metadata(state);
     seed_triage_cache_for_urls(&mut state, urls, 3);
 
+    let state = crate::fixture_support::complete_archive_meter_startup(state);
     let view = state.view();
+    assert_eq!(view.archive_meter.selected_count, 0);
     assert_eq!(
-        view.archive_filtered_count, 2,
-        "archive counts must reflect the cached triage results at startup, not 0"
+        view.archive_meter.status,
+        crate::ArchiveMeterStatus::NotScoredYet
     );
-    assert_eq!(
-        view.raw_unprocessed_count, 2,
-        "both cached-triaged articles lack a summary → both are raw backlog"
-    );
-    assert_eq!(
-        state.current_working_corpus().source(),
-        crate::working_corpus::CurrentWorkingCorpusSource::PreTriageReady,
-        "working corpus stays PreTriageReady — only the archive corpus is cache-derived"
-    );
+    assert_eq!(view.archive_meter.unsettled_count, 2);
+    assert_eq!(view.archive_partial_coverage, None);
+    let (_, effects) = update(state, Msg::ArchiveClicked);
+    assert!(effects.iter().any(|e| matches!(
+        e,
+        Effect::OpenArchiveDialog {
+            article_count: 2,
+            ..
+        }
+    )));
 }
 
 #[test]
@@ -2373,11 +2736,19 @@ fn cache_derived_archive_estimates_use_pre_triage_content_hash_for_summaries() {
     let estimates = state.archive_token_estimates(&[url.to_string()]);
     assert_eq!(estimates.summary_coverage, 1);
     assert_eq!(estimates.summary_tokens, 42);
-    assert_eq!(state.view().raw_unprocessed_count, 0);
+    let state = crate::fixture_support::complete_archive_meter_startup(state);
+    assert_eq!(state.view().archive_meter.selected_count, 0);
+    assert_eq!(state.view().archive_meter.token_estimate, 0);
+    assert_eq!(
+        state.view().archive_meter.status,
+        crate::ArchiveMeterStatus::NotScoredYet
+    );
+    let (_, effects) = update(state, Msg::ArchiveClicked);
+    assert!(effects.iter().any(|e| matches!(e, Effect::OpenArchiveDialog { token_estimates, .. } if *token_estimates == estimates)));
 }
 
 #[test]
-fn cache_derived_startup_counts_never_reach_full_archive_export() {
+fn saved_startup_counts_reach_full_archive_export() {
     init_logging();
     let urls = &[
         "https://startup-export.example/1",
@@ -2387,6 +2758,12 @@ fn cache_derived_startup_counts_never_reach_full_archive_export() {
     state = prime_llm_metadata(state);
     seed_triage_cache_for_urls(&mut state, urls, 3);
 
+    let state = crate::fixture_support::complete_archive_meter_startup(state);
+    assert_eq!(state.view().archive_meter.selected_count, 0);
+    assert_eq!(
+        state.view().archive_meter.status,
+        crate::ArchiveMeterStatus::NotScoredYet
+    );
     let (state, effects) = update(state, Msg::ArchiveClicked);
     let open = effects
         .iter()
@@ -2395,10 +2772,10 @@ fn cache_derived_startup_counts_never_reach_full_archive_export() {
             _ => None,
         })
         .expect("OpenArchiveDialog effect expected");
-    assert_eq!(open, 0);
+    assert_eq!(open, 2);
     assert!(matches!(
         state.pinned_archive_corpus().map(|corpus| corpus.source()),
-        Some(crate::CurrentWorkingCorpusSource::Unavailable)
+        Some(crate::CurrentWorkingCorpusSource::TriageComplete)
     ));
 
     let request_id = state.archive_request_id();
@@ -2420,11 +2797,14 @@ fn cache_derived_startup_counts_never_reach_full_archive_export() {
             _ => None,
         })
         .expect("ArchiveRequested effect expected");
-    assert!(ordered_urls.is_empty());
+    assert_eq!(
+        ordered_urls,
+        urls.iter().map(|url| url.to_string()).collect::<Vec<_>>()
+    );
 }
 
 #[test]
-fn cache_derived_startup_counts_do_not_enable_signal_candidate_export() {
+fn saved_startup_counts_hide_signal_results_without_current_upstream_keys() {
     use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
 
     init_logging();
@@ -2432,7 +2812,9 @@ fn cache_derived_startup_counts_do_not_enable_signal_candidate_export() {
     let mut state = ready_pre_triage_state(urls);
     state = prime_llm_metadata(state);
     seed_triage_cache_for_urls(&mut state, urls, 3);
-    state.signal_candidate_mut().enqueue(urls[0].to_string());
+    state
+        .signal_candidate_mut()
+        .enqueue(urls[0].to_string(), "fixture-input".to_string());
     state.signal_candidate_mut().mark_scoring(urls[0], 1);
     state.signal_candidate_mut().complete(
         urls[0],
@@ -2449,6 +2831,12 @@ fn cache_derived_startup_counts_do_not_enable_signal_candidate_export() {
         },
     );
 
+    let state = crate::fixture_support::complete_archive_meter_startup(state);
+    assert_eq!(state.view().archive_meter.selected_count, 0);
+    assert_eq!(
+        state.view().archive_meter.status,
+        crate::ArchiveMeterStatus::NotScoredYet
+    );
     let (state, effects) = update(state, Msg::ArchiveClicked);
     let (signal_candidate_count, signal_candidate_default) = effects
         .iter()
@@ -2493,8 +2881,8 @@ fn cache_derived_startup_counts_do_not_enable_signal_candidate_export() {
 fn cache_derived_archive_counts_do_not_mutate_the_live_triage_session() {
     init_logging();
     // The cache-derived archive corpus is a display-only projection. It must not
-    // touch the load-bearing TriageSession, or batch orchestration would skip its
-    // triage dispatch (which also drives signal-candidate enqueue).
+    // touch the load-bearing TriageSession, so the explicit Resume run still has
+    // unfinished triage to admit after the display-only projection.
     let urls = &["https://startup.com/1", "https://startup.com/2"];
     let mut state = ready_pre_triage_state(urls);
     state = prime_llm_metadata(state);
@@ -2507,10 +2895,22 @@ fn cache_derived_archive_counts_do_not_mutate_the_live_triage_session() {
         matches!(state.triage().phase(), crate::triage::TriagePhase::Idle),
         "live triage session must remain Idle; the derived corpus is display-only"
     );
-    assert_eq!(
-        state.batch_next_action(),
-        crate::BatchNextAction::DispatchTriage,
-        "batch must still dispatch triage — the derived corpus must not pre-empt it"
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
+    assert_eq!(state.triage().completed_count(), 2);
+    assert!(
+        effects.iter().any(|effect| matches!(
+            effect,
+            crate::Effect::RequestLlmCompletion {
+                prompt_id: harvester_engine::llm::prompt::PromptId::ArticleSummary,
+                ..
+            }
+        )),
+        "the Resume run releases cached triage to summaries"
     );
 }
 
@@ -2519,21 +2919,39 @@ fn cache_derived_archive_corpus_counts_the_covered_subset_under_partial_coverage
     init_logging();
     // Only one of two ready articles has a cached triage result — the common real
     // case, where some articles were triaged under a superseded prompt/model or are
-    // newly polled. The count must reflect the triaged subset (1), not collapse to 0.
+    // newly polled. Dialog coverage keeps the triaged subset; the meter stays unscored.
     let urls = &["https://partial.com/1", "https://partial.com/2"];
     let mut state = ready_pre_triage_state(urls);
     state = prime_llm_metadata(state);
     seed_triage_cache_for_urls(&mut state, &urls[..1], 3);
 
+    let state = crate::fixture_support::complete_archive_meter_startup(state);
     let view = state.view();
     assert_eq!(
-        view.archive_filtered_count, 1,
-        "partial cache coverage must count the already-triaged subset, not 0"
+        view.archive_partial_coverage,
+        Some(crate::ArchivePartialCoverageView {
+            triaged: 1,
+            actionable_total: 2
+        })
     );
+    assert_eq!(view.archive_meter.selected_count, 0);
+    assert_eq!(
+        view.archive_meter.status,
+        crate::ArchiveMeterStatus::NotScoredYet
+    );
+    assert_eq!(view.archive_meter.unsettled_count, 2);
+    let (_, effects) = update(state, Msg::ArchiveClicked);
+    assert!(effects.iter().any(|e| matches!(
+        e,
+        Effect::OpenArchiveDialog {
+            article_count: 1,
+            ..
+        }
+    )));
 }
 
 #[test]
-fn cache_derived_view_counts_ignore_settled_signal_candidate_override() {
+fn cache_derived_meter_applies_exclusions_to_saved_selection() {
     use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
 
     init_logging();
@@ -2544,7 +2962,9 @@ fn cache_derived_view_counts_ignore_settled_signal_candidate_override() {
     let mut state = ready_pre_triage_state(urls);
     state = prime_llm_metadata(state);
     seed_triage_cache_for_urls(&mut state, urls, 3);
-    state.signal_candidate_mut().enqueue(urls[0].to_string());
+    state
+        .signal_candidate_mut()
+        .enqueue(urls[0].to_string(), "fixture-input".to_string());
     state.signal_candidate_mut().mark_scoring(urls[0], 1);
     state.signal_candidate_mut().complete(
         urls[0],
@@ -2561,9 +2981,35 @@ fn cache_derived_view_counts_ignore_settled_signal_candidate_override() {
         },
     );
 
-    let view = state.view();
-    assert_eq!(view.archive_filtered_count, 2);
-    assert_eq!(view.archive_token_estimate, 0);
+    crate::fixture_support::save_session_results(&mut state);
+    let state = crate::fixture_support::complete_archive_meter_startup(state);
+    assert_eq!(state.view().archive_meter.selected_count, 1);
+    assert_eq!(
+        state.view().archive_meter.status,
+        crate::ArchiveMeterStatus::Scored
+    );
+    let (state, _) = update(
+        state,
+        Msg::ToggleSignalCandidateExclusion {
+            signal_key: "cache-view-cluster".into(),
+        },
+    );
+    assert_eq!(state.view().archive_meter.selected_count, 0);
+    assert_eq!(state.view().archive_meter.token_estimate, 0);
+    assert_eq!(
+        state.view().archive_meter.status,
+        crate::ArchiveMeterStatus::Scored
+    );
+    assert_eq!(state.view().archive_partial_coverage, None);
+    let (_, effects) = update(state, Msg::ArchiveClicked);
+    assert!(effects.iter().any(|e| matches!(
+        e,
+        Effect::OpenArchiveDialog {
+            article_count: 2,
+            signal_candidate_count: 0,
+            ..
+        }
+    )));
 }
 
 #[test]
@@ -2596,23 +3042,15 @@ fn cache_derived_archive_counts_populate_while_pre_triage_is_reviewing() {
             fetched_utc: None,
         },
     ];
-    let (state, _) = update(
+    let (mut state, _) = update(
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            articles,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
         },
     );
-    // Resolve one review item, leaving the other unresolved → Reviewing phase, both
-    // articles tentatively included.
-    let key = state.pre_triage().entries()[0].key.clone();
-    let (mut state, _) = update(
-        state,
-        Msg::PreTriageDecisionSet {
-            key,
-            decision: crate::pre_triage_filter::ManualDecision::Include,
-        },
-    );
+    // Manual resolution no longer exists, so both review articles remain
+    // tentatively included and the phase stays Reviewing.
     assert!(
         matches!(
             state.pre_triage().phase(),
@@ -2624,11 +3062,21 @@ fn cache_derived_archive_counts_populate_while_pre_triage_is_reviewing() {
     state = prime_llm_metadata(state);
     seed_triage_cache_for_urls(&mut state, &[url1, url2], 3);
 
+    let state = crate::fixture_support::complete_archive_meter_startup(state);
+    assert_eq!(state.view().archive_partial_coverage, None);
+    assert_eq!(state.view().archive_meter.selected_count, 0);
     assert_eq!(
-        state.view().archive_filtered_count,
-        2,
-        "archive counts must derive from the cache even while pre-triage is Reviewing"
+        state.view().archive_meter.status,
+        crate::ArchiveMeterStatus::NotScoredYet
     );
+    let (state, effects) = update(state, Msg::ArchiveClicked);
+    assert!(effects.iter().any(|e| matches!(
+        e,
+        Effect::OpenArchiveDialog {
+            article_count: 2,
+            ..
+        }
+    )));
     assert!(
         matches!(state.triage().phase(), crate::triage::TriagePhase::Idle),
         "live triage session must stay Idle — the derived corpus is display-only"

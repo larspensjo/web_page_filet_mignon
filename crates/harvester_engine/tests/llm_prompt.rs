@@ -55,12 +55,6 @@ fn prompt_id_from_str_round_trips() {
         (PromptId::ArticleTriage, "ArticleTriage"),
         (PromptId::ArticleSummary, "ArticleSummary"),
         (PromptId::ArticleSignalCandidate, "ArticleSignalCandidate"),
-        (PromptId::AggregateBriefing, "AggregateBriefing"),
-        (
-            PromptId::BriefingExecutiveSummary,
-            "BriefingExecutiveSummary",
-        ),
-        (PromptId::BriefingNextItem, "BriefingNextItem"),
     ];
 
     for (id, s) in ids {
@@ -83,9 +77,6 @@ fn registry_with_defaults_exposes_active_latest_template_for_each_prompt() {
         PromptId::ArticleTriage,
         PromptId::ArticleSummary,
         PromptId::ArticleSignalCandidate,
-        PromptId::AggregateBriefing,
-        PromptId::BriefingExecutiveSummary,
-        PromptId::BriefingNextItem,
     ] {
         let versions = registry.versions(prompt_id);
         assert!(
@@ -109,15 +100,6 @@ fn registry_with_defaults_exposes_active_latest_template_for_each_prompt() {
             "default active template should track the latest registered version for {prompt_id}"
         );
     }
-}
-
-#[test]
-fn briefing_stream_ids_have_active_default_prompts() {
-    let registry = PromptRegistry::with_defaults();
-    assert!(registry
-        .active(PromptId::BriefingExecutiveSummary)
-        .is_some());
-    assert!(registry.active(PromptId::BriefingNextItem).is_some());
 }
 
 #[test]

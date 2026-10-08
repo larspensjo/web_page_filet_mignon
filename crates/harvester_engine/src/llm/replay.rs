@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::cmp;
-use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -111,83 +110,6 @@ pub fn load_replay_record(path: &Path) -> Result<ReplayRecord, String> {
     let content =
         fs::read_to_string(path).map_err(|err| format!("reading {}: {}", path.display(), err))?;
     serde_json::from_str(&content).map_err(|err| format!("{}: {}", path.display(), err))
-}
-
-/// In-memory cache of replayed completions.
-pub struct ReplayProvider {
-    records: HashMap<String, ReplayRecord>,
-}
-
-impl ReplayProvider {
-    pub fn new() -> Self {
-        Self {
-            records: HashMap::new(),
-        }
-    }
-
-    pub fn from_records(records: HashMap<String, ReplayRecord>) -> Self {
-        Self { records }
-    }
-
-    /// Load every JSON file in `dir`.
-    pub fn load_from_dir(dir: &Path) -> Result<Self, String> {
-        let mut provider = Self::new();
-        if !dir.exists() {
-            return Ok(provider);
-        }
-
-        for entry in fs::read_dir(dir).map_err(|err| err.to_string())? {
-            let entry = entry.map_err(|err| err.to_string())?;
-            let path = entry.path();
-            if !entry.file_type().map_err(|err| err.to_string())?.is_file() {
-                continue;
-            }
-
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                continue;
-            }
-
-            let record =
-                load_replay_record(&path).map_err(|err| format!("{}: {}", path.display(), err))?;
-            let key = lookup_key(
-                &record.input_content_hash,
-                record.prompt_id,
-                record.prompt_version,
-            );
-            provider.records.entry(key).or_insert(record);
-        }
-
-        Ok(provider)
-    }
-
-    pub fn lookup(
-        &self,
-        input_hash: &str,
-        prompt_id: PromptId,
-        prompt_version: PromptVersion,
-    ) -> Option<&ReplayRecord> {
-        let key = lookup_key(input_hash, prompt_id, prompt_version);
-        self.records.get(&key)
-    }
-
-    pub fn insert(&mut self, record: ReplayRecord) {
-        let key = lookup_key(
-            &record.input_content_hash,
-            record.prompt_id,
-            record.prompt_version,
-        );
-        self.records.insert(key, record);
-    }
-}
-
-impl Default for ReplayProvider {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-fn lookup_key(input_hash: &str, prompt_id: PromptId, prompt_version: PromptVersion) -> String {
-    format!("{input_hash}::{prompt_id:?}::{prompt_version}")
 }
 
 fn record_filename_base(record: &ReplayRecord) -> String {

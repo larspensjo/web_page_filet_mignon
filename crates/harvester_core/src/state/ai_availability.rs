@@ -1,28 +1,52 @@
-use super::{AiAvailability, AiUnavailableReason, AppState, PreTriageLoadContext};
-use crate::pre_triage_coordinator::PreTriageRefreshReason;
-use crate::pre_triage_filter::PreTriagePhase;
-use crate::InlineWarningView;
+use super::{AiAvailability, AiUnavailableReason, AppState};
 use harvester_engine::llm::prompt::PromptId;
 
 impl AppState {
+    pub fn result_store_failure(&self) -> Option<&str> {
+        self.result_store_failure.as_deref()
+    }
+
+    pub(crate) fn refuse_result_store(&mut self, reason: String) {
+        self.result_store_failure = Some(match self.result_store_failure.take() {
+            Some(previous) if !previous.contains(&reason) => format!("{previous}; {reason}"),
+            Some(previous) => previous,
+            _ => reason,
+        });
+        self.ai_availability = AiAvailability::Unavailable {
+            reason: AiUnavailableReason::ResultStoreUnavailable,
+        };
+        self.llm_quota.ai_available = false;
+        self.mark_dirty();
+    }
+
     pub fn ai_availability(&self) -> &AiAvailability {
         &self.ai_availability
     }
 
     pub fn triage_ai_available(&self) -> bool {
-        matches!(self.ai_availability, AiAvailability::Available)
+        self.result_store_failure.is_none()
+            && matches!(self.ai_availability, AiAvailability::Available)
     }
 
     pub fn briefing_ai_available(&self) -> bool {
-        matches!(self.ai_availability, AiAvailability::Available)
+        self.result_store_failure.is_none()
+            && matches!(self.ai_availability, AiAvailability::Available)
     }
 
     pub(crate) fn set_ai_availability(&mut self, availability: AiAvailability) {
-        self.llm_quota.ai_available = matches!(availability, AiAvailability::Available);
+        if self.result_store_failure.is_some() {
+            return;
+        }
+        self.llm_quota.ai_available = self.result_store_failure.is_none()
+            && matches!(availability, AiAvailability::Available);
         self.ai_availability = availability;
     }
 
     pub(crate) fn reconcile_ai_availability_from_metadata(&mut self) {
+        if self.result_store_failure.is_some() {
+            self.llm_quota.ai_available = false;
+            return;
+        }
         let triage_model_available = self.effective_models.contains_key(&PromptId::ArticleTriage);
         match (&self.ai_availability, triage_model_available) {
             (
@@ -53,6 +77,9 @@ impl AppState {
 
     fn ai_unavailable_reason_text(&self) -> Option<&'static str> {
         match self.ai_unavailable_reason() {
+            Some(AiUnavailableReason::ResultStoreUnavailable) => {
+                Some("saved results store unavailable")
+            }
             Some(AiUnavailableReason::MissingApiKey) => Some("OPENAI_API_KEY is not set"),
             Some(AiUnavailableReason::NoTriageModel) => Some("no triage model is available"),
             None => None,
@@ -60,49 +87,10 @@ impl AppState {
     }
 
     pub(super) fn ai_unavailable_message(&self) -> Option<String> {
+        if let Some(reason) = self.result_store_failure() {
+            return Some(format!("AI features unavailable: saved results could not be opened: {reason}. Restore the file from backup or move it aside, then restart."));
+        }
         self.ai_unavailable_reason_text()
             .map(|reason| format!("AI features unavailable: {reason}"))
-    }
-
-    pub(super) fn ai_warning_banner(&self) -> Option<InlineWarningView> {
-        matches!(
-            self.ai_unavailable_reason(),
-            Some(AiUnavailableReason::MissingApiKey)
-        )
-        .then(|| InlineWarningView {
-            title: "AI features are disabled".to_string(),
-            body: "Set OPENAI_API_KEY in the launch environment and restart to enable triage and briefing.".to_string(),
-        })
-    }
-
-    pub(super) fn triage_blocked_reason(&self) -> Option<String> {
-        if let Some(reason) = self.ai_unavailable_reason() {
-            return Some(match reason {
-                AiUnavailableReason::MissingApiKey => {
-                    "AI setup is incomplete because OPENAI_API_KEY is not set".to_string()
-                }
-                AiUnavailableReason::NoTriageModel => "no triage model is available".to_string(),
-            });
-        }
-
-        if matches!(self.pre_triage.phase(), PreTriagePhase::LoadingArticles) {
-            return Some(match self.pre_triage_load_context {
-                Some(PreTriageLoadContext {
-                    reason: PreTriageRefreshReason::RestoreCompletedJobs,
-                }) => "Triage is unavailable while startup prepares the article set".to_string(),
-                _ => "Triage is unavailable while the article set is being prepared".to_string(),
-            });
-        }
-
-        None
-    }
-
-    pub(super) fn briefing_blocked_reason(&self) -> Option<String> {
-        self.ai_unavailable_reason().map(|reason| match reason {
-            AiUnavailableReason::MissingApiKey => {
-                "AI setup is incomplete because OPENAI_API_KEY is not set".to_string()
-            }
-            AiUnavailableReason::NoTriageModel => "no triage model is available".to_string(),
-        })
     }
 }

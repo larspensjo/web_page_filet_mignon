@@ -1,10 +1,7 @@
-use super::{AppState, JobId, PreTriageActionability, PreTriageLoadContext, PreTriageLoadProgress};
+use super::{AppState, JobId, PreTriageActionability, PreTriageLoadContext};
 use crate::pre_triage_coordinator::PreTriageRefreshReason;
-use crate::pre_triage_filter::{
-    ArticleFilterKey, ManualDecision, PreTriagePhase, PreTriageSession,
-};
+use crate::pre_triage_filter::{ArticleFilterKey, PreTriagePhase, PreTriageSession};
 use crate::triage::TriageSession;
-use std::collections::HashMap;
 
 impl AppState {
     pub(crate) fn triage(&self) -> &TriageSession {
@@ -12,12 +9,26 @@ impl AppState {
     }
 
     pub(crate) fn triage_mut(&mut self) -> &mut TriageSession {
+        self.note_unfinished_inputs_changed();
         &mut self.triage
     }
 
     pub(crate) fn set_triage(&mut self, triage: TriageSession) {
+        self.note_unfinished_inputs_changed();
         self.triage = triage;
+        self.rebuild_saved_results();
         self.dirty = true;
+    }
+
+    #[cfg(feature = "host-drain-fixture")]
+    #[doc(hidden)]
+    pub fn set_complete_triage_for_host_drain_fixture(&mut self, triage: TriageSession) {
+        assert!(matches!(
+            triage.phase(),
+            crate::triage::TriagePhase::Complete
+        ));
+        self.pre_triage.finish_handoff();
+        self.set_triage(triage);
     }
 
     pub(crate) fn pre_triage(&self) -> &PreTriageSession {
@@ -28,14 +39,14 @@ impl AppState {
         match self.pre_triage.phase() {
             PreTriagePhase::LoadingArticles => PreTriageActionability::Loading,
             PreTriagePhase::ReadyToTriage => {
-                if self.pre_triage.resolved_included_articles().is_empty() {
+                if !self.pre_triage.has_resolved_included_article() {
                     PreTriageActionability::Unavailable
                 } else {
                     PreTriageActionability::Ready
                 }
             }
             PreTriagePhase::Reviewing => {
-                if self.pre_triage.resolved_included_articles().is_empty() {
+                if !self.pre_triage.has_resolved_included_article() {
                     PreTriageActionability::Unavailable
                 } else {
                     PreTriageActionability::ReadyWithPendingReview
@@ -54,11 +65,11 @@ impl AppState {
         )
     }
 
-    /// Consumes the pre-triage included articles for use in a triage session,
+    /// Hands off the pre-triage included articles for use in a triage session,
     /// resetting pre-triage to Idle. Returns `None` if pre-triage is not in an
     /// interactive phase or has no resolved articles. This is a one-way
     /// transition that ensures pre-triage cannot remain action-ready after its
-    /// articles have been handed off.
+    /// articles have been handed off. Preparation and verdicts remain held for delta loads.
     pub(crate) fn consume_interactive_pre_triage_articles_for_triage(
         &mut self,
     ) -> Option<Vec<crate::briefing::LoadedArticle>> {
@@ -69,17 +80,23 @@ impl AppState {
         if articles.is_empty() {
             return None;
         }
-        self.pre_triage.reset();
+        self.pre_triage.finish_handoff();
         self.dirty = true;
         Some(articles)
     }
 
+    pub(crate) fn pre_triage_mut(&mut self) -> &mut PreTriageSession {
+        self.note_unfinished_global_inputs_changed();
+        &mut self.pre_triage
+    }
+
     pub(crate) fn set_pre_triage(&mut self, pre_triage: PreTriageSession) {
+        self.note_unfinished_global_inputs_changed();
         if !matches!(pre_triage.phase(), PreTriagePhase::LoadingArticles) {
             self.pre_triage_load_context = None;
-            self.pre_triage_load_progress = None;
         }
         self.pre_triage = pre_triage;
+        self.rebuild_saved_results();
         self.dirty = true;
     }
 
@@ -88,78 +105,12 @@ impl AppState {
         self.dirty = true;
     }
 
-    pub(crate) fn set_pre_triage_load_progress(
-        &mut self,
-        request_id: u64,
-        files_scanned: usize,
-        files_total: usize,
-    ) {
-        let progress = PreTriageLoadProgress {
-            request_id,
-            files_scanned,
-            files_total,
-        };
-        if self.pre_triage_load_progress != Some(progress) {
-            self.pre_triage_load_progress = Some(progress);
-            self.dirty = true;
-        }
-    }
-
-    pub(crate) fn clear_pre_triage_load_progress(&mut self) {
-        if self.pre_triage_load_progress.take().is_some() {
-            self.dirty = true;
-        }
-    }
-
-    pub(crate) fn pre_triage_load_progress(&self) -> Option<(usize, usize, u64)> {
-        self.pre_triage_load_progress.map(
-            |PreTriageLoadProgress {
-                 request_id,
-                 files_scanned,
-                 files_total,
-             }| { (files_scanned, files_total, request_id) },
-        )
-    }
-
     pub fn is_pre_triage_reviewing(&self) -> bool {
         self.pre_triage.is_interactive()
     }
 
     pub fn pre_triage_key_for_job(&self, job_id: JobId) -> Option<ArticleFilterKey> {
         self.pre_triage.key_for_job(job_id)
-    }
-
-    pub fn pre_triage_manual_overrides(&self) -> &HashMap<ArticleFilterKey, ManualDecision> {
-        &self.pre_triage_manual_overrides
-    }
-
-    pub(crate) fn set_pre_triage_manual_overrides(
-        &mut self,
-        overrides: HashMap<ArticleFilterKey, ManualDecision>,
-    ) {
-        self.pre_triage_manual_overrides = overrides;
-        self.pre_triage
-            .apply_manual_overrides(&self.pre_triage_manual_overrides);
-        self.dirty = true;
-    }
-
-    pub(crate) fn set_pre_triage_manual_decision(
-        &mut self,
-        key: ArticleFilterKey,
-        decision: ManualDecision,
-    ) -> bool {
-        if self.pre_triage.set_manual_decision(&key, decision).is_err() {
-            return false;
-        }
-        self.pre_triage_manual_overrides.insert(key, decision);
-        self.dirty = true;
-        true
-    }
-
-    pub(crate) fn clear_pre_triage_manual_overrides(&mut self) {
-        self.pre_triage_manual_overrides.clear();
-        self.pre_triage.clear_manual_decisions();
-        self.dirty = true;
     }
 
     /// Allocate the next request ID for a pre-triage load.

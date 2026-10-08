@@ -1,9 +1,12 @@
+use std::collections::HashMap;
+use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
 
 use harvester_core::{
-    update, AppState, ArticleSummaryResult, CompletedJobSnapshot, Effect, JobResultKind,
-    LinkSnapshotRecord, LoadedArticle, Msg, Stage, SummaryCache, SummaryCacheEntry,
-    SummaryCacheKey, ACTIVITY_FEED_CAPACITY, MAX_EXTRACTED_LINKS,
+    update, AppState, ArticleSummaryResult, ArticleTriageResult, CompletedJobSnapshot, Effect,
+    JobResultKind, LinkSnapshotRecord, LlmResultKind, LoadedArticle, Msg, Stage, SummaryCache,
+    SummaryCacheEntry, SummaryCacheKey, TriageCache, TriageCacheKey, TriagePhase, TriageSession,
+    UnfinishedWork, ACTIVITY_FEED_CAPACITY, MAX_EXTRACTED_LINKS,
 };
 use harvester_engine::llm::{prompt::PromptId, SummaryEntities};
 use harvester_ui_bridge::{
@@ -17,11 +20,20 @@ const DRAIN_COST_LINK_DISTRIBUTION: [(usize, usize, usize); 3] =
     [(11, 0, 0), (7, 1, 5), (2, 20, 40)];
 const DRAIN_COST_ITERATIONS: usize = 5;
 const SUMMARY_TITLE_ROWS: usize = 110;
+const PRODUCTION_SCALE_WINDOW_ARTICLES: usize = 10_450;
+static HOST_DRAIN_TEST_MUTEX: Mutex<()> = Mutex::new(());
+
+fn serialize_timing_tests() -> MutexGuard<'static, ()> {
+    HOST_DRAIN_TEST_MUTEX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 #[test]
 fn view_build_compare_and_project_stay_within_the_drain_budget() {
+    let _guard = serialize_timing_tests();
     let (state, summary_cache_entries) = drain_cost_state();
-    let previous = state.desktop_view();
+    let previous = state.view();
     let shape = assert_representative_shape(&previous, None, summary_cache_entries);
     let measured = median_drain_cost(&state, &previous);
     let measured_ms = measured.total_ms;
@@ -45,10 +57,11 @@ fn view_build_compare_and_project_stay_within_the_drain_budget() {
 
 #[test]
 fn search_driven_view_rebuild_stays_within_the_drain_budget() {
+    let _guard = serialize_timing_tests();
     let (state, summary_cache_entries) = drain_cost_state();
-    let previous = state.desktop_view();
+    let previous = state.view();
     let (state, _) = update(state, Msg::JobsSearchQueryChanged("needle".into()));
-    let searched = state.desktop_view();
+    let searched = state.view();
     let shape = assert_representative_shape(&searched, Some("needle"), summary_cache_entries);
     let measured = median_drain_cost(&state, &previous);
     let measured_ms = measured.total_ms;
@@ -71,6 +84,189 @@ fn search_driven_view_rebuild_stays_within_the_drain_budget() {
     );
 }
 
+#[test]
+fn production_scale_included_window_view_cost() {
+    let _guard = serialize_timing_tests();
+    let state = load_production_scale_window();
+    assert_eq!(
+        state.batch_observation().jobs_done,
+        PRODUCTION_SCALE_WINDOW_ARTICLES
+    );
+    let unfinished = match state.unfinished_work() {
+        UnfinishedWork::Known(summary) => summary,
+        UnfinishedWork::Unknown => panic!("article metadata should make completeness known"),
+    };
+    assert_eq!(
+        unfinished.window_articles(),
+        PRODUCTION_SCALE_WINDOW_ARTICLES
+    );
+    assert_eq!(unfinished.not_eligible, 6_666);
+    assert_eq!(unfinished.needs_triage, 450);
+    assert_eq!(unfinished.needs_scoring, 3_334);
+
+    // A target-sized saved selection over the full 10,450-article window exercises
+    // selection and summary estimation without inventing thousands of desktop Results rows.
+    let state = harvester_core::fixture_support::save_host_drain_scores(state, 150);
+    assert_eq!(
+        state.startup_readiness(),
+        harvester_core::StartupReadinessStatus::Ready
+    );
+    let previous = state.view();
+    assert_eq!(
+        previous.archive_meter.status,
+        harvester_core::ArchiveMeterStatus::Scored
+    );
+    assert_eq!(previous.archive_meter.selected_count, 150);
+    assert_eq!(previous.archive_meter.token_estimate, 150 * 80);
+    assert_eq!(previous.archive_meter.unsettled_count, 3_784 - 150);
+    let measured = median_drain_cost(&state, &previous);
+    println!("production-scale included view cost: measured_ms={} view_us={} compare_us={} project_us={}", measured.total_ms, measured.view_us, measured.compare_us, measured.project_us);
+    assert!(
+        measured.total_ms <= HOST_DRAIN_BUDGET_MS,
+        "production-scale view build + comparison + projection took {} ms; budget is {HOST_DRAIN_BUDGET_MS} ms",
+        measured.total_ms
+    );
+}
+
+#[test]
+fn production_scale_loaded_triaging_view_cost() {
+    let _guard = serialize_timing_tests();
+    let state = load_production_scale_triage_session();
+    let observation = state.batch_observation();
+    assert!(matches!(observation.triage_phase, TriagePhase::Triaging));
+    assert_eq!(observation.triage_total, PRODUCTION_SCALE_WINDOW_ARTICLES);
+    assert_eq!(observation.jobs_done, PRODUCTION_SCALE_WINDOW_ARTICLES);
+    let previous = state.view();
+    let measured = median_drain_cost(&state, &previous);
+    println!("production-scale loaded triaging view cost: measured_ms={} view_us={} compare_us={} project_us={}", measured.total_ms, measured.view_us, measured.compare_us, measured.project_us);
+    assert!(measured.total_ms <= HOST_DRAIN_BUDGET_MS);
+}
+
+#[test]
+fn production_scale_loaded_complete_view_cost() {
+    let _guard = serialize_timing_tests();
+    let state = load_production_scale_complete_session();
+    let observation = state.batch_observation();
+    assert!(
+        matches!(observation.triage_phase, TriagePhase::Complete),
+        "{observation:?}"
+    );
+    assert_eq!(observation.triage_total, PRODUCTION_SCALE_WINDOW_ARTICLES);
+    assert_eq!(observation.triage_completed, 10_000);
+    assert_eq!(observation.triage_failed, 450);
+    assert_eq!(observation.jobs_done, PRODUCTION_SCALE_WINDOW_ARTICLES);
+    let previous = state.view();
+    assert_eq!(
+        state.startup_readiness(),
+        harvester_core::StartupReadinessStatus::Ready
+    );
+    assert_eq!(previous.archive_meter.selected_count, 0);
+    assert_eq!(
+        previous.archive_meter.status,
+        harvester_core::ArchiveMeterStatus::NotScoredYet
+    );
+    // The old filtered count omitted 450 articles without current-key triage.
+    assert_eq!(previous.archive_meter.unsettled_count, 3_784);
+    let measured = median_drain_cost(&state, &previous);
+    println!("production-scale loaded complete view cost: measured_ms={} view_us={} compare_us={} project_us={}", measured.total_ms, measured.view_us, measured.compare_us, measured.project_us);
+    assert!(measured.total_ms <= HOST_DRAIN_BUDGET_MS);
+}
+
+#[test]
+fn production_scale_article_completion_reducer_stays_within_budget() {
+    let _guard = serialize_timing_tests();
+    let mut state = load_production_scale_window();
+    let (next, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Resume,
+        },
+    );
+    state = next;
+    let configuration_request = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::LoadProcessingConfiguration { request_id, .. } => Some(*request_id),
+            _ => None,
+        })
+        .expect("triage configuration request");
+    let (versions, models) = production_metadata();
+    let (state, effects) = update(
+        state,
+        Msg::ProcessingConfigurationLoaded {
+            request_id: configuration_request,
+            contexts: production_contexts(),
+            active_versions: versions,
+            effective_models: models,
+            preparation_budget: 100_000,
+        },
+    );
+    let (state, load_effects) = respond_to_pipeline_window(state, effects);
+    let (state, advance_effects) = update(state, Msg::PipelineRunAdvance);
+    let effects = load_effects
+        .into_iter()
+        .chain(advance_effects)
+        .collect::<Vec<_>>();
+    let request_id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::RequestLlmCompletion {
+                request_id,
+                prompt_id: PromptId::ArticleSignalCandidate,
+                ..
+            } => Some(*request_id),
+            _ => None,
+        })
+        .expect("one article scoring request");
+    let samples = (0..DRAIN_COST_ITERATIONS).map(|_| {
+        let copy = state.clone();
+        let started = Instant::now();
+        let (after, _) = update(
+            copy,
+            Msg::LlmCompleted {
+                request_id,
+                result: LlmResultKind::Failed {
+                    reason: "cost probe".into(),
+                },
+                metadata: None,
+            },
+        );
+        assert_eq!(
+            known_window_articles(&after),
+            PRODUCTION_SCALE_WINDOW_ARTICLES
+        );
+        started.elapsed().as_micros()
+    });
+    let hot_us = median(samples);
+    let (mut versions, models) = production_metadata();
+    versions.insert(PromptId::ArticleTriage, 2);
+    let started = Instant::now();
+    let (after, _) = update(
+        state,
+        Msg::LlmMetadataLoaded {
+            active_versions: versions,
+            effective_models: models,
+        },
+    );
+    let full_pass_us = started.elapsed().as_micros();
+    assert_eq!(
+        known_window_articles(&after),
+        PRODUCTION_SCALE_WINDOW_ARTICLES
+    );
+    println!("production-scale reducer cost: article_completion_us={hot_us} full_pass_prompt_version_us={full_pass_us} window_articles={PRODUCTION_SCALE_WINDOW_ARTICLES}");
+    assert!(
+        hot_us <= u128::from(HOST_DRAIN_BUDGET_MS) * 1_000,
+        "article completion reducer took {hot_us} us; budget is {HOST_DRAIN_BUDGET_MS} ms"
+    );
+}
+
+fn known_window_articles(state: &AppState) -> usize {
+    match state.unfinished_work() {
+        UnfinishedWork::Known(summary) => summary.window_articles(),
+        UnfinishedWork::Unknown => panic!("production metadata should be loaded"),
+    }
+}
+
 fn drain_cost_state() -> (AppState, usize) {
     let snapshots = (0..PROBE_CORPUS_JOBS)
         .map(|index| {
@@ -90,6 +286,14 @@ fn drain_cost_state() -> (AppState, usize) {
         .collect();
     let state = seed_populated_run_progress();
     let (state, _) = update(state, Msg::RestoreCompletedJobs(snapshots));
+    // Restoration resets source state; keep a real source poll open for the active-run fixture.
+    let (state, _) = harvester_core::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Full,
+        },
+    );
+    let (state, _) = update(state, Msg::PollStarted { total: 1 });
     let (state, _) = update(
         state,
         Msg::BriefingCheckpointSet(Some("2026-09-05T12:00:00Z".into())),
@@ -99,8 +303,26 @@ fn drain_cost_state() -> (AppState, usize) {
 
 fn seed_populated_run_progress() -> AppState {
     const ACTIVITY_JOBS: usize = ACTIVITY_FEED_CAPACITY / 2;
-    let (state, _) = update(AppState::new(), Msg::PollSourcesClicked);
-    let (state, _) = update(state, Msg::PollStarted { total: 1 });
+    let (active_versions, effective_models) = production_metadata();
+    let (state, _) = update(
+        AppState::new(),
+        Msg::LlmMetadataLoaded {
+            active_versions,
+            effective_models,
+        },
+    );
+    let (state, configuration_effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Full,
+        },
+    );
+    let (state, _) = harvester_core::fixture_support::complete_processing_configuration(
+        state,
+        configuration_effects,
+        100_000,
+    );
+    let (state, _) = update(state, Msg::PollStarted { total: 2 });
     let urls = (0..ACTIVITY_JOBS).map(job_url).collect::<Vec<_>>();
     let (mut state, effects) = update(
         state,
@@ -120,8 +342,7 @@ fn seed_populated_run_progress() -> AppState {
         })
         .collect::<Vec<_>>();
     assert_eq!(job_ids.len(), ACTIVITY_JOBS);
-    state = update(state, Msg::PipelineRunRequested).0;
-    state = update(state, Msg::AllSourcesPollEnded).0;
+    // Keep intake open so the measured populated run has genuine pending work.
     for job_id in job_ids {
         state = update(
             state,
@@ -130,7 +351,6 @@ fn seed_populated_run_progress() -> AppState {
                 stage: Stage::Downloading,
                 tokens: None,
                 bytes: Some(32_768),
-                content_preview: None,
             },
         )
         .0;
@@ -139,7 +359,6 @@ fn seed_populated_run_progress() -> AppState {
             Msg::JobDone {
                 job_id,
                 result: JobResultKind::Success,
-                content_preview: None,
                 extracted_links: Vec::new(),
                 fetched_utc: Some("2026-09-05T12:00:00Z".into()),
             },
@@ -147,7 +366,7 @@ fn seed_populated_run_progress() -> AppState {
         .0;
     }
     assert_eq!(
-        state.desktop_view().run_progress.activity.len(),
+        state.view().run_progress.activity.len(),
         ACTIVITY_FEED_CAPACITY
     );
     state
@@ -182,6 +401,22 @@ fn link_snapshots(index: usize) -> Vec<LinkSnapshotRecord> {
 }
 
 fn seed_summary_titles_through_cache(mut state: AppState) -> (AppState, usize) {
+    let (active_versions, effective_models) = production_metadata();
+    state = update(
+        state,
+        Msg::LlmMetadataLoaded {
+            active_versions,
+            effective_models,
+        },
+    )
+    .0;
+    let (next, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Resume,
+        },
+    );
+    state = harvester_core::fixture_support::complete_processing_start(next, effects, 100_000).0;
     let summary_urls = (PROBE_CORPUS_JOBS - SUMMARY_TITLE_ROWS..PROBE_CORPUS_JOBS)
         .map(job_url)
         .collect::<Vec<_>>();
@@ -225,7 +460,7 @@ fn seed_summary_titles_through_cache(mut state: AppState) -> (AppState, usize) {
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            articles: articles.clone(),
+            delta: harvester_engine::TriageArticleDelta::full_window(articles.clone(), 100_000),
         },
     );
     state = next_state;
@@ -267,6 +502,291 @@ fn seed_summary_titles_through_cache(mut state: AppState) -> (AppState, usize) {
         update(state, Msg::SummaryCacheHydrated { cache }).0,
         summary_cache_entries,
     )
+}
+
+fn load_production_scale_window() -> AppState {
+    let mut state = AppState::new();
+    state = update(state, Msg::BriefingCheckpointLoaded { since_utc: None }).0;
+    let (active_versions, effective_models) = production_metadata();
+    let contexts = production_contexts();
+    state = update(
+        state,
+        Msg::LlmMetadataLoaded {
+            active_versions,
+            effective_models,
+        },
+    )
+    .0;
+    state = update(
+        state,
+        Msg::PromptContextsLoaded {
+            contexts: contexts.clone(),
+        },
+    )
+    .0;
+    let mut triage_cache = TriageCache::new();
+    let mut summary_cache = SummaryCache::new();
+    for index in 0usize..10_000 {
+        let content_hash = format!("drain-cost-content-{index}");
+        let triage_key = TriageCacheKey::try_new(
+            &content_hash,
+            PromptId::ArticleTriage,
+            Some(1),
+            Some("drain-cost-triage-model"),
+            contexts.get(&PromptId::ArticleTriage).unwrap(),
+        )
+        .unwrap();
+        triage_cache.insert(
+            triage_key,
+            ArticleTriageResult {
+                category: "news".into(),
+                priority: if index.is_multiple_of(3) { 3 } else { 1 },
+                tags: vec!["topic".into()],
+                rationale: "representative triage".into(),
+                input_tokens: 100,
+                output_tokens: 30,
+            },
+        );
+        if index.is_multiple_of(3) {
+            let key = SummaryCacheKey::try_new(
+                &content_hash,
+                PromptId::ArticleSummary,
+                Some(1),
+                Some("drain-cost-model"),
+                contexts.get(&PromptId::ArticleSummary).unwrap(),
+            )
+            .unwrap();
+            summary_cache.insert(
+                key,
+                SummaryCacheEntry {
+                    result: ArticleSummaryResult {
+                        title: format!("Production summary {index}"),
+                        summary: "Representative summary text".repeat(8),
+                        key_points: vec!["Representative point".into()],
+                        input_tokens: 200,
+                        output_tokens: 80,
+                        entities: SummaryEntities::default(),
+                    },
+                    created_at_utc: "2026-09-06T12:00:00Z".into(),
+                },
+            );
+        }
+    }
+    state = update(
+        state,
+        Msg::TriageCacheHydrated {
+            cache: triage_cache,
+        },
+    )
+    .0;
+    state = update(
+        state,
+        Msg::SummaryCacheHydrated {
+            cache: summary_cache,
+        },
+    )
+    .0;
+    state = update(
+        state,
+        Msg::SignalCandidateCacheLoaded {
+            cache: Default::default(),
+        },
+    )
+    .0;
+
+    let completed_jobs = (0..PRODUCTION_SCALE_WINDOW_ARTICLES)
+        .map(|index| CompletedJobSnapshot {
+            url: production_window_url(index),
+            tokens: Some(1_000 + (index % 900) as u32),
+            bytes: Some(32_768 + index as u64),
+            links: Vec::new(),
+            fetched_utc: Some("2026-09-06T12:00:00Z".into()),
+        })
+        .collect();
+    state = update(state, Msg::RestoreCompletedJobs(completed_jobs)).0;
+
+    let urls = (0..PRODUCTION_SCALE_WINDOW_ARTICLES)
+        .map(production_window_url)
+        .collect::<Vec<_>>();
+    state = update(
+        state,
+        Msg::EvaluatePreTriageRefresh {
+            ordered_urls: urls,
+            triggered_by_job_done: false,
+        },
+    )
+    .0;
+    let request_id = (0..100)
+        .find_map(|tick| {
+            let (next_state, effects) = update(
+                std::mem::take(&mut state),
+                Msg::Tick {
+                    now: chrono::DateTime::from_timestamp(1_778_000_000 + tick, 0)
+                        .expect("valid fixture timestamp"),
+                },
+            );
+            state = next_state;
+            effects.into_iter().find_map(|effect| match effect {
+                Effect::LoadArticlesForTriage { request_id, .. } => Some(request_id),
+                _ => None,
+            })
+        })
+        .expect("production-scale window load should be dispatched");
+    let articles = (0..PRODUCTION_SCALE_WINDOW_ARTICLES)
+        .map(production_loaded_article)
+        .collect::<Vec<_>>();
+    state = update(
+        state,
+        Msg::SavedArticlesLoaded {
+            request_id,
+            articles: articles
+                .iter()
+                .map(|a| harvester_engine::WindowArticle {
+                    url: a.url.clone(),
+                    content_hash: a.content_hash.clone(),
+                    source_title: a.source_title.clone(),
+                    fetched_utc: a.fetched_utc.clone(),
+                })
+                .collect(),
+        },
+    )
+    .0;
+    update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
+        },
+    )
+    .0
+}
+
+fn load_production_scale_triage_session() -> AppState {
+    let state = load_production_scale_window();
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Resume,
+        },
+    );
+    let request_id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::LoadProcessingConfiguration { request_id, .. } => Some(*request_id),
+            _ => None,
+        })
+        .expect("triage configuration request");
+    let (active_versions, effective_models) = production_metadata();
+    let (state, effects) = update(
+        state,
+        Msg::ProcessingConfigurationLoaded {
+            request_id,
+            contexts: production_contexts(),
+            active_versions,
+            effective_models,
+            preparation_budget: 100_000,
+        },
+    );
+    let (state, _) = respond_to_pipeline_window(state, effects);
+    update(state, Msg::PipelineRunAdvance).0
+}
+
+fn respond_to_pipeline_window(state: AppState, effects: Vec<Effect>) -> (AppState, Vec<Effect>) {
+    let Some(request_id) = effects.iter().find_map(|effect| match effect {
+        Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+        _ => None,
+    }) else {
+        return (state, effects);
+    };
+    let articles = (0..PRODUCTION_SCALE_WINDOW_ARTICLES)
+        .map(production_loaded_article)
+        .collect();
+    update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
+        },
+    )
+}
+
+fn load_production_scale_complete_session() -> AppState {
+    let mut state = load_production_scale_window();
+    let mut triage = TriageSession::new_loading(None);
+    triage.set_articles(
+        (0..PRODUCTION_SCALE_WINDOW_ARTICLES)
+            .map(production_loaded_article)
+            .collect(),
+    );
+    triage.transition_to_triaging();
+    for index in 0..PRODUCTION_SCALE_WINDOW_ARTICLES {
+        if index < 10_000 {
+            triage.complete_article(
+                index,
+                ArticleTriageResult {
+                    category: "news".into(),
+                    priority: if index.is_multiple_of(3) { 3 } else { 1 },
+                    tags: vec!["topic".into()],
+                    rationale: "representative triage".into(),
+                    input_tokens: 100,
+                    output_tokens: 30,
+                },
+            );
+        } else {
+            triage.fail_article(index, "cache miss in completed session".into());
+        }
+    }
+    triage.complete();
+    state.set_complete_triage_for_host_drain_fixture(triage);
+    state
+}
+
+fn production_loaded_article(index: usize) -> LoadedArticle {
+    LoadedArticle {
+        url: production_window_url(index),
+        source_title: Some(format!("Production-scale source {index}")),
+        prepared_text: "word ".repeat(600),
+        content_hash: format!("drain-cost-content-{index}"),
+        fetched_utc: Some(if index < PROBE_CORPUS_JOBS {
+            "2026-09-06T12:00:00Z".into()
+        } else {
+            "2026-09-05T12:01:00Z".into()
+        }),
+    }
+}
+
+fn production_contexts() -> HashMap<PromptId, Vec<(String, String)>> {
+    [
+        PromptId::ArticleTriage,
+        PromptId::ArticleSummary,
+        PromptId::ArticleSignalCandidate,
+    ]
+    .into_iter()
+    .map(|prompt_id| (prompt_id, vec![("policy".into(), "context ".repeat(375))]))
+    .collect()
+}
+
+fn production_metadata() -> (HashMap<PromptId, u32>, HashMap<PromptId, String>) {
+    let mut active_versions = HashMap::new();
+    let mut effective_models = HashMap::new();
+    for prompt_id in [
+        PromptId::ArticleTriage,
+        PromptId::ArticleSummary,
+        PromptId::ArticleSignalCandidate,
+    ] {
+        active_versions.insert(prompt_id, 1);
+    }
+    effective_models.insert(PromptId::ArticleTriage, "drain-cost-triage-model".into());
+    effective_models.insert(PromptId::ArticleSummary, "drain-cost-model".into());
+    effective_models.insert(
+        PromptId::ArticleSignalCandidate,
+        "drain-cost-scoring-model".into(),
+    );
+    (active_versions, effective_models)
+}
+
+fn production_window_url(index: usize) -> String {
+    job_url(index)
 }
 
 fn job_url(index: usize) -> String {
@@ -352,7 +872,7 @@ fn median_drain_cost(
         .map(|_| {
             let started = Instant::now();
             let view_started = Instant::now();
-            let view = state.desktop_view();
+            let view = state.view();
             let view_us = view_started.elapsed().as_micros();
             let compare_started = Instant::now();
             let _changed = view != *previous;

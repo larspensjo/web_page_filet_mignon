@@ -77,23 +77,29 @@ pub enum SourceKind {
     Brave,
     File,
     Curated,
-    Script,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SourceType {
     File { path: PathBuf },
-    Script { command: String, args: Vec<String> },
     CuratedList { urls: Vec<String> },
     Rss { feed_url: String },
     BraveNews(BraveNewsSourceConfig),
 }
 
 impl SourceType {
+    pub fn ron_variant_name(&self) -> &'static str {
+        match self {
+            SourceType::File { .. } => "File",
+            SourceType::CuratedList { .. } => "CuratedList",
+            SourceType::Rss { .. } => "Rss",
+            SourceType::BraveNews(_) => "BraveNews",
+        }
+    }
+
     pub fn kind(&self) -> SourceKind {
         match self {
             SourceType::File { .. } => SourceKind::File,
-            SourceType::Script { .. } => SourceKind::Script,
             SourceType::CuratedList { .. } => SourceKind::Curated,
             SourceType::Rss { .. } => SourceKind::Rss,
             SourceType::BraveNews(_) => SourceKind::Brave,
@@ -131,10 +137,6 @@ impl SourceType {
         match self {
             SourceType::File { path } => SourceType::File {
                 path: resolve_config_path(config_dir, path),
-            },
-            SourceType::Script { command, args } => SourceType::Script {
-                command: command.clone(),
-                args: args.clone(),
             },
             SourceType::CuratedList { urls } => SourceType::CuratedList { urls: urls.clone() },
             SourceType::Rss { feed_url } => SourceType::Rss {

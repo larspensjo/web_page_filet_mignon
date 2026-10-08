@@ -1,7 +1,4 @@
-use super::drain_control::BatchDrainSnapshot;
-use super::CycleOutcome;
-use harvester_core::{BatchObservation, LlmModelUsageView};
-use std::io::Write;
+use harvester_core::{BatchObservation, UnfinishedWork};
 use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -17,169 +14,68 @@ pub(super) struct CycleCounts {
     pub(super) imports_failed: usize,
 }
 
-/// Summarizes a finished drain for stdout. Batches that are still running
-/// remain in the manifest and are reported so the operator knows a later drain
-/// still has work to collect.
-pub(super) fn format_drain_summary(
-    pending_manifest_batches: &[(String, Option<String>)],
-) -> String {
-    if pending_manifest_batches.is_empty() {
-        return "[batch-drain] collected and exiting; no batches remain pending".to_string();
+#[derive(Default)]
+pub(crate) struct CycleStartWorkReporter {
+    count_printed: bool,
+    notice_printed: bool,
+}
+
+impl CycleStartWorkReporter {
+    pub(crate) fn pending_count_line(
+        &mut self,
+        state: &harvester_core::AppState,
+    ) -> Option<String> {
+        if self.count_printed {
+            return None;
+        }
+        let UnfinishedWork::Known(work) = state.unfinished_work() else {
+            return None;
+        };
+        self.count_printed = true;
+        Some(format!(
+            "[batch] cycle-start unfinished_articles={} estimated_calls={}",
+            work.articles_with_work, work.estimated_calls
+        ))
     }
-    let ids: Vec<_> = pending_manifest_batches
-        .iter()
-        .map(|(input_file_id, batch_id)| batch_id.clone().unwrap_or_else(|| input_file_id.clone()))
-        .collect();
-    format!(
-        "[batch-drain] collected and exiting; {} batch(es) still pending: {}",
-        ids.len(),
-        ids.join(", ")
-    )
-}
 
-pub(super) fn write_no_progress_bailout<W: Write>(
-    sink: &mut W,
-    snapshot: &BatchDrainSnapshot,
-) -> std::io::Result<()> {
-    writeln!(
-        sink,
-        "[batch-wait] no-progress bailout; remaining triage={} summaries={} signal={}",
-        snapshot.triage_deferred, snapshot.summary_deferred, snapshot.signal_deferred
-    )
-}
-
-/// Returns the once-per-intake poll summary plus the former per-pass transcript
-/// when the operator explicitly opts in. Runtime logging is unaffected.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn format_optional_cycle_diagnostics(
-    verbose_progress: bool,
-    include_header: bool,
-    include_poll_summary: bool,
-    cycle: usize,
-    outcome: &CycleOutcome,
-    counts: &CycleCounts,
-    batch_cost_microdollars: u64,
-    observation: &BatchObservation,
-    usage_rows: &[LlmModelUsageView],
-    checked_at_local: Option<chrono::DateTime<chrono::FixedOffset>>,
-) -> Vec<String> {
-    let mut lines = Vec::new();
-    if verbose_progress {
-        if include_header {
-            lines.push(format!(
-                "{:<6} {:<9} {:>20} {:>18} {:>21}",
-                "Cycle", "Outcome", "Jobs(new/done/fail)", "Triage(ok/fail)", "Summaries(ok/fail)"
-            ));
-            lines.push("-".repeat(78));
-        }
-        lines.push(format!(
-            "{:<6} {:<9} {:>20} {:>18} {:>21}",
-            cycle,
-            cycle_outcome_label(outcome),
-            format!(
-                "{}/{}/{}",
-                counts.new_jobs, counts.jobs_done, counts.jobs_failed
-            ),
-            format!("{}/{}", counts.triage_completed, counts.triage_failed),
-            format!("{}/{}", counts.summary_completed, counts.summary_failed),
-        ));
-        if batch_cost_microdollars > 0 {
-            lines.push(format!(
-                "  Batch API realized tokens/cost this run: discounted {} ({} microdollars)",
-                microdollars_to_display(batch_cost_microdollars),
-                batch_cost_microdollars
-            ));
-        }
-        if let Some(line) = format_verbose_awaiting_batch_line(
-            observation.triage_deferred,
-            observation.summary_deferred,
-            observation.signal_deferred,
-            checked_at_local,
-        ) {
+    pub(crate) fn pending_lines(&mut self, state: &harvester_core::AppState) -> Vec<String> {
+        let mut lines = Vec::new();
+        if let Some(line) = self.pending_count_line(state) {
             lines.push(line);
         }
-    }
-    if include_poll_summary {
-        lines.extend(format_poll_summary(&observation.source_poll_stats));
-    }
-    if verbose_progress {
-        lines.extend(format_llm_usage_lines(usage_rows));
-    }
-    lines
-}
-
-fn cycle_outcome_label(outcome: &CycleOutcome) -> &'static str {
-    match outcome {
-        CycleOutcome::Success => "SUCCESS",
-        CycleOutcome::PartialFailure => "PARTIAL",
-        CycleOutcome::TotalFailure => "FAILED",
-    }
-}
-
-/// Formats a token count as a compact human-readable string (e.g. 12K, 1.2M).
-fn format_compact_tokens(n: u64) -> String {
-    if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    } else if n >= 1_000 {
-        format!("{}K", n / 1_000)
-    } else {
-        n.to_string()
-    }
-}
-
-/// Formats the awaiting-batch-results summary line, or `None` when no work is
-/// deferred to a pending Batch API job.
-pub(super) fn format_awaiting_batch_line(
-    triage_deferred: usize,
-    summary_deferred: usize,
-    signal_deferred: usize,
-) -> Option<String> {
-    let total = triage_deferred + summary_deferred + signal_deferred;
-    (total > 0).then(|| {
-        format!(
-            "  Awaiting batch results: {} triage, {} summaries, {} signal ({} total)",
-            triage_deferred, summary_deferred, signal_deferred, total
-        )
-    })
-}
-
-/// Formats the verbose Batch API wait detail with a presentation-only local
-/// wall-clock timestamp. Durable batch timestamps remain UTC elsewhere.
-fn format_verbose_awaiting_batch_line(
-    triage_deferred: usize,
-    summary_deferred: usize,
-    signal_deferred: usize,
-    checked_at_local: Option<chrono::DateTime<chrono::FixedOffset>>,
-) -> Option<String> {
-    format_awaiting_batch_line(triage_deferred, summary_deferred, signal_deferred).map(|line| {
-        match checked_at_local {
-            Some(checked_at) => format!(
-                "{line} · checked_at={}",
-                checked_at.format("%Y-%m-%d %H:%M:%S %:z")
-            ),
-            None => line,
+        if !self.notice_printed {
+            if let Some((articles, calls)) = state.reprocess_notice() {
+                lines.push(format!(
+                    "[batch] reprocess notice: {} unfinished articles; up to {} model calls",
+                    articles, calls
+                ));
+                self.notice_printed = true;
+            }
         }
-    })
-}
-
-/// Formats per-model usage rows as indented display lines.
-fn format_llm_usage_lines(rows: &[LlmModelUsageView]) -> Vec<String> {
-    rows.iter()
-        .map(|r| {
-            format!(
-                "  {}: in={} out={}",
-                r.model,
-                format_compact_tokens(r.input_tokens),
-                format_compact_tokens(r.output_tokens)
-            )
-        })
-        .collect()
+        lines
+    }
 }
 
 /// Prints a grouped poll-stats summary (RSS / Brave / other source types).
 pub(super) fn print_poll_stats(stats: &[harvester_core::SourcePollStat]) {
     if let Some(summary) = format_poll_summary(stats) {
         println!("{summary}");
+    }
+}
+
+#[derive(Default)]
+pub(super) struct PollSummaryReporter {
+    printed: bool,
+}
+
+impl PollSummaryReporter {
+    pub(super) fn take(&mut self, stats: &[harvester_core::SourcePollStat]) -> Option<String> {
+        if self.printed {
+            return None;
+        }
+        let summary = format_poll_summary(stats)?;
+        self.printed = true;
+        Some(summary)
     }
 }
 
@@ -195,46 +91,38 @@ fn format_poll_summary(stats: &[harvester_core::SourcePollStat]) -> Option<Strin
 /// Prints the final summary when batch runner exits.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn print_final_summary(
-    batch_api: bool,
     total_cycles: usize,
     observation: &BatchObservation,
     total_new_articles: usize,
     total_triaged: usize,
     total_summarized: usize,
     elapsed: Duration,
-    batch_cost_microdollars: u64,
 ) {
     println!(
         "{}",
         format_final_summary(
-            batch_api,
             total_cycles,
             observation,
             total_new_articles,
             total_triaged,
             total_summarized,
             elapsed,
-            batch_cost_microdollars,
         )
     );
 }
 
 #[allow(clippy::too_many_arguments)]
 fn format_final_summary(
-    batch_api: bool,
     total_cycles: usize,
     observation: &BatchObservation,
     total_new_articles: usize,
     total_triaged: usize,
     total_summarized: usize,
     elapsed: Duration,
-    batch_cost_microdollars: u64,
 ) -> String {
     let elapsed = format_summary_elapsed(elapsed);
-    let deferred =
-        observation.triage_deferred + observation.summary_deferred + observation.signal_deferred;
     let stages = format!(
-        "intake_success={} intake_failed={} triage_success={} triage_failed={} summaries_success={} summaries_failed={} signals_success={} signals_failed={} deferred={} elapsed={} cost_this_run={}",
+        "intake_success={} intake_failed={} triage_success={} triage_failed={} summaries_success={} summaries_failed={} signals_success={} signals_failed={} elapsed={}",
         observation.jobs_done,
         observation.jobs_failed,
         observation.triage_completed,
@@ -243,22 +131,12 @@ fn format_final_summary(
         observation.summary_failed,
         observation.signal_completed,
         observation.signal_failed,
-        deferred,
         elapsed,
-        microdollars_to_display(batch_cost_microdollars),
     );
-    if batch_api {
-        format!(
-            "[batch] complete intake=1 collection_passes={} {}",
-            total_cycles.saturating_sub(1),
-            stages
-        )
-    } else {
-        format!(
-            "\n-- Batch complete: {} cycles, {} new articles, {} triaged, {} summarized --\n{}",
-            total_cycles, total_new_articles, total_triaged, total_summarized, stages
-        )
-    }
+    format!(
+        "\n-- Batch complete: {} cycles, {} new articles, {} triaged, {} summarized --\n{}",
+        total_cycles, total_new_articles, total_triaged, total_summarized, stages
+    )
 }
 
 fn format_summary_elapsed(elapsed: Duration) -> String {
@@ -273,26 +151,112 @@ fn format_summary_elapsed(elapsed: Duration) -> String {
 }
 
 /// One-line notice printed before state hydration so an interactive launch is
-/// never silent between the password prompt and the live dashboard.
+/// never silent between the password prompt and the live progress block.
 pub(super) fn format_startup_notice(mode_label: &str) -> String {
     format!("Harvester batch · starting ({mode_label}) · loading state and caches")
-}
-
-/// Converts microdollars to a human-readable dollar string with exact rounding.
-/// Examples: 0 -> "$0.00", 1234567 -> "$1.23", 50 -> "$0.00", 5000 -> "$0.01"
-pub(crate) fn microdollars_to_display(microdollars: u64) -> String {
-    let cents = (microdollars + 5000) / 10000; // Round to nearest cent
-    let dollars = cents / 100;
-    let remaining_cents = cents % 100;
-    format!("${}.{:02}", dollars, remaining_cents)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
-    use harvester_core::{SessionState, SourcePollStat};
-    use harvester_engine::{SourceId, SourceKind};
+    use crate::progress::format_cost as microdollars_to_display;
+    use harvester_core::{CompletedJobSnapshot, SessionState, SourcePollStat};
+    use harvester_engine::{llm::PromptId, SourceId, SourceKind};
+    use std::collections::HashMap;
+
+    fn state_with_unfinished_article_and_limited_quota() -> harvester_core::AppState {
+        let url = "https://cycle-start.example/article";
+        let article = harvester_core::LoadedArticle {
+            url: url.into(),
+            source_title: Some("Cycle-start article".into()),
+            prepared_text: "articleword ".repeat(220),
+            content_hash: "cycle-start-content".into(),
+            fetched_utc: Some("2026-09-27T00:00:00Z".into()),
+        };
+        let state = harvester_core::AppState::new();
+        let (state, _) = harvester_core::update(
+            state,
+            harvester_core::Msg::LlmMetadataLoaded {
+                active_versions: HashMap::from([
+                    (PromptId::ArticleTriage, 1),
+                    (PromptId::ArticleSummary, 1),
+                    (PromptId::ArticleSignalCandidate, 1),
+                ]),
+                effective_models: HashMap::from([
+                    (PromptId::ArticleTriage, "triage-test-model".into()),
+                    (PromptId::ArticleSummary, "summary-test-model".into()),
+                    (PromptId::ArticleSignalCandidate, "signal-test-model".into()),
+                ]),
+            },
+        );
+        let (state, _) =
+            harvester_core::update(state, harvester_core::Msg::PromptTemplateFilesLoaded);
+        let (state, _) = harvester_core::update(
+            state,
+            harvester_core::Msg::PromptContextsLoaded {
+                contexts: HashMap::new(),
+            },
+        );
+        let (state, _) = harvester_core::update(
+            state,
+            harvester_core::Msg::RestoreCompletedJobs(vec![CompletedJobSnapshot {
+                url: url.into(),
+                tokens: Some(100),
+                bytes: Some(4_000),
+                links: Vec::new(),
+                fetched_utc: article.fetched_utc.clone(),
+            }]),
+        );
+        let (mut state, _) = harvester_core::update(
+            state,
+            harvester_core::Msg::EvaluatePreTriageRefresh {
+                ordered_urls: vec![url.into()],
+                triggered_by_job_done: false,
+            },
+        );
+        let mut load_request_id = None;
+        for tick in 1..=20 {
+            let (next, effects) = harvester_core::update(
+                state,
+                harvester_core::Msg::tick_at(
+                    chrono::DateTime::from_timestamp(1_790_000_000 + tick, 0)
+                        .expect("valid fixture time"),
+                ),
+            );
+            state = next;
+            load_request_id = load_request_id.or_else(|| {
+                effects.iter().find_map(|effect| match effect {
+                    harvester_core::Effect::LoadArticlesForTriage { request_id, .. } => {
+                        Some(*request_id)
+                    }
+                    _ => None,
+                })
+            });
+            if load_request_id.is_some() {
+                break;
+            }
+        }
+        let load_request_id = load_request_id.expect("pre-triage load request");
+        let (state, _) = harvester_core::update(
+            state,
+            harvester_core::Msg::TriageArticlesLoaded {
+                request_id: load_request_id,
+                delta: harvester_engine::TriageArticleDelta::full_window(vec![article], 100_000),
+            },
+        );
+        let (state, _) = harvester_core::update(
+            state,
+            harvester_core::Msg::LlmQuotaConfigured {
+                limits: harvester_core::LlmQuotaLimits {
+                    max_calls_per_session: Some(1),
+                    max_input_tokens_per_session: None,
+                    max_output_tokens_per_session: None,
+                    max_cost_microdollars_per_session: None,
+                },
+            },
+        );
+        state
+    }
 
     fn observation_with_totals(
         jobs_total: usize,
@@ -326,13 +290,10 @@ mod tests {
             summary_in_flight: 0,
             summary_completed,
             summary_failed,
-            triage_deferred: 0,
-            summary_deferred: 0,
             signal_total: 0,
             signal_pending_or_in_flight: 0,
             signal_completed: 0,
             signal_failed: 0,
-            signal_deferred: 0,
             triage_cache_hits: 0,
             triage_cache_misses: 0,
             triage_cache_key_unavailable: 0,
@@ -350,9 +311,63 @@ mod tests {
     #[test]
     fn startup_notice_names_mode_and_hydration_work() {
         assert_eq!(
-            format_startup_notice("batch-api"),
-            "Harvester batch · starting (batch-api) · loading state and caches"
+            format_startup_notice("one cycle"),
+            "Harvester batch · starting (one cycle) · loading state and caches"
         );
+    }
+
+    #[test]
+    fn cycle_start_reports_unfinished_count_and_reprocess_notice() {
+        let state = state_with_unfinished_article_and_limited_quota();
+        let mut reporter = CycleStartWorkReporter::default();
+        let lines = reporter.pending_lines(&state);
+        assert!(lines[0].starts_with("[batch] cycle-start unfinished_articles=1 estimated_calls="));
+        assert_eq!(
+            lines.len(),
+            1,
+            "the host must not infer a notice from quota"
+        );
+        assert!(reporter.pending_lines(&state).is_empty());
+
+        let (state, effects) = harvester_core::update(
+            state,
+            harvester_core::Msg::PipelineRunRequested {
+                scope: harvester_core::PipelineRunScope::Resume,
+            },
+        );
+        let (state, effects) = harvester_core::fixture_support::complete_processing_configuration(
+            state, effects, 100_000,
+        );
+        let request_id = effects
+            .iter()
+            .find_map(|effect| match effect {
+                harvester_core::Effect::LoadArticlesForTriage { request_id, .. } => {
+                    Some(*request_id)
+                }
+                _ => None,
+            })
+            .expect("run loads its previous window");
+        let (state, _) = harvester_core::update(
+            state,
+            harvester_core::Msg::TriageArticlesLoaded {
+                request_id,
+                delta: harvester_engine::TriageArticleDelta::full_window(
+                    vec![harvester_core::LoadedArticle {
+                        url: "https://cycle-start.example/article".into(),
+                        source_title: Some("Cycle-start article".into()),
+                        prepared_text: "articleword ".repeat(220),
+                        content_hash: "cycle-start-content".into(),
+                        fetched_utc: Some("2026-09-27T00:00:00Z".into()),
+                    }],
+                    100_000,
+                ),
+            },
+        );
+        assert!(reporter
+            .pending_lines(&state)
+            .iter()
+            .any(|line| line.starts_with("[batch] reprocess notice:")));
+        assert!(reporter.pending_lines(&state).is_empty());
     }
 
     #[test]
@@ -362,18 +377,17 @@ mod tests {
 
     #[test]
     fn test_microdollars_to_display_rounds_down() {
-        // 50 microdollars = $0.000050 -> rounds to $0.00
+        // 50 microdollars = $0.000050 -> displays $0.00
         assert_eq!(microdollars_to_display(50), "$0.00");
-        // 4999 microdollars = $0.004999 -> rounds to $0.00
+        // 4999 microdollars = $0.004999 -> displays $0.00
         assert_eq!(microdollars_to_display(4999), "$0.00");
     }
 
     #[test]
-    fn test_microdollars_to_display_rounds_up() {
-        // 5000 microdollars = $0.005000 -> rounds to $0.01
-        assert_eq!(microdollars_to_display(5000), "$0.01");
-        // 15000 microdollars = $0.015000 -> rounds to $0.02
-        assert_eq!(microdollars_to_display(15000), "$0.02");
+    fn test_microdollars_to_display_truncates_fractional_cents() {
+        // Preserve the dashboard header's precision: truncate fractional cents.
+        assert_eq!(microdollars_to_display(5000), "$0.00");
+        assert_eq!(microdollars_to_display(15000), "$0.01");
     }
 
     #[test]
@@ -386,79 +400,23 @@ mod tests {
 
     #[test]
     fn test_microdollars_to_display_typical_values() {
-        // 1234567 microdollars = $1.234567 -> rounds to $1.23
+        // 1234567 microdollars = $1.234567 -> displays $1.23
         assert_eq!(microdollars_to_display(1234567), "$1.23");
-        // 5678901 microdollars = $5.678901 -> rounds to $5.68
-        assert_eq!(microdollars_to_display(5678901), "$5.68");
+        // 5678901 microdollars = $5.678901 -> displays $5.67
+        assert_eq!(microdollars_to_display(5678901), "$5.67");
     }
 
     #[test]
     fn test_microdollars_to_display_large_values() {
-        // 123456789 microdollars = $123.456789 -> rounds to $123.46
-        assert_eq!(microdollars_to_display(123456789), "$123.46");
+        // 123456789 microdollars = $123.456789 -> displays $123.45
+        assert_eq!(microdollars_to_display(123456789), "$123.45");
         // 1000000000 microdollars = $1000.00
         assert_eq!(microdollars_to_display(1000000000), "$1000.00");
     }
 
     #[test]
-    fn format_compact_tokens_thresholds() {
-        assert_eq!(format_compact_tokens(0), "0");
-        assert_eq!(format_compact_tokens(999), "999");
-        assert_eq!(format_compact_tokens(1_000), "1K");
-        assert_eq!(format_compact_tokens(12_345), "12K");
-        assert_eq!(format_compact_tokens(999_999), "999K");
-        assert_eq!(format_compact_tokens(1_000_000), "1.0M");
-        assert_eq!(format_compact_tokens(1_234_567), "1.2M");
-    }
-
-    #[test]
-    fn format_llm_usage_lines_formats_rows_compactly() {
-        let rows = vec![
-            LlmModelUsageView {
-                model: "alpha".to_string(),
-                input_tokens: 12_345,
-                output_tokens: 3_100,
-            },
-            LlmModelUsageView {
-                model: "beta".to_string(),
-                input_tokens: 500,
-                output_tokens: 80,
-            },
-        ];
-        let lines = format_llm_usage_lines(&rows);
-        assert_eq!(lines.len(), 2);
-        assert!(lines[0].contains("alpha"));
-        assert!(lines[0].contains("in=12K"));
-        assert!(lines[0].contains("out=3K"));
-        assert!(lines[1].contains("beta"));
-        assert!(lines[1].contains("in=500"));
-        assert!(lines[1].contains("out=80"));
-    }
-
-    #[test]
-    fn format_llm_usage_lines_empty_returns_empty() {
-        let lines = format_llm_usage_lines(&[]);
-        assert!(lines.is_empty());
-    }
-
-    #[test]
-    fn format_awaiting_batch_line_is_absent_when_nothing_deferred() {
-        assert_eq!(format_awaiting_batch_line(0, 0, 0), None);
-    }
-
-    #[test]
-    fn format_awaiting_batch_line_reports_per_stage_and_total_counts() {
-        let line = format_awaiting_batch_line(3, 2, 1).unwrap();
-        assert_eq!(
-            line,
-            "  Awaiting batch results: 3 triage, 2 summaries, 1 signal (6 total)"
-        );
-    }
-
-    #[test]
     fn default_progress_output_includes_poll_summary_once_but_excludes_verbose_diagnostics() {
         let mut observation = observation_with_totals(1, 1, 0, 1, 0, 1, 0);
-        observation.triage_deferred = 1;
         observation.source_poll_stats.push(SourcePollStat {
             source_id: SourceId::new("test-rss").unwrap(),
             kind: SourceKind::Rss,
@@ -466,178 +424,34 @@ mod tests {
             dedup_filtered: 1,
             emitted: 1,
         });
-        let usage_rows = [LlmModelUsageView {
-            model: "gpt-test".to_string(),
-            input_tokens: 10,
-            output_tokens: 20,
-        }];
-
-        let intake_details = format_optional_cycle_diagnostics(
+        let mut reporter = PollSummaryReporter::default();
+        assert!(reporter.take(&[]).is_none());
+        let details = reporter.take(&observation.source_poll_stats).unwrap();
+        let block = crate::progress::format_progress_block(
+            &crate::progress::test_stages(),
             false,
-            true,
-            true,
-            1,
-            &CycleOutcome::Success,
-            &CycleCounts::default(),
+            Duration::ZERO,
             0,
-            &observation,
-            &usage_rows,
-            None,
         );
-        let collect_only_details = format_optional_cycle_diagnostics(
-            false,
-            false,
-            false,
-            2,
-            &CycleOutcome::Success,
-            &CycleCounts::default(),
-            0,
-            &observation,
-            &usage_rows,
-            None,
-        );
-        let details = intake_details
-            .into_iter()
-            .chain(collect_only_details)
-            .collect::<Vec<_>>()
-            .join("\n");
-
+        assert!(!block.join("\n").contains("Poll summary"));
+        assert!(reporter.take(&observation.source_poll_stats).is_none());
         assert_eq!(details.matches("--- Poll summary ---").count(), 1);
         assert!(details.contains("test-rss"));
         assert!(!details.contains("Cycle"));
-        assert!(!details.contains("Awaiting batch results"));
         assert!(!details.contains("gpt-test: in=10 out=20"));
-    }
-
-    #[test]
-    fn verbose_progress_output_contains_cycle_source_and_model_diagnostics() {
-        let mut observation = observation_with_totals(1, 1, 0, 1, 0, 1, 0);
-        observation.source_poll_stats.push(SourcePollStat {
-            source_id: SourceId::new("test-rss").unwrap(),
-            kind: SourceKind::Rss,
-            parsed: 2,
-            dedup_filtered: 1,
-            emitted: 1,
-        });
-        let details = format_optional_cycle_diagnostics(
-            true,
-            true,
-            true,
-            1,
-            &CycleOutcome::Success,
-            &CycleCounts::default(),
-            0,
-            &observation,
-            &[LlmModelUsageView {
-                model: "gpt-test".to_string(),
-                input_tokens: 10,
-                output_tokens: 20,
-            }],
-            None,
-        )
-        .join("\n");
-
-        assert!(details.contains("Cycle"));
-        assert!(details.contains("--- Poll summary ---"));
-        assert!(details.contains("gpt-test: in=10 out=20"));
-    }
-
-    #[test]
-    fn verbose_wait_timestamp_uses_injected_local_offset() {
-        let checked_at = chrono::FixedOffset::east_opt(2 * 60 * 60)
-            .unwrap()
-            .with_ymd_and_hms(2026, 7, 24, 9, 48, 30)
-            .single()
-            .unwrap();
-        let line = format_verbose_awaiting_batch_line(1, 0, 0, Some(checked_at)).unwrap();
-
-        assert!(line.contains("2026-07-24 09:48:30 +02:00"));
-        assert!(!line.contains("Z"));
-        assert!(!line.contains("+00:00"));
-    }
-
-    #[test]
-    fn batch_api_final_summary_distinguishes_intake_from_collection_passes_and_cost_scope() {
-        let summary = format_final_summary(
-            true,
-            7,
-            &observation_with_totals(2, 2, 0, 1, 0, 1, 0),
-            2,
-            1,
-            1,
-            Duration::from_secs(136),
-            25_000,
-        );
-
-        assert!(summary.contains("intake=1 collection_passes=6"));
-        assert!(summary.contains("triage_success=1 triage_failed=0"));
-        assert!(summary.contains("cost_this_run=$0.03"));
-        assert!(!summary.contains("7 cycles"));
     }
 
     #[test]
     fn ordinary_final_summary_retains_cycle_wording() {
         let summary = format_final_summary(
-            false,
             7,
             &observation_with_totals(2, 2, 0, 1, 0, 1, 0),
             2,
             1,
             1,
             Duration::from_secs(136),
-            0,
         );
 
         assert!(summary.contains("Batch complete: 7 cycles"));
-        assert!(!summary.contains("collection_passes"));
-    }
-
-    #[test]
-    fn drain_summary_reports_batches_left_pending_for_a_later_run() {
-        assert_eq!(
-            format_drain_summary(&[]),
-            "[batch-drain] collected and exiting; no batches remain pending"
-        );
-
-        let summary = format_drain_summary(&[
-            ("file_1".to_string(), Some("batch_1".to_string())),
-            ("file_2".to_string(), Some("batch_2".to_string())),
-        ]);
-
-        assert_eq!(
-            summary,
-            "[batch-drain] collected and exiting; 2 batch(es) still pending: batch_1, batch_2"
-        );
-
-        // A reservation that never reached the provider has no batch id yet, so the
-        // input file id has to identify it.
-        let unreconciled = format_drain_summary(&[("file_3".to_string(), None)]);
-        assert!(unreconciled.contains("file_3"), "got {unreconciled}");
-    }
-
-    #[test]
-    fn batch_drain_bailout_prints_remaining_stage_counts_without_changing_exit_code() {
-        let snapshot = BatchDrainSnapshot {
-            pending_manifest_batches: vec![("file-1".to_string(), Some("batch-1".to_string()))],
-            triage_deferred: 7,
-            summary_deferred: 5,
-            signal_deferred: 3,
-        };
-        let mut output = Vec::new();
-
-        assert!(super::super::should_exit_batch_drain_after_no_progress(
-            super::super::drain_control::MAX_CONSECUTIVE_BATCH_COLLECT_NO_PROGRESS
-        ));
-        write_no_progress_bailout(&mut output, &snapshot).unwrap();
-
-        assert_eq!(
-            String::from_utf8(output).unwrap(),
-            "[batch-wait] no-progress bailout; remaining triage=7 summaries=5 signal=3\n"
-        );
-        assert_eq!(
-            super::super::exit_code_with_shutdown(super::super::determine_exit_code(0), false),
-            0,
-            "the bailout must retain the existing successful exit code"
-        );
     }
 }

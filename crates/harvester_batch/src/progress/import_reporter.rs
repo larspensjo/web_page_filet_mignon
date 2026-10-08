@@ -1,6 +1,5 @@
-use super::stale_reporter::format_elapsed;
 use std::io::Write;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Live progress reporter for `--import-saved-web-dir` mode.
 ///
@@ -61,6 +60,13 @@ impl ImportProgressReporter {
         self.painted_status = true;
     }
 
+    pub fn suspend_for_output<W: Write>(&mut self, stdout: &mut W) {
+        if self.enabled && self.painted_status {
+            let _ = writeln!(stdout);
+            self.painted_status = false;
+        }
+    }
+
     pub fn finish<W: Write>(&mut self, cost_display: &str, stdout: &mut W) {
         if !self.enabled {
             return;
@@ -102,6 +108,11 @@ fn phase_label(obs: &harvester_core::BatchObservation) -> &'static str {
     "SETTLING "
 }
 
+pub(super) fn format_elapsed(d: Duration) -> String {
+    let secs = d.as_secs();
+    format!("{}:{:02}", secs / 60, secs % 60)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,13 +144,10 @@ mod tests {
             summary_in_flight: 0,
             summary_completed: 0,
             summary_failed: 0,
-            triage_deferred: 0,
-            summary_deferred: 0,
             signal_total: 0,
             signal_pending_or_in_flight: 0,
             signal_completed: 0,
             signal_failed: 0,
-            signal_deferred: 0,
             triage_cache_hits: 0,
             triage_cache_misses: 0,
             triage_cache_key_unavailable: 0,
@@ -151,6 +159,23 @@ mod tests {
             imports_failed: 0,
             import_in_flight: false,
             source_poll_stats: vec![],
+        }
+    }
+
+    #[test]
+    fn format_elapsed_formats_minutes_and_padded_seconds() {
+        for (seconds, expected) in [
+            (0, "0:00"),
+            (9, "0:09"),
+            (59, "0:59"),
+            (60, "1:00"),
+            (61, "1:01"),
+            (3601, "60:01"),
+        ] {
+            assert_eq!(
+                format_elapsed(Duration::from_millis(seconds * 1000 + 999)),
+                expected
+            );
         }
     }
 

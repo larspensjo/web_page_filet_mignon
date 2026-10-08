@@ -35,9 +35,8 @@ target
 coverage_*.json
 coverage_*.md
 
-# Desktop UI frontend build output and dependencies, and throughput-probe output
+# Desktop UI frontend build output and dependencies, and local scratch (probe, benchmark, agent work files)
 /frontend/dist/
 /frontend/node_modules/
-/.local/probe/
-/.local/experiments/
+/.local/
 /crates/harvester_ui/gen/

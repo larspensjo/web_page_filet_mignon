@@ -135,10 +135,10 @@ fn view_contains_sorted_llm_usage_rows() {
     let state = AppState::new();
     let state = send_llm_completed(state, "zmodel", 10, 5, CacheStatus::Miss);
     let state = send_llm_completed(state, "amodel", 20, 8, CacheStatus::Miss);
-    let view = state.view();
-    assert_eq!(view.llm_usage_by_model.len(), 2);
-    assert_eq!(view.llm_usage_by_model[0].model, "amodel");
-    assert_eq!(view.llm_usage_by_model[1].model, "zmodel");
+
+    assert_eq!(state.llm_usage_rows().len(), 2);
+    assert_eq!(state.llm_usage_rows()[0].model, "amodel");
+    assert_eq!(state.llm_usage_rows()[1].model, "zmodel");
 }
 
 #[test]
@@ -173,7 +173,7 @@ fn quota_usage_snapshot_is_authoritative_and_model_usage_stays_separate() {
 
     assert_eq!(view.llm_quota.used, 7);
     assert_eq!(view.llm_quota.limit, Some(100));
-    assert_eq!(view.llm_usage_by_model[0].input_tokens, 10);
+    assert_eq!(state.llm_usage_rows()[0].input_tokens, 10);
 }
 
 #[test]

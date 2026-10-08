@@ -24,6 +24,11 @@ impl OpenAiProvider {
         let api_key = env::var("OPENAI_API_KEY").map_err(|err| LlmError::Configuration {
             detail: format!("OPENAI_API_KEY missing: {err}"),
         })?;
+        if api_key.trim().is_empty() {
+            return Err(LlmError::Configuration {
+                detail: "OPENAI_API_KEY is empty".to_string(),
+            });
+        }
         Ok(Self::new(api_key))
     }
 
@@ -267,8 +272,7 @@ impl LlmProvider for OpenAiProvider {
 
 /// Builds the exact JSON object sent to OpenAI's Chat Completions endpoint.
 ///
-/// Batch callers can embed this object in a JSONL request line, guaranteeing it
-/// stays byte-for-byte equivalent to the synchronous request payload.
+/// Serializes the synchronous transport payload.
 pub fn openai_chat_completion_body(request: &LlmRequest) -> serde_json::Value {
     serde_json::to_value(OpenAiProvider::build_request_body(request))
         .expect("OpenAI chat completion request must be serializable")

@@ -17,6 +17,7 @@ import {
 type ReadingPaneProps = {
 	selected: SelectedJobView | null | undefined;
 	summary: BodyRef | null | undefined;
+	aiUnavailableMessage?: string | null;
 	/** The selected job's scored signal candidate, when it has one. */
 	candidate: SignalCandidateRow | null;
 	onToggleExclusion: (signalKey: string) => void;
@@ -25,12 +26,18 @@ type ReadingPaneProps = {
 function BodyContent({
 	state,
 	selected,
+	aiUnavailableMessage,
 }: {
+	aiUnavailableMessage?: string | null;
 	state: BodyState;
 	selected: SelectedJobView;
 }) {
 	if (state.kind === "unavailable")
-		return <p className="empty-state">No summary available.</p>;
+		return (
+			<p className="empty-state">
+				{aiUnavailableMessage ?? "Not summarized under the current settings."}
+			</p>
+		);
 	if (state.kind === "loading")
 		return <p className="empty-state">Loading article…</p>;
 	if (state.kind === "changed")
@@ -81,44 +88,13 @@ function MarkdownBody({
 						</span>
 					),
 				}}
-				remarkPlugins={[
-					remarkGfm,
-					suppressDuplicateLeadingHeading(jobTitle(selected)),
-				]}
+				remarkPlugins={[remarkGfm]}
 				skipHtml
 			>
 				{text}
 			</ReactMarkdown>
 		</div>
 	);
-}
-
-type MarkdownNode = {
-	type: string;
-	value?: string;
-	alt?: string;
-	children?: MarkdownNode[];
-};
-
-type MarkdownRoot = {
-	children: MarkdownNode[];
-};
-
-function markdownText(node: MarkdownNode): string {
-	return (
-		node.value ??
-		node.alt ??
-		node.children?.map((child) => markdownText(child)).join("") ??
-		""
-	);
-}
-
-function suppressDuplicateLeadingHeading(title: string) {
-	return () => (root: MarkdownRoot) => {
-		const first = root.children[0];
-		if (first?.type === "heading" && markdownText(first) === title)
-			root.children.shift();
-	};
 }
 
 function AnnotationBand({ selected }: { selected: SelectedJobView }) {
@@ -162,6 +138,7 @@ function ExclusionToggle({
 export function ReadingPane({
 	selected,
 	summary,
+	aiUnavailableMessage,
 	candidate,
 	onToggleExclusion,
 }: ReadingPaneProps) {
@@ -214,7 +191,11 @@ export function ReadingPane({
 			</header>
 			<AnnotationBand selected={selected} />
 			<div className="reading-body">
-				<BodyContent selected={selected} state={summaryBody} />
+				<BodyContent
+					selected={selected}
+					state={summaryBody}
+					aiUnavailableMessage={aiUnavailableMessage}
+				/>
 			</div>
 		</section>
 	);

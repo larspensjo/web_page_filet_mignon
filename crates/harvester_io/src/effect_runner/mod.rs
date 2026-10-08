@@ -1,22 +1,22 @@
 use std::collections::HashMap;
-use std::sync::{mpsc, Arc, RwLock};
+use std::path::Path;
+use std::sync::{atomic::AtomicBool, mpsc, Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
 
 use chrono::Utc;
 use engine_logging::{engine_error, engine_info, engine_warn};
-use harvester_core::{Effect, JobResultKind, Msg};
+use harvester_core::{Effect, JobResultKind, Msg, PersistenceSnapshot};
 use harvester_engine::llm::prompt::PromptId;
-use harvester_engine::llm::types::ProviderKind;
 use harvester_engine::llm::{LlmHandle, PromptRegistry};
 use harvester_engine::{
-    is_confined_to, EngineConfig, EngineEvent, EngineHandle, FailureKind, FetchSettings, UrlPolicy,
+    EngineConfig, EngineEvent, EngineHandle, FailureKind, FetchSettings, UrlPolicy,
 };
 
+mod configuration;
 mod dispatch;
 mod poll;
 mod worker;
-use worker::{run_entity_index_worker, EntityIndexWorkerMsg};
 
 use crate::effect_helpers::{map_llm_event, map_stage};
 use crate::RuntimePaths;
@@ -60,14 +60,54 @@ impl PlatformEffectHandler for NoOpPlatformHandler {
     }
 }
 
+/// Sink for reducer-emitted runtime persistence snapshots.
+pub trait RuntimePersistenceSink: Send + Sync {
+    fn enqueue(&self, snapshot: PersistenceSnapshot);
+    fn set_message_sender(&self, _sender: mpsc::Sender<Msg>) {}
+    /// Sinks suppressing runtime snapshots still service independent link effects.
+    fn store_article_links(
+        &self,
+        output: &Path,
+        url: String,
+        links: Vec<harvester_engine::ExtractedLink>,
+        observer: Option<FileWriteObserver>,
+    ) {
+        crate::article_links::store_observed(output, &url, &links, &observer);
+    }
+}
+pub type FileWriteObserver = Arc<dyn Fn(&Path, u64, Duration) + Send + Sync>;
+
+impl RuntimePersistenceSink for crate::PersistenceWorker {
+    fn store_article_links(
+        &self,
+        output: &Path,
+        url: String,
+        links: Vec<harvester_engine::ExtractedLink>,
+        observer: Option<FileWriteObserver>,
+    ) {
+        crate::PersistenceWorker::enqueue_links(self, output.to_path_buf(), url, links, observer);
+    }
+    fn set_message_sender(&self, sender: mpsc::Sender<Msg>) {
+        crate::PersistenceWorker::set_message_sender(self, sender);
+    }
+    fn enqueue(&self, snapshot: PersistenceSnapshot) {
+        crate::PersistenceWorker::enqueue(self, snapshot);
+    }
+}
+
+/// No-op sink for modes whose contract forbids runtime-state writes.
+pub struct NoOpRuntimePersistenceSink;
+
+impl RuntimePersistenceSink for NoOpRuntimePersistenceSink {
+    fn enqueue(&self, _snapshot: PersistenceSnapshot) {}
+}
+
 /// Effect runner that orchestrates IO effects.
 ///
-/// # Entity index worker lifecycle
-/// The runner spawns a dedicated single-threaded worker for entity index upserts.
-/// Upserts are forwarded via `entity_index_worker_tx`. When `EffectRunner` is dropped,
-/// the sender is dropped, which closes the channel and signals the worker to exit cleanly.
 pub struct EffectRunner {
     engine: EngineHandle,
+    corpus_scan_index: Arc<Mutex<harvester_engine::CorpusScanIndex>>,
+    corpus_scan_reset_requested: Arc<AtomicBool>,
     msg_tx: mpsc::Sender<Msg>,
     paths: RuntimePaths,
     url_policy: UrlPolicy,
@@ -76,11 +116,11 @@ pub struct EffectRunner {
     llm_max_input_bytes: Option<usize>,
     prompt_registry: Arc<RwLock<PromptRegistry>>,
     llm_metadata_models: HashMap<PromptId, String>,
-    llm_provider: Option<Arc<dyn harvester_engine::llm::provider::LlmProvider>>,
-    llm_default_provider: Option<ProviderKind>,
     platform_handler: Box<dyn PlatformEffectHandler>,
-    /// Sender to the serialized entity-index worker. Dropping this closes the channel.
-    entity_index_worker_tx: mpsc::SyncSender<EntityIndexWorkerMsg>,
+    /// Host-selected sink for reducer-emitted runtime persistence snapshots.
+    persistence_sink: Box<dyn RuntimePersistenceSink>,
+    file_write_observer: Option<FileWriteObserver>,
+    result_sink: Box<dyn crate::result_sink::ResultSink>,
 }
 
 impl EffectRunner {
@@ -88,6 +128,7 @@ impl EffectRunner {
         paths: RuntimePaths,
         msg_tx: mpsc::Sender<Msg>,
         platform_handler: Box<dyn PlatformEffectHandler>,
+        persistence_sink: Box<dyn RuntimePersistenceSink>,
     ) -> Self {
         let registry = Arc::new(RwLock::new(PromptRegistry::with_defaults()));
         Self::with_optional_llm(
@@ -96,10 +137,10 @@ impl EffectRunner {
             None,
             None,
             registry,
-            HashMap::new(),
-            None,
-            None,
+            crate::host_bootstrap::default_effective_model_map(),
             platform_handler,
+            persistence_sink,
+            None,
         )
     }
 
@@ -111,9 +152,8 @@ impl EffectRunner {
         llm_max_input_bytes: usize,
         prompt_registry: Arc<RwLock<PromptRegistry>>,
         llm_metadata_models: HashMap<PromptId, String>,
-        llm_provider: Arc<dyn harvester_engine::llm::provider::LlmProvider>,
-        llm_default_provider: ProviderKind,
         platform_handler: Box<dyn PlatformEffectHandler>,
+        persistence_sink: Box<dyn RuntimePersistenceSink>,
     ) -> Self {
         Self::with_optional_llm(
             paths,
@@ -122,9 +162,34 @@ impl EffectRunner {
             Some(llm_max_input_bytes),
             prompt_registry,
             llm_metadata_models,
-            Some(llm_provider),
-            Some(llm_default_provider),
             platform_handler,
+            persistence_sink,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_llm_and_file_write_observer(
+        paths: RuntimePaths,
+        msg_tx: mpsc::Sender<Msg>,
+        llm_handle: LlmHandle,
+        llm_max_input_bytes: usize,
+        prompt_registry: Arc<RwLock<PromptRegistry>>,
+        llm_metadata_models: HashMap<PromptId, String>,
+        platform_handler: Box<dyn PlatformEffectHandler>,
+        persistence_sink: Box<dyn RuntimePersistenceSink>,
+        file_write_observer: FileWriteObserver,
+    ) -> Self {
+        Self::with_optional_llm(
+            paths,
+            msg_tx,
+            Some(llm_handle),
+            Some(llm_max_input_bytes),
+            prompt_registry,
+            llm_metadata_models,
+            platform_handler,
+            persistence_sink,
+            Some(file_write_observer),
         )
     }
 
@@ -136,9 +201,9 @@ impl EffectRunner {
         llm_max_input_bytes: Option<usize>,
         prompt_registry: Arc<RwLock<PromptRegistry>>,
         llm_metadata_models: HashMap<PromptId, String>,
-        llm_provider: Option<Arc<dyn harvester_engine::llm::provider::LlmProvider>>,
-        llm_default_provider: Option<ProviderKind>,
         platform_handler: Box<dyn PlatformEffectHandler>,
+        persistence_sink: Box<dyn RuntimePersistenceSink>,
+        file_write_observer: Option<FileWriteObserver>,
     ) -> Self {
         let mut config = EngineConfig::default_with_output(paths.output_dir.clone());
         config.fetched_utc = Arc::new(|| Utc::now().to_rfc3339());
@@ -147,16 +212,15 @@ impl EffectRunner {
 
         let engine = EngineHandle::new(config);
 
-        // Spawn the serialized entity-index worker.
-        // All UpsertEntityIndexEntry effects are forwarded to this single-threaded worker,
-        // which processes them sequentially (load â†’ merge â†’ atomic write).
-        let entity_index_path = paths.entity_index_path.clone();
-        let (worker_tx, worker_rx) = mpsc::sync_channel::<EntityIndexWorkerMsg>(256);
-        thread::spawn(move || {
-            run_entity_index_worker(worker_rx, entity_index_path);
-        });
-
+        let result_sink = Box::new(crate::result_sink::CoalescingResultSink::new(
+            paths.clone(),
+            msg_tx.clone(),
+            file_write_observer.clone(),
+        ));
+        persistence_sink.set_message_sender(msg_tx.clone());
         let runner = Self {
+            corpus_scan_index: Arc::new(Mutex::new(harvester_engine::CorpusScanIndex::default())),
+            corpus_scan_reset_requested: Arc::new(AtomicBool::new(false)),
             engine,
             msg_tx: msg_tx.clone(),
             paths,
@@ -166,10 +230,10 @@ impl EffectRunner {
             llm_max_input_bytes,
             prompt_registry,
             llm_metadata_models,
-            llm_provider,
-            llm_default_provider,
             platform_handler,
-            entity_index_worker_tx: worker_tx,
+            result_sink,
+            persistence_sink,
+            file_write_observer,
         };
         runner.spawn_event_loop(msg_tx);
         runner
@@ -184,18 +248,21 @@ impl EffectRunner {
         msg_tx: mpsc::Sender<Msg>,
         engine_config: EngineConfig,
         platform_handler: Box<dyn PlatformEffectHandler>,
+        persistence_sink: Box<dyn RuntimePersistenceSink>,
     ) -> Self {
         let url_policy = engine_config.url_policy.clone();
         let fetch_settings = engine_config.fetch_settings.clone();
         let engine = EngineHandle::new(engine_config);
 
-        let entity_index_path = paths.entity_index_path.clone();
-        let (worker_tx, worker_rx) = mpsc::sync_channel::<EntityIndexWorkerMsg>(256);
-        thread::spawn(move || {
-            run_entity_index_worker(worker_rx, entity_index_path);
-        });
-
+        let result_sink = Box::new(crate::result_sink::CoalescingResultSink::new(
+            paths.clone(),
+            msg_tx.clone(),
+            None,
+        ));
+        persistence_sink.set_message_sender(msg_tx.clone());
         let runner = Self {
+            corpus_scan_index: Arc::new(Mutex::new(harvester_engine::CorpusScanIndex::default())),
+            corpus_scan_reset_requested: Arc::new(AtomicBool::new(false)),
             engine,
             msg_tx: msg_tx.clone(),
             paths,
@@ -205,24 +272,21 @@ impl EffectRunner {
             llm_max_input_bytes: None,
             prompt_registry: Arc::new(RwLock::new(PromptRegistry::with_defaults())),
             llm_metadata_models: HashMap::new(),
-            llm_provider: None,
-            llm_default_provider: None,
             platform_handler,
-            entity_index_worker_tx: worker_tx,
+            result_sink,
+            persistence_sink,
+            file_write_observer: None,
         };
         runner.spawn_event_loop(msg_tx);
         runner
     }
 
-    /// Block until all pending entity-index upserts have been written to disk.
-    /// Only available in test builds for deterministic verification.
-    #[cfg(test)]
-    pub fn flush_entity_index_queue(&self) {
-        let (done_tx, done_rx) = mpsc::sync_channel(0);
-        let _ = self
-            .entity_index_worker_tx
-            .send(EntityIndexWorkerMsg::Flush { done: done_tx });
-        let _ = done_rx.recv();
+    pub fn with_result_sink(mut self, sink: Box<dyn crate::result_sink::ResultSink>) -> Self {
+        self.result_sink = sink;
+        self
+    }
+    pub fn flush_results(&self) -> std::io::Result<()> {
+        self.result_sink.flush()
     }
 
     pub fn enqueue(&self, effects: Vec<Effect>) {
@@ -248,7 +312,6 @@ impl EffectRunner {
                             stage: map_stage(progress.stage),
                             tokens: progress.tokens,
                             bytes: progress.bytes,
-                            content_preview: progress.content_preview.clone(),
                         });
                     }
                     EngineEvent::JobCompleted { job_id, result } => {
@@ -269,7 +332,6 @@ impl EffectRunner {
                             Ok(outcome) => Msg::JobDone {
                                 job_id,
                                 result: JobResultKind::Success,
-                                content_preview: outcome.content_preview,
                                 extracted_links: outcome.extracted_links,
                                 fetched_utc: outcome.fetched_utc,
                             },
@@ -283,7 +345,6 @@ impl EffectRunner {
                                 Msg::JobDone {
                                     job_id,
                                     result: JobResultKind::Failed { reason },
-                                    content_preview: None,
                                     extracted_links: Vec::new(),
                                     fetched_utc: None,
                                 }
@@ -329,24 +390,6 @@ impl EffectRunner {
                     .map_err(|violation| format!("url policy violation: {}", violation))?;
                 Ok(())
             }
-            Effect::DownloadLinkedPage { url, .. } => {
-                let parsed = url::Url::parse(url)
-                    .map_err(|err| format!("invalid linked page url {}: {}", url, err))?;
-                self.url_policy.check(&parsed).map_err(|violation| {
-                    format!("linked page url policy violation: {}", violation)
-                })?;
-                Ok(())
-            }
-            Effect::DeleteLinkedPage { path, .. } => {
-                let linked_dir = self.paths.output_dir.join("linked");
-                if !is_confined_to(path, &linked_dir) {
-                    return Err(format!(
-                        "delete linked page path violation: {:?} not in {:?}",
-                        path, linked_dir
-                    ));
-                }
-                Ok(())
-            }
             Effect::RequestLlmCompletion { input_content, .. } => {
                 if let Some(max) = self.llm_max_input_bytes {
                     if input_content.len() > max {
@@ -364,48 +407,70 @@ impl EffectRunner {
     }
 
     fn reject_effect(&self, effect: Effect, reason: String) {
-        engine_error!("[effect] Rejected: {:?} â€” {}", effect, reason);
         // Send appropriate failure message based on effect type
         match effect {
             Effect::EnqueueUrl { job_id, .. } => {
+                engine_error!(
+                    "[effect] operation=enqueue job_id={} rejected={}",
+                    job_id,
+                    reason
+                );
                 let _ = self.msg_tx.send(Msg::JobDone {
                     job_id,
                     result: JobResultKind::Failed { reason },
-                    content_preview: None,
                     extracted_links: Vec::new(),
                     fetched_utc: None,
                 });
             }
-            Effect::DownloadLinkedPage {
-                job_id, link_index, ..
+            Effect::RequestLlmCompletion {
+                request_id,
+                prompt_id,
+                ..
             } => {
-                let _ = self.msg_tx.send(Msg::LinkDownloadFailed {
-                    job_id,
-                    link_index,
-                    error: reason,
+                engine_error!(
+                    "[effect] operation=llm request_id={} prompt_id={:?} rejected={}",
+                    request_id,
+                    prompt_id,
+                    reason
+                );
+                let _ = self.msg_tx.send(Msg::LlmCompleted {
+                    request_id,
+                    result: harvester_core::LlmResultKind::Failed { reason },
+                    metadata: None,
                 });
             }
-            Effect::DeleteLinkedPage {
-                job_id, link_index, ..
-            } => {
-                // DeleteLinkedPage always sends LinkDeleted even on rejection (path confinement check happens here)
-                let _ = self.msg_tx.send(Msg::LinkDeleted { job_id, link_index });
-            }
             _ => {
-                // For other effects, log the rejection without sending a message
+                engine_error!("[effect] rejected={}", reason);
             }
         }
     }
 }
 
+pub(super) fn observe_file_write(
+    observer: &Option<FileWriteObserver>,
+    path: &Path,
+    elapsed: Duration,
+) {
+    if let Some(observer) = observer {
+        let bytes = std::fs::metadata(path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        observer(path, bytes, elapsed);
+    }
+}
+
 impl Drop for EffectRunner {
     fn drop(&mut self) {
+        if let Err(error) = self.flush_results() {
+            engine_error!("[results] runner drop flush failed: {}", error);
+        }
         engine_info!("[effect] EffectRunner dropped, stopping engine");
-        self.engine.stop(false);
-        // `entity_index_worker_tx` is dropped here, closing the channel.
-        // The worker thread sees RecvError and exits cleanly.
+        self.engine.stop(true);
     }
 }
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod restart_tests;

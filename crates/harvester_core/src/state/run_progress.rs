@@ -1,5 +1,5 @@
 use super::AppState;
-use crate::{PipelineActivity, PipelineRunPhase, RunCompletionNotice, RunProgress};
+use crate::{PipelineActivity, PipelineRunPhase, RunCompletionNotice, RunProgress, RunState};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PollPipelineJobSnapshot {
@@ -9,21 +9,88 @@ pub(crate) struct PollPipelineJobSnapshot {
 }
 
 impl AppState {
+    pub fn pipeline_waves(&self) -> &crate::PipelineWaves {
+        &self.pipeline_waves
+    }
+
+    pub fn pipeline_run_armed(&self) -> bool {
+        self.run_progress_is_active() && self.pipeline_admission.as_ref().is_some_and(|r| r.armed)
+    }
+
+    pub(crate) fn pipeline_ready(&self) -> bool {
+        self.pipeline_run_armed()
+            && self
+                .pipeline_admission
+                .as_ref()
+                .is_some_and(|r| r.configured)
+    }
     pub fn pipeline_run_phase(&self) -> PipelineRunPhase {
         self.pipeline_run_phase
+    }
+
+    pub fn run_state(&self) -> RunState {
+        if self.pipeline_run_phase == PipelineRunPhase::Stopping
+            || self.session == crate::SessionState::Finishing
+        {
+            return RunState::Stopping {
+                in_flight: self.stopping_in_flight_count(),
+            };
+        }
+        if self.run_progress_is_active() {
+            RunState::Active
+        } else {
+            RunState::Idle
+        }
+    }
+
+    /// Export depends only on whether a pipeline run is working or draining.
+    pub fn export_available(&self) -> bool {
+        matches!(self.run_state(), RunState::Idle)
+    }
+
+    fn stopping_in_flight_count(&self) -> usize {
+        let batch = self.batch_observation();
+        let started_downloads = self.run_progress.as_ref().map_or(0, |run| {
+            run.download_started_job_ids
+                .difference(&run.download_finished_job_ids)
+                .count()
+        });
+        started_downloads
+            + self.article_model_requests_in_flight()
+            + usize::from(batch.poll_in_progress)
+            + usize::from(self.pipeline_activity().intake_refresh_pending)
+            + usize::from(batch.import_in_flight)
     }
 
     pub fn run_progress(&self) -> Option<&RunProgress> {
         self.run_progress.as_ref()
     }
 
+    /// Read-only progress snapshot, without building the rest of the desktop view.
+    pub fn run_progress_view(&self) -> crate::RunProgressView {
+        self.run_progress
+            .as_ref()
+            .map_or_else(Default::default, RunProgress::view)
+    }
+
     pub fn run_completion_notice(&self) -> Option<&RunCompletionNotice> {
         self.run_completion_notice.as_ref()
+    }
+
+    /// Notice recorded when the current run first admits its prior window.
+    pub fn reprocess_notice(&self) -> Option<(usize, u64)> {
+        self.pipeline_admission
+            .as_ref()
+            .and_then(|run| run.reprocess_notice)
     }
 
     pub fn pipeline_activity(&self) -> PipelineActivity {
         let batch = self.batch_observation();
         PipelineActivity {
+            intake_refresh_pending: self.pre_triage_refresh_eval_pending
+                || self.processing_start.is_some()
+                || self.pre_triage_coordinator.refresh_pending()
+                || self.triage_in_flight_request_id().is_some(),
             poll_in_progress: usize::from(batch.poll_in_progress),
             jobs_pending_or_in_flight: batch.jobs_in_flight,
             pre_triage_loading: usize::from(matches!(
@@ -37,6 +104,21 @@ impl AppState {
             briefing_active: usize::from(self.briefing.is_active()),
             import_in_flight: usize::from(batch.import_in_flight),
         }
+    }
+
+    /// Outstanding side effects, excluding admitted work that has yet to dispatch.
+    /// Hosts use this to distinguish quiet operations from stalled orchestration.
+    pub fn pipeline_has_in_flight_work(&self) -> bool {
+        self.source_states.is_poll_in_progress()
+            || self.jobs.values().any(|job| job.outcome.is_none())
+            || self.import_session.phase == crate::ImportPhase::Importing
+            || self.triage_in_flight_request_id().is_some()
+            || self
+                .processing_start
+                .as_ref()
+                .is_some_and(|start| start.configuration_request.is_some())
+            || self.pending_llm_request_ids().next().is_some()
+            || matches!(self.briefing.phase(), crate::BriefingPhase::LoadingArticles)
     }
 
     pub(crate) fn run_progress_mut(&mut self) -> Option<&mut RunProgress> {
@@ -61,12 +143,17 @@ impl AppState {
         self.pipeline_run_phase = phase;
     }
 
-    pub(crate) fn reduced_message_seq(&self) -> u64 {
-        self.reduced_message_seq
-    }
-
-    pub(crate) fn note_reduced_work_message(&mut self) {
-        self.reduced_message_seq = self.reduced_message_seq.wrapping_add(1);
+    pub(crate) fn pipeline_intake_open(&self) -> bool {
+        self.pipeline_run_phase != PipelineRunPhase::Stopping
+            && !matches!(
+                self.session,
+                crate::SessionState::Finishing | crate::SessionState::Finished
+            )
+            && (!self.run_progress_is_active()
+                || self
+                    .pipeline_admission
+                    .as_ref()
+                    .is_none_or(|run| run.intake_open))
     }
 
     pub(crate) fn set_run_completion_notice(&mut self, notice: RunCompletionNotice) {

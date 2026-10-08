@@ -4,6 +4,7 @@ use harvester_core::{
     update, AppState, Effect, LlmRequestState, LlmResultKind, Msg, SessionState, StopPolicy,
 };
 use harvester_engine::llm::prompt::PromptId;
+use harvester_engine::{ExtractedLink, LinkKind};
 
 fn init_logging() {
     static INIT: Once = Once::new();
@@ -24,10 +25,15 @@ fn urls_pasted_trims_and_ignores_empty() {
     let (next, effects) = submit_urls(state, input);
     let view = next.view();
 
-    assert_eq!(view.session, SessionState::Running);
-    assert_eq!(view.queued_urls, Vec::<String>::new());
+    assert_eq!(
+        next.batch_observation().session_state,
+        SessionState::Running
+    );
     assert_eq!(view.job_count, 2);
-    assert!(view.dirty);
+    assert!({
+        let mut state = next.clone();
+        state.consume_dirty()
+    });
     assert_eq!(
         effects,
         vec![
@@ -55,8 +61,19 @@ fn stop_finish_moves_running_to_finishing() {
     let (state, _effects) = submit_urls(state, "https://example.com\n");
     let (state, _effects) = update(state, Msg::StopFinishClicked);
 
-    assert_eq!(state.view().session, SessionState::Finishing);
-    assert!(state.view().dirty);
+    assert_eq!(
+        state.batch_observation().session_state,
+        SessionState::Finishing
+    );
+    assert_eq!(
+        state.view().run_state,
+        harvester_core::RunState::Stopping { in_flight: 0 }
+    );
+    assert!(!state.view().archive_enabled);
+    assert!({
+        let mut snapshot = state.clone();
+        snapshot.consume_dirty()
+    });
 }
 
 #[test]
@@ -68,9 +85,22 @@ fn stop_finish_emits_effect() {
 
     assert_eq!(
         effects,
-        vec![Effect::StopFinish {
-            policy: StopPolicy::Finish
-        }]
+        vec![
+            Effect::StopFinish {
+                policy: StopPolicy::Finish
+            },
+            Effect::FlushResults,
+            Effect::PersistRuntimeState {
+                snapshot: harvester_core::PersistenceSnapshot {
+                    fetch_time_recovery_done: false,
+                    job_list_mode: Some(Default::default()),
+                    selected_article_url: None,
+                    completed: Vec::new(),
+                    pending_intake: vec!["https://example.com".to_string()],
+                    blacklist: Default::default(),
+                }
+            }
+        ]
     );
 }
 
@@ -83,24 +113,53 @@ fn stop_finish_click_is_ignored_after_work_has_already_settled() {
 
     let (next, effects) = update(state, Msg::StopFinishClicked);
 
-    assert_eq!(next.view().session, SessionState::Finishing);
+    assert_eq!(
+        next.batch_observation().session_state,
+        SessionState::Finishing
+    );
     assert!(effects.is_empty());
 }
 
 #[test]
-fn urls_pasted_ignored_while_finishing() {
+fn urls_pasted_again_after_stop_drain() {
     init_logging();
     let state = AppState::new();
     let (state, _effects) = submit_urls(state, "https://example.com\n");
-    let (mut state, _effects) = update(state, Msg::StopFinishClicked);
+    let (state, _effects) = update(state, Msg::StopFinishClicked);
+    let job_count = state.view().job_count;
+    let (state, during_drain) = submit_urls(state, "https://a.example.com\n");
+    assert!(during_drain.is_empty());
+    assert_eq!(state.view().job_count, job_count);
+    let (mut state, _) = update(
+        state,
+        Msg::JobDone {
+            job_id: 1,
+            result: harvester_core::JobResultKind::Failed {
+                reason: "cancelled from Stop queue drain".into(),
+            },
+
+            extracted_links: Vec::new(),
+            fetched_utc: None,
+        },
+    );
+    assert_eq!(state.batch_observation().session_state, SessionState::Idle);
+    assert_eq!(state.view().run_state, harvester_core::RunState::Idle);
     assert!(state.consume_dirty());
 
-    let (mut next, effects) = submit_urls(state, "https://a.example.com\n");
+    let (next, effects) = submit_urls(state, "https://a.example.com\n");
 
-    assert_eq!(next.view().session, SessionState::Finishing);
-    assert_eq!(next.view().job_count, 1);
-    assert!(effects.is_empty());
-    assert!(!next.consume_dirty());
+    assert_eq!(
+        next.batch_observation().session_state,
+        SessionState::Running
+    );
+    assert_eq!(next.view().job_count, 2);
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::EnqueueUrl {
+            job_id: 2,
+            url
+        } if url == "https://a.example.com"
+    )));
 }
 
 #[test]
@@ -109,12 +168,18 @@ fn urls_pasted_while_running_stays_running() {
     let state = AppState::new();
     // First paste: Idle -> Running
     let (state, effects) = submit_urls(state, "https://first.example.com\n");
-    assert_eq!(state.view().session, SessionState::Running);
+    assert_eq!(
+        state.batch_observation().session_state,
+        SessionState::Running
+    );
     assert_eq!(effects.len(), 2); // StartSession + EnqueueUrl
 
     // Second paste while Running: should stay Running, no StartSession
     let (state, effects) = submit_urls(state, "https://second.example.com\n");
-    assert_eq!(state.view().session, SessionState::Running);
+    assert_eq!(
+        state.batch_observation().session_state,
+        SessionState::Running
+    );
     assert_eq!(state.view().job_count, 2);
     assert_eq!(
         effects,
@@ -229,16 +294,52 @@ fn archive_click_emits_effect_without_state_change() {
 }
 
 fn send_llm_request_with_context(state: AppState) -> (AppState, Vec<Effect>) {
-    update(
+    let (state, _) = update(
         state,
-        Msg::RequestLlmCompletion {
-            prompt_id: PromptId::ArticleTriage,
-            prompt_version: Some(1),
-            model_override: None,
-            input_content: "llm input".to_string(),
-            context: vec![("key".to_string(), "value".to_string())],
-            template_override: None,
+        Msg::LlmMetadataLoaded {
+            active_versions: [(PromptId::ArticleTriage, 1)].into(),
+            effective_models: [(PromptId::ArticleTriage, "test-model".into())].into(),
         },
+    );
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Resume,
+        },
+    );
+    let (state, effects) =
+        harvester_core::fixture_support::complete_processing_configuration(state, effects, 100_000);
+    let request_id = effects
+        .iter()
+        .find_map(|e| match e {
+            Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+            _ => None,
+        })
+        .expect("preparation request");
+    let articles = (0..2)
+        .map(|index| harvester_core::LoadedArticle {
+            url: format!("https://example.com/{index}"),
+            source_title: None,
+            prepared_text: std::iter::repeat_n("content", 220)
+                .collect::<Vec<_>>()
+                .join(" "),
+            content_hash: format!("hash-{index}"),
+            fetched_utc: None,
+        })
+        .collect();
+    let (state, effects) = update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
+        },
+    );
+    (
+        state,
+        effects
+            .into_iter()
+            .filter(|e| matches!(e, Effect::RequestLlmCompletion { .. }))
+            .collect(),
     )
 }
 
@@ -269,7 +370,7 @@ fn llm_completed_success_updates_state() {
     init_logging();
     let (state, effects) = send_llm_request_with_context(AppState::new());
     let request_id = extract_request_id(&effects[0]);
-    let json = "{\"ok\":true}".to_string();
+    let json = r#"{"category":"news","priority":1,"tags":[],"rationale":"ok"}"#.to_string();
     let (state, effects) = update(
         state,
         Msg::LlmCompleted {
@@ -284,7 +385,9 @@ fn llm_completed_success_updates_state() {
             metadata: None,
         },
     );
-    assert!(effects.is_empty());
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, Effect::SaveResults { .. })));
     assert_eq!(
         state.llm_request_state(request_id),
         Some(&LlmRequestState::Completed {
@@ -317,7 +420,78 @@ fn request_ids_monotonically_increase() {
     init_logging();
     let (state, effects_a) = send_llm_request_with_context(AppState::new());
     let request_id_a = extract_request_id(&effects_a[0]);
-    let (_state, effects_b) = send_llm_request_with_context(state);
+    let (_state, effects_b) = update(
+        state,
+        Msg::LlmCompleted {
+            request_id: request_id_a,
+            result: LlmResultKind::Failed {
+                reason: "fixture".into(),
+            },
+            metadata: None,
+        },
+    );
     let request_id_b = extract_request_id(&effects_b[0]);
     assert!(request_id_b > request_id_a);
+}
+
+#[test]
+fn extracted_links_do_not_bypass_stop_intake_drain() {
+    init_logging();
+    let (state, _) = submit_urls(
+        AppState::new(),
+        "https://source.example/article\nhttps://pending.example/article\n",
+    );
+    let (state, _) = update(
+        state,
+        Msg::JobDone {
+            job_id: 1,
+            result: harvester_core::JobResultKind::Success,
+            extracted_links: vec![ExtractedLink {
+                url: "https://linked.example/article/one".into(),
+                text: None,
+                kind: LinkKind::Hyperlink,
+            }],
+            fetched_utc: None,
+        },
+    );
+    let (state, _) = update(state, Msg::StopFinishClicked);
+    assert!(matches!(
+        state.view().run_state,
+        harvester_core::RunState::Stopping { .. }
+    ));
+    let job_count = state.view().job_count;
+    let (_, open_effects) = update(
+        state.clone(),
+        Msg::ExtractedLinkOpenRequested {
+            job_id: 1,
+            link_index: 0,
+        },
+    );
+    assert_eq!(
+        open_effects,
+        vec![Effect::OpenUrlInBrowser {
+            url: "https://linked.example/article/one".into()
+        }]
+    );
+    let (state, effects) = submit_urls(state, "https://linked.example/article/one");
+    assert!(effects.is_empty());
+    assert_eq!(state.view().job_count, job_count);
+    let (state, _) = update(
+        state,
+        Msg::JobDone {
+            job_id: 2,
+            result: harvester_core::JobResultKind::Failed {
+                reason: "cancelled from Stop queue drain".into(),
+            },
+            extracted_links: Vec::new(),
+            fetched_utc: None,
+        },
+    );
+    let (state, effects) = submit_urls(state, "https://linked.example/article/one");
+    assert_eq!(state.view().job_count, job_count + 1);
+    assert!(matches!(effects.first(), Some(Effect::StartSession)));
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::EnqueueUrl { url, .. } if url == "https://linked.example/article/one"
+    )));
 }

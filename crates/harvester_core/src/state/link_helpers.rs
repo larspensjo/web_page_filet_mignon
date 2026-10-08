@@ -28,80 +28,15 @@ pub(super) fn normalize_extracted_link(link: &str) -> String {
     }
 }
 
-pub(super) fn format_lab_triage_markdown(output_json: &str) -> String {
-    use harvester_engine::llm::validation::validate_triage;
-
-    match validate_triage(output_json) {
-        Ok(result) => {
-            let triage = crate::triage::ArticleTriageResult {
-                category: result.category,
-                priority: result.priority.value(),
-                tags: result.tags,
-                rationale: result.rationale,
-                input_tokens: 0,
-                output_tokens: 0,
-            };
-            let formatted = crate::preview::format_triage_for_preview(None, &triage);
-            format!("*Prompt Lab preview*\n\n{formatted}")
-        }
-        Err(_) => format!("**\\[Lab Triage\\]**\n\n```json\n{output_json}\n```\n"),
-    }
-}
-
-pub(super) fn format_lab_summary_markdown(output_json: &str) -> String {
-    use harvester_engine::llm::validation::validate_summary;
-
-    match validate_summary(output_json) {
-        Ok(result) => {
-            let kp_lines: String = result
-                .key_points
-                .iter()
-                .map(|kp| format!("- {kp}\n"))
-                .collect();
-            format!(
-                "# \\[Lab\\] {}\n\n{}\n\n**Key Points:**\n\n{}\n",
-                result.title, result.summary, kp_lines
-            )
-        }
-        Err(_) => format!("**\\[Lab Summary\\]**\n\n```json\n{output_json}\n```\n"),
-    }
-}
-
-pub(super) fn format_lab_briefing_markdown(output_json: &str) -> String {
-    format!("**\\[Lab Briefing\\]**\n\n```json\n{output_json}\n```\n")
-}
-
-pub(super) fn domain_from_url(url: &str) -> String {
-    let trimmed = url.trim();
-    let without_scheme = trimmed
-        .find("://")
-        .map(|pos| &trimmed[pos + 3..])
-        .unwrap_or(trimmed);
-    let host = without_scheme
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or(without_scheme)
-        .trim_end_matches('/');
-    if host.is_empty() {
-        trimmed.to_string()
-    } else {
-        host.to_string()
-    }
-}
-
 pub(super) fn map_job_filter_status(entry: &crate::ArticleFilterEntry) -> JobFilterStatus {
-    match entry.manual_decision {
-        Some(crate::ManualDecision::Exclude) => JobFilterStatus::ManuallyExcluded,
-        Some(crate::ManualDecision::Include) => JobFilterStatus::ManuallyIncluded,
-        None => match entry.auto_verdict {
-            crate::AutoVerdict::HardExclude => JobFilterStatus::HardExcluded {
-                reasons: entry.reasons.clone(),
-            },
-            crate::AutoVerdict::Review => JobFilterStatus::ReviewNeeded {
-                reasons: entry.reasons.clone(),
-            },
-            crate::AutoVerdict::Include => JobFilterStatus::AutoIncluded,
+    match entry.auto_verdict {
+        crate::AutoVerdict::HardExclude => JobFilterStatus::HardExcluded {
+            reasons: entry.reasons.clone(),
         },
+        crate::AutoVerdict::Review => JobFilterStatus::ReviewNeeded {
+            reasons: entry.reasons.clone(),
+        },
+        crate::AutoVerdict::Include => JobFilterStatus::AutoIncluded,
     }
 }
 
@@ -114,8 +49,6 @@ pub(super) fn build_link_rows(records: &[LinkRecord]) -> Vec<LinkRowView> {
             url: record.url.clone(),
             label: link_label_for_record(record),
             kind: record.kind.clone(),
-            download_state: record.download_state.clone(),
-            age_suspect: record.age_estimate.is_some(),
         })
         .collect()
 }

@@ -3,15 +3,13 @@ use std::path::Path;
 
 use harvester_engine::llm::{PromptId, PromptRegistry};
 use harvester_engine::{
-    build_markdown_document, compute_prompt_overhead, load_and_prepare_articles,
-    load_and_prepare_articles_filtered, load_and_prepare_articles_filtered_with_progress,
-    WhitespaceTokenCounter,
+    build_markdown_document, compute_prompt_overhead, ArticleScanProgress, CorpusScanIndex,
+    LoadedArticle, WhitespaceTokenCounter,
 };
 use tempfile::tempdir;
 
 const ENCODING: &str = "utf-8";
 const FETCHED: &str = "2026-02-09T00:00:00Z";
-const COLLECTION_MIN_BYTES: usize = 64;
 
 fn write_markdown_file(
     dir: &Path,
@@ -35,14 +33,12 @@ fn prompt_registry_with_defaults() -> PromptRegistry {
 fn empty_directory_returns_no_articles() {
     let registry = prompt_registry_with_defaults();
     let tmp = tempdir().unwrap();
-    let (articles, collection) =
-        load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
+    let articles = scan_articles(tmp.path(), 10_000, &registry, None).unwrap();
     assert!(articles.is_empty());
-    assert!(collection.is_empty());
 }
 
 #[test]
-fn single_article_is_loaded_and_in_collection() {
+fn single_article_is_loaded_and_prepared() {
     let registry = prompt_registry_with_defaults();
     let tmp = tempdir().unwrap();
     write_markdown_file(
@@ -53,12 +49,11 @@ fn single_article_is_loaded_and_in_collection() {
         "body text sentinel",
     );
 
-    let (articles, collection) =
-        load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
+    let articles = scan_articles(tmp.path(), 10_000, &registry, None).unwrap();
 
     assert_eq!(articles.len(), 1);
     assert_eq!(articles[0].url, "https://example.com/1");
-    assert!(collection.contains("body text sentinel"));
+    assert!(articles[0].prepared_text.contains("body text sentinel"));
 }
 
 #[test]
@@ -67,7 +62,7 @@ fn non_md_files_are_skipped() {
     let tmp = tempdir().unwrap();
     fs::write(tmp.path().join("note.txt"), "irrelevant").unwrap();
 
-    let (articles, _) = load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
+    let articles = scan_articles(tmp.path(), 10_000, &registry, None).unwrap();
     assert!(articles.is_empty());
 }
 
@@ -85,7 +80,7 @@ fn linked_directory_is_not_scanned() {
         "body",
     );
 
-    let (articles, _) = load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
+    let articles = scan_articles(tmp.path(), 10_000, &registry, None).unwrap();
     assert!(articles.is_empty());
 }
 
@@ -95,7 +90,7 @@ fn files_without_frontmatter_are_skipped() {
     let tmp = tempdir().unwrap();
     fs::write(tmp.path().join("orphan.md"), "just a body").unwrap();
 
-    let (articles, _) = load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
+    let articles = scan_articles(tmp.path(), 10_000, &registry, None).unwrap();
     assert!(articles.is_empty());
 }
 
@@ -112,7 +107,7 @@ fn valid_files_do_not_prevent_others_from_loading() {
     );
     fs::write(tmp.path().join("bad.md"), "no frontmatter").unwrap();
 
-    let (articles, _) = load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
+    let articles = scan_articles(tmp.path(), 10_000, &registry, None).unwrap();
     assert_eq!(articles.len(), 1);
 }
 
@@ -122,12 +117,8 @@ fn prepared_text_is_within_summary_budget() {
     let summary_template = registry
         .active(PromptId::ArticleSummary)
         .expect("summary prompt missing");
-    let briefing_template = registry
-        .active(PromptId::AggregateBriefing)
-        .expect("briefing prompt missing");
     let summary_overhead = compute_prompt_overhead(summary_template, "content", &[]);
-    let briefing_overhead = compute_prompt_overhead(briefing_template, "collection", &[]);
-    let max_input = summary_overhead + briefing_overhead + 5_000;
+    let max_input = summary_overhead + 5_000;
 
     let tmp = tempdir().unwrap();
     write_markdown_file(
@@ -138,93 +129,9 @@ fn prepared_text_is_within_summary_budget() {
         "body",
     );
 
-    let (articles, _) = load_and_prepare_articles(tmp.path(), max_input, &registry, None).unwrap();
+    let articles = scan_articles(tmp.path(), max_input, &registry, None).unwrap();
     let summary_budget = max_input - summary_overhead;
     assert!(articles[0].prepared_text.len() <= summary_budget);
-}
-
-#[test]
-fn collection_text_respects_collection_budget() {
-    let registry = prompt_registry_with_defaults();
-    let summary_template = registry
-        .active(PromptId::ArticleSummary)
-        .expect("summary prompt missing");
-    let briefing_template = registry
-        .active(PromptId::AggregateBriefing)
-        .expect("briefing prompt missing");
-    let summary_overhead = compute_prompt_overhead(summary_template, "content", &[]);
-    let briefing_overhead = compute_prompt_overhead(briefing_template, "collection", &[]);
-    let max_input = summary_overhead + briefing_overhead + 5_000;
-
-    let tmp = tempdir().unwrap();
-    write_markdown_file(
-        tmp.path(),
-        "article.md",
-        "https://example.com/collection",
-        Some("Collection"),
-        "body",
-    );
-
-    let (_, collection) =
-        load_and_prepare_articles(tmp.path(), max_input, &registry, None).unwrap();
-    let collection_budget = max_input - briefing_overhead;
-    assert!(collection.len() <= collection_budget);
-}
-
-#[test]
-fn collection_limits_articles_when_budget_tight() {
-    let mut registry = prompt_registry_with_defaults();
-    // Pin prompt versions so this budget-shaping test does not depend on evolving defaults.
-    registry.set_active(PromptId::ArticleSummary, 1);
-    registry.set_active(PromptId::AggregateBriefing, 1);
-    let summary_template = registry
-        .active(PromptId::ArticleSummary)
-        .expect("summary prompt missing");
-    let briefing_template = registry
-        .active(PromptId::AggregateBriefing)
-        .expect("briefing prompt missing");
-    let summary_overhead = compute_prompt_overhead(summary_template, "content", &[]);
-    let briefing_overhead = compute_prompt_overhead(briefing_template, "collection", &[]);
-    let max_input = summary_overhead + briefing_overhead + COLLECTION_MIN_BYTES;
-
-    let tmp = tempdir().unwrap();
-    const TOTAL_ARTICLES: usize = 20;
-    for i in 0..TOTAL_ARTICLES {
-        write_markdown_file(
-            tmp.path(),
-            &format!("article_{i:02}.md"),
-            &format!("https://example.com/{i:02}"),
-            Some(&format!("Budget {i:02}")),
-            &format!("body article {i:02}"),
-        );
-    }
-
-    let (articles, collection) =
-        load_and_prepare_articles(tmp.path(), max_input, &registry, None).unwrap();
-    assert_eq!(articles.len(), TOTAL_ARTICLES);
-    let selected_articles = (0..TOTAL_ARTICLES)
-        .filter(|i| collection.contains(&format!("body article {i:02}")))
-        .count();
-    assert!(
-        selected_articles >= 1,
-        "collection should include at least one article"
-    );
-    assert!(
-        selected_articles < TOTAL_ARTICLES,
-        "collection should drop articles when budget is tight"
-    );
-    for i in 0..selected_articles {
-        assert!(
-            collection.contains(&format!("body article {i:02}")),
-            "collection should keep the selected prefix"
-        );
-    }
-    for i in selected_articles..TOTAL_ARTICLES {
-        assert!(
-            !collection.contains(&format!("body article {i:02}")),
-            "collection should drop articles after the selected prefix"
-        );
-    }
 }
 
 #[test]
@@ -247,8 +154,7 @@ fn filtered_loader_includes_only_selected_urls() {
     );
 
     let selected = vec!["https://example.com/b".to_string()];
-    let (articles, _) =
-        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected, None).unwrap();
+    let articles = scan_selected(tmp.path(), 10_000, &registry, &selected, None).unwrap();
 
     assert_eq!(articles.len(), 1);
     assert_eq!(articles[0].url, "https://example.com/b");
@@ -277,8 +183,7 @@ fn filtered_loader_preserves_caller_order() {
         "https://example.com/b".to_string(),
         "https://example.com/a".to_string(),
     ];
-    let (articles, _) =
-        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected, None).unwrap();
+    let articles = scan_selected(tmp.path(), 10_000, &registry, &selected, None).unwrap();
 
     assert_eq!(articles.len(), 2);
     assert_eq!(articles[0].url, "https://example.com/b");
@@ -301,64 +206,10 @@ fn filtered_loader_missing_selected_url_is_skipped() {
         "https://example.com/missing".to_string(),
         "https://example.com/a".to_string(),
     ];
-    let (articles, _) =
-        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected, None).unwrap();
+    let articles = scan_selected(tmp.path(), 10_000, &registry, &selected, None).unwrap();
 
     assert_eq!(articles.len(), 1);
     assert_eq!(articles[0].url, "https://example.com/a");
-}
-
-#[test]
-fn filtered_loader_budget_trimming_drops_tail_only() {
-    let mut registry = prompt_registry_with_defaults();
-    // Pin prompt versions so this budget-shaping test does not depend on evolving defaults.
-    registry.set_active(PromptId::ArticleSummary, 1);
-    registry.set_active(PromptId::AggregateBriefing, 1);
-    let summary_template = registry
-        .active(PromptId::ArticleSummary)
-        .expect("summary prompt missing");
-    let briefing_template = registry
-        .active(PromptId::AggregateBriefing)
-        .expect("briefing prompt missing");
-    let summary_overhead = compute_prompt_overhead(summary_template, "content", &[]);
-    let briefing_overhead = compute_prompt_overhead(briefing_template, "collection", &[]);
-    let max_input = summary_overhead + briefing_overhead + COLLECTION_MIN_BYTES;
-
-    let tmp = tempdir().unwrap();
-    let mut selected = Vec::new();
-    for idx in 0..20 {
-        let url = format!("https://example.com/{idx:02}");
-        write_markdown_file(
-            tmp.path(),
-            &format!("article_{idx:02}.md"),
-            &url,
-            Some(&format!("Title {idx}")),
-            &format!("body article {idx:02}"),
-        );
-        selected.push(url);
-    }
-    let (articles, collection) =
-        load_and_prepare_articles_filtered(tmp.path(), max_input, &registry, &selected, None)
-            .unwrap();
-
-    assert_eq!(articles.len(), selected.len());
-    let selected_articles = (0..selected.len())
-        .filter(|idx| collection.contains(&format!("body article {idx:02}")))
-        .count();
-    assert!(selected_articles >= 1);
-    assert!(selected_articles < selected.len());
-    for idx in 0..selected_articles {
-        assert!(
-            collection.contains(&format!("body article {idx:02}")),
-            "collection should keep the selected prefix"
-        );
-    }
-    for idx in selected_articles..selected.len() {
-        assert!(
-            !collection.contains(&format!("body article {idx:02}")),
-            "collection should drop the tail after budget trimming"
-        );
-    }
 }
 
 #[test]
@@ -373,11 +224,9 @@ fn filtered_loader_empty_selection_returns_empty_result() {
         "body a",
     );
 
-    let (articles, collection) =
-        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &[], None).unwrap();
+    let articles = scan_selected(tmp.path(), 10_000, &registry, &[], None).unwrap();
 
     assert!(articles.is_empty());
-    assert!(collection.is_empty());
 }
 
 #[test]
@@ -395,8 +244,7 @@ fn filtered_loader_matches_www_and_eu_host_variants() {
 
     let selected =
         vec!["https://www.detroitnews.com/story/business/2026/02/14/example/".to_string()];
-    let (articles, _) =
-        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected, None).unwrap();
+    let articles = scan_selected(tmp.path(), 10_000, &registry, &selected, None).unwrap();
 
     assert_eq!(articles.len(), 1);
     assert_eq!(articles[0].url, article_url);
@@ -415,8 +263,7 @@ fn filtered_loader_matches_normalized_url_shape() {
     );
 
     let selected = vec!["HTTPS://EXAMPLE.COM:443/news/item/".to_string()];
-    let (articles, _) =
-        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected, None).unwrap();
+    let articles = scan_selected(tmp.path(), 10_000, &registry, &selected, None).unwrap();
 
     assert_eq!(articles.len(), 1);
     assert_eq!(articles[0].url, "https://example.com/news/item");
@@ -430,8 +277,7 @@ fn filtered_loader_matches_mobile_and_query_variants() {
     write_markdown_file(tmp.path(), "economics.md", article_url, Some("ET"), "body");
 
     let selected = vec!["https://m.economictimes.com/ai/story?from=mdr".to_string()];
-    let (articles, _) =
-        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected, None).unwrap();
+    let articles = scan_selected(tmp.path(), 10_000, &registry, &selected, None).unwrap();
 
     assert_eq!(articles.len(), 1);
     assert_eq!(articles[0].url, article_url);
@@ -445,8 +291,7 @@ fn filtered_loader_matches_http_https_and_edition_variants() {
     write_markdown_file(tmp.path(), "cnn.md", cnn_url, Some("CNN"), "body");
 
     let selected = vec!["http://www.cnn.com/2026/02/24/tech/example".to_string()];
-    let (articles, _) =
-        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected, None).unwrap();
+    let articles = scan_selected(tmp.path(), 10_000, &registry, &selected, None).unwrap();
 
     assert_eq!(articles.len(), 1);
     assert_eq!(articles[0].url, cnn_url);
@@ -462,56 +307,55 @@ fn filtered_loader_matches_cisco_content_path_alias() {
     let selected = vec![
         "https://newsroom.cisco.com/content/r/newsroom/en/us/a/y2026/m02/example.html".to_string(),
     ];
-    let (articles, _) =
-        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected, None).unwrap();
+    let articles = scan_selected(tmp.path(), 10_000, &registry, &selected, None).unwrap();
 
     assert_eq!(articles.len(), 1);
     assert_eq!(articles[0].url, article_url);
 }
 
-#[test]
-fn filtered_loader_single_selection_ignores_unrelated_invalid_markdown() {
-    let registry = prompt_registry_with_defaults();
-    let tmp = tempdir().unwrap();
-    write_markdown_file(
-        tmp.path(),
-        "a.md",
-        "https://example.com/a",
-        Some("A"),
-        "body a",
-    );
-    fs::write(tmp.path().join("z-invalid.md"), [0xFF, 0xFE, 0xFD]).unwrap();
-
-    let selected = vec!["https://example.com/a".to_string()];
-    let (articles, _) =
-        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected, None).unwrap();
-
-    assert_eq!(articles.len(), 1);
-    assert_eq!(articles[0].url, "https://example.com/a");
-}
-
-/// Archive files (multi-doc format, starting with `===== DOC START =====`) live in the same
-/// output directory as articles. The scan must skip them without preventing valid articles
-/// from loading.
+/// Archive files in either legacy shape or schema 2 live beside articles. The scan must skip
+/// them without preventing valid articles from loading.
 #[test]
 fn archive_format_file_in_output_dir_does_not_block_article_scan() {
     let registry = prompt_registry_with_defaults();
-    let tmp = tempdir().unwrap();
-    write_markdown_file(
-        tmp.path(),
-        "article.md",
-        "https://example.com/article",
-        Some("Article"),
-        "body text",
-    );
-    // Simulate an archive file: starts with the multi-doc separator, not a frontmatter block.
-    let archive_content = "===== DOC START =====\n---\nurl: \"https://example.com/old\"\ntitle: \"Old\"\n---\n\nold body\n";
-    fs::write(tmp.path().join("archive.md"), archive_content).unwrap();
+    let cases: [(&str, &[u8]); 4] = [
+        (
+            "legacy raw copy",
+            b"===== DOC START =====\n---\nurl: \"https://example.com/old\"\ntitle: \"Old\"\n---\n\nold body\n",
+        ),
+        (
+            "legacy summary header",
+            b"===== DOC START =====\nurl: https://example.com/old\ntitle: Old\ntokens: 1\nfetched_utc: 2026-01-01T00:00:00Z\nfilename: old.md\ncontent: summary\n\nold summary\n===== DOC END =====\n",
+        ),
+        (
+            "schema 2 document archive",
+            include_bytes!("fixtures/archive_export/schema2_raw.md"),
+        ),
+        (
+            "schema 2 index-only archive",
+            include_bytes!("fixtures/archive_export/schema2_index_only.md"),
+        ),
+    ];
 
-    let (articles, _) = load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
+    for (case, archive_content) in cases {
+        let tmp = tempdir().unwrap();
+        write_markdown_file(
+            tmp.path(),
+            "article.md",
+            "https://example.com/article",
+            Some("Article"),
+            "body text",
+        );
+        fs::write(tmp.path().join("archive.md"), archive_content).unwrap();
 
-    assert_eq!(articles.len(), 1);
-    assert_eq!(articles[0].url, "https://example.com/article");
+        let articles = scan_articles(tmp.path(), 10_000, &registry, None).unwrap();
+
+        assert_eq!(articles.len(), 1, "case: {case}");
+        assert_eq!(
+            articles[0].url, "https://example.com/article",
+            "case: {case}"
+        );
+    }
 }
 
 /// When `since_utc` is set and all selected URLs belong to articles older than the cutoff,
@@ -534,17 +378,10 @@ fn filtered_loader_selected_urls_older_than_since_utc_produce_empty_result() {
         .parse::<chrono::DateTime<chrono::Utc>>()
         .unwrap();
     let selected = vec!["https://example.com/old".to_string()];
-    let (articles, collection) = load_and_prepare_articles_filtered(
-        tmp.path(),
-        10_000,
-        &registry,
-        &selected,
-        Some(since_utc),
-    )
-    .unwrap();
+    let articles =
+        scan_selected(tmp.path(), 10_000, &registry, &selected, Some(since_utc)).unwrap();
 
     assert!(articles.is_empty());
-    assert!(collection.is_empty());
 }
 
 #[test]
@@ -568,22 +405,52 @@ fn filtered_loader_with_progress_reports_scan_progress() {
 
     let mut progress = Vec::new();
     let selected = vec!["https://example.com/second".to_string()];
-    let (articles, collection) = load_and_prepare_articles_filtered_with_progress(
-        tmp.path(),
-        10_000,
-        &registry,
-        &selected,
-        None,
-        |scan| progress.push(scan),
-    )
-    .unwrap();
+    let articles =
+        scan_selected_with_progress(tmp.path(), 10_000, &registry, &selected, None, |scan| {
+            progress.push(scan)
+        })
+        .unwrap();
 
     assert_eq!(articles.len(), 1);
     assert_eq!(articles[0].url, "https://example.com/second");
-    assert!(collection.contains("second body"));
+    assert!(articles[0].prepared_text.contains("second body"));
     assert!(!progress.is_empty());
     assert_eq!(progress[0].files_scanned, 1);
     assert_eq!(progress[0].files_total, 2);
     assert_eq!(progress.last().unwrap().files_scanned, 2);
     assert_eq!(progress.last().unwrap().files_total, 2);
+}
+
+fn scan_articles(
+    dir: &Path,
+    max: usize,
+    registry: &PromptRegistry,
+    since: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<Vec<LoadedArticle>, String> {
+    let urls = harvester_engine::scan_archive_article_metadata(dir)?
+        .into_iter()
+        .map(|a| a.url)
+        .collect::<Vec<_>>();
+    scan_selected(dir, max, registry, &urls, since)
+}
+fn scan_selected(
+    dir: &Path,
+    max: usize,
+    registry: &PromptRegistry,
+    urls: &[String],
+    since: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<Vec<LoadedArticle>, String> {
+    scan_selected_with_progress(dir, max, registry, urls, since, |_| {})
+}
+fn scan_selected_with_progress(
+    dir: &Path,
+    max: usize,
+    registry: &PromptRegistry,
+    urls: &[String],
+    since: Option<chrono::DateTime<chrono::Utc>>,
+    progress: impl FnMut(ArticleScanProgress),
+) -> Result<Vec<LoadedArticle>, String> {
+    let (delta, _) =
+        CorpusScanIndex::default().load_delta(dir, max, registry, urls, since, &[], progress)?;
+    Ok(delta.articles)
 }

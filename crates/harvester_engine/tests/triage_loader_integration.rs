@@ -3,8 +3,8 @@ use std::path::Path;
 
 use harvester_engine::llm::{PromptId, PromptRegistry};
 use harvester_engine::{
-    build_markdown_document, compute_prompt_overhead, load_and_prepare_articles,
-    load_and_prepare_articles_for_triage, WhitespaceTokenCounter,
+    build_markdown_document, compute_prompt_overhead, CorpusScanIndex, LoadedArticle,
+    WhitespaceTokenCounter,
 };
 use tempfile::tempdir;
 
@@ -22,14 +22,14 @@ fn prompt_registry_with_defaults() -> PromptRegistry {
 }
 
 #[test]
-fn triage_loader_respects_triage_budget() {
+fn triage_loader_respects_shared_summary_budget() {
     let registry = prompt_registry_with_defaults();
-    let triage_template = registry
-        .active(PromptId::ArticleTriage)
-        .expect("triage prompt missing");
-    let triage_overhead = compute_prompt_overhead(triage_template, "content", &[]);
-    let triage_budget = 1_000;
-    let max_input = triage_overhead + triage_budget;
+    let summary_template = registry
+        .active(PromptId::ArticleSummary)
+        .expect("summary prompt missing");
+    let summary_overhead = compute_prompt_overhead(summary_template, "content", &[]);
+    let summary_budget = 1_000;
+    let max_input = summary_overhead + summary_budget;
 
     let tmp = tempdir().unwrap();
     write_markdown_file(
@@ -40,14 +40,14 @@ fn triage_loader_respects_triage_budget() {
         "content",
     );
 
-    let articles = load_and_prepare_articles_for_triage(tmp.path(), max_input, &registry).unwrap();
+    let articles = scan_triage(tmp.path(), max_input, &registry).unwrap();
     assert_eq!(articles.len(), 1);
     let loaded = &articles[0];
-    assert!(loaded.prepared_text.len() <= triage_budget);
+    assert!(loaded.prepared_text.len() <= summary_budget);
 }
 
 #[test]
-fn triage_loader_shared_scanning_matches_briefing() {
+fn triage_loader_shared_scanning_matches_archive_metadata() {
     let registry = prompt_registry_with_defaults();
     let tmp = tempdir().unwrap();
     write_markdown_file(
@@ -59,30 +59,25 @@ fn triage_loader_shared_scanning_matches_briefing() {
     );
     fs::write(tmp.path().join("bad.txt"), "ignore me").unwrap();
 
-    let briefing_articles = load_and_prepare_articles(tmp.path(), 100_000, &registry, None)
-        .unwrap()
-        .0;
-    let triage_articles =
-        load_and_prepare_articles_for_triage(tmp.path(), 100_000, &registry).unwrap();
-    let briefing_urls: Vec<_> = briefing_articles
-        .iter()
-        .map(|article| article.url.clone())
-        .collect();
-    let triage_urls: Vec<_> = triage_articles
-        .iter()
-        .map(|article| article.url.clone())
-        .collect();
-    assert_eq!(briefing_urls, triage_urls);
+    let articles = scan_triage(tmp.path(), 100_000, &registry).unwrap();
+    assert_eq!(articles.len(), 1);
+    assert_eq!(articles[0].url, "https://example.com/good");
+    assert_eq!(
+        harvester_engine::scan_archive_article_metadata(tmp.path()).unwrap()[0]
+            .content_hash
+            .as_deref(),
+        Some(articles[0].content_hash.as_str())
+    );
 }
 
 #[test]
 fn triage_loader_truncates_at_utf8_boundary() {
     let registry = prompt_registry_with_defaults();
-    let triage_template = registry
-        .active(PromptId::ArticleTriage)
-        .expect("triage prompt missing");
-    let triage_overhead = compute_prompt_overhead(triage_template, "content", &[]);
-    let max_input = triage_overhead + 5;
+    let summary_template = registry
+        .active(PromptId::ArticleSummary)
+        .expect("summary prompt missing");
+    let summary_overhead = compute_prompt_overhead(summary_template, "content", &[]);
+    let max_input = summary_overhead + 5;
 
     let tmp = tempdir().unwrap();
     write_markdown_file(
@@ -93,7 +88,7 @@ fn triage_loader_truncates_at_utf8_boundary() {
         "ééééé",
     );
 
-    let articles = load_and_prepare_articles_for_triage(tmp.path(), max_input, &registry).unwrap();
+    let articles = scan_triage(tmp.path(), max_input, &registry).unwrap();
     assert_eq!(articles.len(), 1);
     let prepared = &articles[0].prepared_text;
     assert!(prepared.is_char_boundary(prepared.len()));
@@ -112,11 +107,26 @@ fn triage_loader_mapping_preserves_fields() {
         "body text",
     );
 
-    let articles = load_and_prepare_articles_for_triage(tmp.path(), 100_000, &registry).unwrap();
+    let articles = scan_triage(tmp.path(), 100_000, &registry).unwrap();
     assert_eq!(articles.len(), 1);
     let article = &articles[0];
     assert_eq!(article.url, "https://example.com/mapping");
     assert_eq!(article.source_title.as_deref(), Some("Mapping"));
     assert!(!article.prepared_text.is_empty());
     assert!(!article.content_hash.is_empty());
+}
+
+fn scan_triage(
+    dir: &Path,
+    max: usize,
+    registry: &PromptRegistry,
+) -> Result<Vec<LoadedArticle>, String> {
+    let urls = harvester_engine::scan_archive_article_metadata(dir)?
+        .into_iter()
+        .map(|a| a.url)
+        .collect::<Vec<_>>();
+    Ok(CorpusScanIndex::default()
+        .load_delta(dir, max, registry, &urls, None, &[], |_| {})?
+        .0
+        .articles)
 }

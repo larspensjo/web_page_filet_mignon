@@ -13,7 +13,6 @@ pub const DEFAULT_SELECTION_THRESHOLD: u8 = 60;
 pub enum SignalCandidateState {
     Pending,
     Scoring { request_id: u64 },
-    Deferred,
     Completed { result: SignalCandidateResult },
     Failed { reason: String },
 }
@@ -23,7 +22,6 @@ pub enum SignalCandidateState {
 pub struct SignalCandidateObservationCounts {
     pub total: usize,
     pub pending_or_in_flight: usize,
-    pub deferred: usize,
     pub completed: usize,
     pub failed: usize,
 }
@@ -46,24 +44,114 @@ pub struct OverrideKey {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct SignalExclusions {
+    excluded: HashSet<OverrideKey>,
+}
+
+impl SignalExclusions {
+    pub fn excluded(&self) -> &HashSet<OverrideKey> {
+        &self.excluded
+    }
+
+    pub(crate) fn set_excluded(&mut self, set: HashSet<OverrideKey>) {
+        self.excluded = set;
+    }
+
+    pub(crate) fn add_exclusion(&mut self, key: OverrideKey) {
+        self.excluded.insert(key);
+    }
+
+    pub(crate) fn remove_exclusion(&mut self, key: &OverrideKey) {
+        self.excluded.remove(key);
+    }
+
+    pub fn override_fingerprint(&self) -> String {
+        use sha2::Digest;
+
+        let mut entries: Vec<&OverrideKey> = self.excluded.iter().collect();
+        entries.sort_by(|a, b| {
+            a.signal_key
+                .cmp(&b.signal_key)
+                .then(a.prompt_id.cmp(&b.prompt_id))
+                .then(a.prompt_version.cmp(&b.prompt_version))
+        });
+
+        let mut h = sha2::Sha256::new();
+        for key in entries {
+            h.update(key.signal_key.as_bytes());
+            h.update(b"|");
+            h.update(key.prompt_id.as_bytes());
+            h.update(b"|");
+            h.update(key.prompt_version.to_be_bytes());
+            h.update(b";");
+        }
+        hex_digest(h.finalize())
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SignalCandidateSession {
     states: HashMap<String, SignalCandidateState>,
+    input_digests: HashMap<String, String>,
+    admission_order: Vec<String>,
     pending_request_ids: HashMap<String, u64>,
     pending_urls_by_request: HashMap<u64, String>,
     enqueued: u32,
     completed: u32,
     failed: u32,
-    excluded: HashSet<OverrideKey>,
 }
 
 impl SignalCandidateSession {
-    pub fn enqueue(&mut self, url: String) -> bool {
-        if self.states.contains_key(&url) {
+    pub(crate) fn retain_urls(&mut self, urls: &HashSet<String>) {
+        self.states.retain(|url, _| urls.contains(url));
+        self.input_digests.retain(|url, _| urls.contains(url));
+        self.admission_order.retain(|url| urls.contains(url));
+        self.pending_request_ids.retain(|url, _| urls.contains(url));
+        self.pending_urls_by_request
+            .retain(|_, url| urls.contains(url));
+    }
+    pub fn enqueue(&mut self, url: String, input_digest: String) -> bool {
+        if self.states.contains_key(&url)
+            && self.input_digests.get(&url) == Some(&input_digest)
+            && !matches!(
+                self.states.get(&url),
+                Some(SignalCandidateState::Failed { .. })
+            )
+        {
             return false;
         }
+        if matches!(
+            self.states.get(&url),
+            Some(SignalCandidateState::Pending | SignalCandidateState::Scoring { .. })
+        ) {
+            return false;
+        }
+        self.admission_order.retain(|existing| existing != &url);
+        self.admission_order.push(url.clone());
+        self.input_digests.insert(url.clone(), input_digest);
         self.states.insert(url, SignalCandidateState::Pending);
         self.enqueued += 1;
         true
+    }
+
+    pub fn input_digest_for(&self, url: &str) -> Option<&str> {
+        self.input_digests.get(url).map(String::as_str)
+    }
+
+    pub(crate) fn next_pending_url(&self) -> Option<&str> {
+        self.admission_order
+            .iter()
+            .find(|url| matches!(self.states.get(*url), Some(SignalCandidateState::Pending)))
+            .map(String::as_str)
+    }
+
+    pub(crate) fn fail_all_pending(&mut self, reason: &str) -> Vec<String> {
+        let mut failed = Vec::new();
+        while let Some(url) = self.next_pending_url().map(str::to_owned) {
+            self.fail(&url, reason);
+            failed.push(url);
+        }
+        failed
     }
 
     pub fn mark_scoring(&mut self, url: &str, request_id: u64) {
@@ -109,26 +197,20 @@ impl SignalCandidateSession {
         }
     }
 
-    pub fn defer(&mut self, url: &str) {
-        if let Some(slot) = self.states.get_mut(url) {
-            *slot = SignalCandidateState::Deferred;
-            if let Some(request_id) = self.pending_request_ids.remove(url) {
-                self.pending_urls_by_request.remove(&request_id);
-            }
-        }
-    }
-
-    pub fn rearm_deferred(&mut self) {
-        self.states
-            .retain(|_, state| !matches!(state, SignalCandidateState::Deferred));
-    }
-
-    pub fn deferred_urls(&self) -> Vec<String> {
-        self.states
+    pub(crate) fn withdraw_pending(&mut self) -> Vec<String> {
+        let withdrawn: Vec<_> = self
+            .states
             .iter()
-            .filter(|(_, state)| matches!(state, SignalCandidateState::Deferred))
+            .filter(|(_, state)| matches!(state, SignalCandidateState::Pending))
             .map(|(url, _)| url.clone())
-            .collect()
+            .collect();
+        for url in &withdrawn {
+            self.states.remove(url);
+            self.input_digests.remove(url);
+        }
+        self.admission_order
+            .retain(|url| self.states.contains_key(url));
+        withdrawn
     }
 
     /// Returns a single-snapshot classification of the current state map.
@@ -136,7 +218,6 @@ impl SignalCandidateSession {
         let mut counts = SignalCandidateObservationCounts {
             total: self.states.len(),
             pending_or_in_flight: 0,
-            deferred: 0,
             completed: 0,
             failed: 0,
         };
@@ -146,7 +227,6 @@ impl SignalCandidateSession {
                 SignalCandidateState::Pending | SignalCandidateState::Scoring { .. } => {
                     counts.pending_or_in_flight += 1;
                 }
-                SignalCandidateState::Deferred => counts.deferred += 1,
                 SignalCandidateState::Completed { .. } => counts.completed += 1,
                 SignalCandidateState::Failed { .. } => counts.failed += 1,
             }
@@ -202,45 +282,6 @@ impl SignalCandidateSession {
                 )
             })
             .count() as u32
-    }
-
-    pub fn excluded(&self) -> &HashSet<OverrideKey> {
-        &self.excluded
-    }
-
-    pub fn set_excluded(&mut self, set: HashSet<OverrideKey>) {
-        self.excluded = set;
-    }
-
-    pub fn add_exclusion(&mut self, key: OverrideKey) {
-        self.excluded.insert(key);
-    }
-
-    pub fn remove_exclusion(&mut self, key: &OverrideKey) {
-        self.excluded.remove(key);
-    }
-
-    pub fn override_fingerprint(&self) -> String {
-        use sha2::Digest;
-
-        let mut entries: Vec<&OverrideKey> = self.excluded.iter().collect();
-        entries.sort_by(|a, b| {
-            a.signal_key
-                .cmp(&b.signal_key)
-                .then(a.prompt_id.cmp(&b.prompt_id))
-                .then(a.prompt_version.cmp(&b.prompt_version))
-        });
-
-        let mut h = sha2::Sha256::new();
-        for key in entries {
-            h.update(key.signal_key.as_bytes());
-            h.update(b"|");
-            h.update(key.prompt_id.as_bytes());
-            h.update(b"|");
-            h.update(key.prompt_version.to_be_bytes());
-            h.update(b";");
-        }
-        hex_digest(h.finalize())
     }
 }
 
@@ -617,9 +658,30 @@ mod tests {
     }
 
     #[test]
+    fn override_fingerprint_is_unchanged_for_the_same_set() {
+        let keys = [
+            ("z-last", "ArticleSignalCandidate", 1),
+            ("a-first", "ArticleSignalCandidate", 256),
+            ("a-first", "ArticleSignalCandidate", 1),
+            ("a-first", "OtherPrompt", 2),
+        ]
+        .map(|(signal_key, prompt_id, prompt_version)| OverrideKey {
+            signal_key: signal_key.into(),
+            prompt_id: prompt_id.into(),
+            prompt_version,
+        });
+        let mut exclusions = SignalExclusions::default();
+        exclusions.set_excluded(keys.iter().cloned().collect());
+        let expected = "108c81148d8c5645efec81512b167edd9aac03c9bb8803569660073f807775d5";
+        assert_eq!(exclusions.override_fingerprint(), expected);
+        exclusions.set_excluded(keys.into_iter().rev().collect());
+        assert_eq!(exclusions.override_fingerprint(), expected);
+    }
+
+    #[test]
     fn pending_then_scoring_then_completed_transitions() {
         let mut s = SignalCandidateSession::default();
-        s.enqueue("https://a/1".into());
+        s.enqueue("https://a/1".into(), "fixture-input".to_string());
         assert!(matches!(
             s.state_for("https://a/1"),
             Some(SignalCandidateState::Pending)
@@ -642,7 +704,7 @@ mod tests {
     #[test]
     fn failure_increments_failed_counter() {
         let mut s = SignalCandidateSession::default();
-        s.enqueue("u".into());
+        s.enqueue("u".into(), "fixture-input".to_string());
         s.mark_scoring("u", 1);
         s.fail("u", "validation: bad");
         assert_eq!(s.failed_count(), 1);
@@ -655,7 +717,7 @@ mod tests {
     #[test]
     fn duplicate_terminal_transitions_do_not_double_count() {
         let mut s = SignalCandidateSession::default();
-        s.enqueue("u".into());
+        s.enqueue("u".into(), "fixture-input".to_string());
         s.mark_scoring("u", 1);
         s.complete("u", sample_result(80, "k-one", SourceTier::Tier1));
         s.complete("u", sample_result(70, "k-two", SourceTier::Tier2));
@@ -670,7 +732,7 @@ mod tests {
     #[test]
     fn fail_then_late_complete_does_not_double_count() {
         let mut s = SignalCandidateSession::default();
-        s.enqueue("u".into());
+        s.enqueue("u".into(), "fixture-input".to_string());
         s.mark_scoring("u", 1);
         s.fail("u", "validation: bad");
         s.complete("u", sample_result(80, "k-one", SourceTier::Tier1));
@@ -684,32 +746,46 @@ mod tests {
     #[test]
     fn duplicate_enqueue_is_idempotent() {
         let mut s = SignalCandidateSession::default();
-        s.enqueue("u".into());
-        s.enqueue("u".into());
+        s.enqueue("u".into(), "fixture-input".to_string());
+        s.enqueue("u".into(), "fixture-input".to_string());
         assert_eq!(s.enqueued_count(), 1);
+    }
+
+    #[test]
+    fn changed_digest_preserves_pending_and_scoring_admission() {
+        let mut session = SignalCandidateSession::default();
+        assert!(session.enqueue("pending".into(), "first".into()));
+        assert!(!session.enqueue("pending".into(), "second".into()));
+        assert_eq!(session.input_digest_for("pending"), Some("first"));
+        assert_eq!(session.enqueued_count(), 1);
+
+        assert!(session.enqueue("scoring".into(), "first".into()));
+        session.mark_scoring("scoring", 7);
+        assert!(!session.enqueue("scoring".into(), "second".into()));
+        assert_eq!(session.url_for_request(7), Some("scoring"));
+        assert_eq!(session.input_digest_for("scoring"), Some("first"));
+
+        assert_eq!(session.enqueued_count(), 2);
     }
 
     #[test]
     fn observation_counts_classify_each_current_signal_state() {
         let mut session = SignalCandidateSession::default();
-        session.enqueue("pending".into());
-        session.enqueue("scoring".into());
+        session.enqueue("pending".into(), "fixture-input".to_string());
+        session.enqueue("scoring".into(), "fixture-input".to_string());
         session.mark_scoring("scoring", 1);
-        session.enqueue("deferred".into());
-        session.defer("deferred");
-        session.enqueue("completed".into());
+        session.enqueue("completed".into(), "fixture-input".to_string());
         session.complete(
             "completed",
             sample_result(80, "complete", SourceTier::Tier1),
         );
-        session.enqueue("failed".into());
+        session.enqueue("failed".into(), "fixture-input".to_string());
         session.fail("failed", "validation: bad");
 
         let counts = session.observation_counts();
 
-        assert_eq!(counts.total, 5);
+        assert_eq!(counts.total, 4);
         assert_eq!(counts.pending_or_in_flight, 2);
-        assert_eq!(counts.deferred, 1);
         assert_eq!(counts.completed, 1);
         assert_eq!(counts.failed, 1);
         assert_eq!(
@@ -720,29 +796,24 @@ mod tests {
     }
 
     #[test]
-    fn observation_counts_use_current_rearmed_epoch_not_historical_counters() {
+    fn observation_counts_include_current_members_after_readmission() {
         let mut session = SignalCandidateSession::default();
-        session.enqueue("completed".into());
+        session.enqueue("completed".into(), "first".into());
         session.complete(
             "completed",
             sample_result(80, "complete", SourceTier::Tier1),
         );
-        session.enqueue("failed".into());
+        session.enqueue("failed".into(), "first".into());
         session.fail("failed", "validation: bad");
-        session.defer("completed");
-        session.defer("failed");
-
-        session.rearm_deferred();
-        session.enqueue("replayed".into());
-
+        assert!(session.enqueue("completed".into(), "new-input".into()));
+        assert!(session.enqueue("failed".into(), "new-input".into()));
+        session.enqueue("new-member".into(), "first".into());
         let counts = session.observation_counts();
-
         assert_eq!(session.completed_count(), 1);
         assert_eq!(session.failed_count(), 1);
-        assert_eq!(session.enqueued_count(), 3);
-        assert_eq!(counts.total, 1);
-        assert_eq!(counts.pending_or_in_flight, 1);
-        assert_eq!(counts.deferred, 0);
+        assert_eq!(session.enqueued_count(), 5);
+        assert_eq!(counts.total, 3);
+        assert_eq!(counts.pending_or_in_flight, 3);
         assert_eq!(counts.completed, 0);
         assert_eq!(counts.failed, 0);
         assert_eq!(counts.total, session.states.len());

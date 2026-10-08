@@ -4,11 +4,16 @@ use crate::LlmResultKind;
 use harvester_engine::llm::{OPENAI_MODEL_GPT_4O, OPENAI_MODEL_GPT_4O_MINI};
 
 #[test]
-fn triage_clicked_emits_load_effects() {
+fn resume_run_without_loaded_articles_emits_no_model_effects() {
     init_logging();
     let state = AppState::new();
-    let (_state, effects) = update(state, Msg::TriageClicked);
-    assert!(effects.is_empty());
+    let (_state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
+    assert_eq!(effects, vec![Effect::FlushResults]);
 }
 
 #[test]
@@ -24,34 +29,10 @@ fn summary_cache_model_id_compatibility_accepts_resolved_suffix() {
 }
 
 #[test]
-fn briefing_blocked_when_triage_in_progress() {
-    init_logging();
-    let mut state = AppState::new();
-    state.set_triage(crate::triage::TriageSession::new_loading(None));
-    let (next_state, effects) = update(state.clone(), Msg::GenerateBriefingClicked);
-    assert!(effects.is_empty());
-    assert!(matches!(
-        next_state.briefing().phase(),
-        crate::briefing::BriefingPhase::Failed { reason }
-            if reason == "No completed triage. Run triage before generating a briefing."
-    ));
-    assert_eq!(next_state.active_tab(), AppTab::Briefing);
-}
-
-#[test]
-fn triage_click_blocked_when_briefing_owns_triage() {
-    init_logging();
-    let state = AppState::new();
-    let (state, _) = update(state, Msg::GenerateBriefingClicked);
-    let (_state, effects) = update(state, Msg::TriageClicked);
-    assert!(effects.is_empty());
-}
-
-#[test]
 fn triage_articles_loaded_dispatches_up_to_limit_requests() {
     init_logging();
     let mut state = AppState::new();
-    state.set_triage_max_in_flight(2);
+    state.set_llm_max_in_flight(2);
     let (state, effects) = start_triage_for_test(state, loaded_triage_articles(3));
     let llm_effects: Vec<_> = effects
         .iter()
@@ -70,7 +51,7 @@ fn triage_articles_loaded_dispatches_up_to_limit_requests() {
 fn triage_completion_backfills_one_slot() {
     init_logging();
     let mut state = AppState::new();
-    state.set_triage_max_in_flight(2);
+    state.set_llm_max_in_flight(2);
     let (state, _) = start_triage_for_test(state, loaded_triage_articles(3));
     assert_eq!(state.triage().in_progress_count(), 2);
 
@@ -85,10 +66,83 @@ fn triage_completion_backfills_one_slot() {
 }
 
 #[test]
+fn fresh_triage_completion_records_snapshot_model_provenance() {
+    init_logging();
+    let (state, effects) = start_triage_for_test(AppState::new(), loaded_triage_articles(1));
+    let request_id = request_id_for_prompt(
+        &effects,
+        harvester_engine::llm::prompt::PromptId::ArticleTriage,
+    )
+    .expect("triage request");
+    let (state, _) = update(state, triage_success(request_id));
+
+    assert_eq!(
+        state.triage().triage_model_for_url("https://example.com/0"),
+        Some("test-model")
+    );
+}
+
+#[test]
+fn key_unavailable_triage_completion_is_absent_from_saved_export() {
+    use harvester_engine::archive_url_key;
+    use harvester_engine::llm::prompt::PromptId;
+
+    init_logging();
+    let article = crate::briefing::LoadedArticle {
+        url: "https://example.com/no-key".to_string(),
+        source_title: None,
+        prepared_text: "article content".to_string(),
+        content_hash: String::new(),
+        fetched_utc: None,
+    };
+    let mut state = prime_llm_metadata(AppState::new());
+    let mut triage = crate::triage::TriageSession::new_loading(None);
+    triage.set_articles(vec![article]);
+    triage.transition_to_triaging();
+    state.set_triage(triage);
+    state.start_triage_cache_run();
+    state.mark_triage_metadata_ready();
+    crate::update::test_support::arm_admitted(&mut state);
+    let mut effects = Vec::new();
+    crate::update::model_dispatch::dispatch_model_work(&mut state, &mut effects);
+    let request_id =
+        request_id_for_prompt(&effects, PromptId::ArticleTriage).expect("triage request");
+    let (state, _) = update(state, triage_success(request_id));
+    assert_eq!(
+        state
+            .triage()
+            .triage_model_for_url("https://example.com/no-key"),
+        None
+    );
+
+    let (state, _) = update(state, Msg::ArchiveClicked);
+    let archive_request_id = state.archive_request_id();
+    let (_state, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id: archive_request_id,
+            basename: "archive.md".to_string(),
+            set_checkpoint: false,
+            submitted_at: chrono::Utc::now(),
+            use_summaries: false,
+            use_signal_candidates: false,
+        },
+    );
+    let annotations = effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::ArchiveRequested { annotations, .. } => Some(annotations),
+            _ => None,
+        })
+        .expect("ArchiveRequested effect expected");
+    assert!(!annotations.contains_key(&archive_url_key("https://example.com/no-key")));
+}
+
+#[test]
 fn triage_out_of_order_completion_routes_correctly() {
     init_logging();
     let mut state = AppState::new();
-    state.set_triage_max_in_flight(3);
+    state.set_llm_max_in_flight(3);
     let (state, _) = start_triage_for_test(state, loaded_triage_articles(3));
     assert_eq!(state.triage().in_progress_count(), 3);
 
@@ -108,7 +162,7 @@ fn triage_out_of_order_completion_routes_correctly() {
 fn triage_progress_text_counts_settled_articles() {
     init_logging();
     let mut state = AppState::new();
-    state.set_triage_max_in_flight(1);
+    state.set_llm_max_in_flight(1);
     let (state, _) = start_triage_for_test(state, loaded_triage_articles(3));
     let text = state.triage().progress_text().unwrap();
     assert!(
@@ -128,7 +182,7 @@ fn triage_progress_text_counts_settled_articles() {
 fn triage_quota_exhausted_fails_all_pending() {
     init_logging();
     let mut state = AppState::new();
-    state.set_triage_max_in_flight(1);
+    state.set_llm_max_in_flight(1);
     let (state, _) = start_triage_for_test(state, loaded_triage_articles(3));
 
     let (state, _) = update(
@@ -143,4 +197,31 @@ fn triage_quota_exhausted_fails_all_pending() {
         },
     );
     assert_eq!(state.triage().failed_count(), 3);
+}
+
+#[test]
+fn triage_completion_emits_exact_record_before_settlement() {
+    let (state, effects) = start_triage_for_test(AppState::new(), loaded_triage_articles(2));
+    let request = request_id_for_prompt(&effects, PromptId::ArticleTriage).unwrap();
+    let (state, effects) = crate::update(state, triage_success(request));
+    assert_eq!(state.triage().completed_count(), 1);
+    assert!(state.triage().is_active());
+    let records: Vec<_> = effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::SaveResults { records } => Some(records),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert_eq!(records.len(), 1);
+    let crate::SavedResult::Triage(key, entry) = records[0] else {
+        panic!("triage record expected")
+    };
+    assert!(state
+        .triage_cache()
+        .iter()
+        .any(|(k, e)| k == key && e == entry));
+    let (_, stopped) = crate::update(state, Msg::StopFinishClicked);
+    assert!(stopped.contains(&Effect::FlushResults));
 }

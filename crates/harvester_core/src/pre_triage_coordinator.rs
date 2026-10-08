@@ -56,7 +56,7 @@ pub(crate) struct PreTriageRefreshDispatch {
 /// Outcome of `schedule_refresh`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PreTriageRefreshScheduleResult {
-    /// Refresh has been queued; caller should set pre-triage to loading state.
+    /// Refresh has been queued; existing preparation remains available.
     Scheduled,
     /// URL list was empty; caller should reset pre-triage immediately (no effect dispatch).
     ImmediateReset,
@@ -85,9 +85,42 @@ pub(crate) struct PreTriageRefreshCoordinator {
     poll_burst_active: bool,
     poll_sources_ended: bool,
     last_job_done_tick: Option<u64>,
+    run_active: bool,
 }
 
 impl PreTriageRefreshCoordinator {
+    pub(crate) fn set_run_active(&mut self, armed: bool) {
+        self.run_active = armed;
+    }
+    pub(crate) fn refresh_pending(&self) -> bool {
+        self.dirty || self.in_flight_request_id.is_some()
+    }
+
+    /// Drop queued refresh demand while allowing an already running load to drain.
+    pub(crate) fn close_intake(&mut self) {
+        self.dirty = false;
+        self.pending_ordered_urls.clear();
+        self.demand_started_tick = None;
+        self.run_active = false;
+    }
+
+    pub(crate) fn allocate_request_id(&mut self) -> u64 {
+        let id = self.next_request_id;
+        self.next_request_id += 1;
+        id
+    }
+
+    pub(crate) fn begin_preparation_load(&mut self) -> u64 {
+        // A run's fresh membership read covers all demand queued before it
+        // starts. Demand that arrives during the read schedules a later delta.
+        self.dirty = false;
+        self.pending_ordered_urls.clear();
+        self.demand_started_tick = None;
+        let id = self.allocate_request_id();
+        self.in_flight_request_id = NonZeroU64::new(id);
+        id
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             dirty: false,
@@ -99,6 +132,7 @@ impl PreTriageRefreshCoordinator {
             poll_burst_active: false,
             poll_sources_ended: false,
             last_job_done_tick: None,
+            run_active: false,
         }
     }
 
@@ -114,12 +148,14 @@ impl PreTriageRefreshCoordinator {
         if ordered_urls.is_empty() {
             // Empty corpus: caller must reset pre-triage immediately.
             self.dirty = false;
+            self.in_flight_request_id = None;
             self.pending_ordered_urls.clear();
             self.demand_started_tick = None;
             return PreTriageRefreshScheduleResult::ImmediateReset;
         }
 
-        let quiet_ticks = if self.poll_burst_active {
+        let run_active = self.run_active;
+        let quiet_ticks = if self.poll_burst_active || run_active {
             QUIET_TICKS_AFTER_POLL
         } else {
             QUIET_TICKS_NORMAL
@@ -177,10 +213,12 @@ impl PreTriageRefreshCoordinator {
             .map(|start| current_tick.saturating_sub(start) >= MAX_WAIT_TICKS)
             .unwrap_or(false);
 
+        let overlap = self.run_active;
+
         // During an active poll burst, block dispatch until:
         //   - poll has ended AND no engine jobs are in flight
         //   - OR max-wait is exceeded (starvation guard)
-        if self.poll_burst_active && !max_wait_exceeded {
+        if self.poll_burst_active && !max_wait_exceeded && !overlap {
             if !self.poll_sources_ended {
                 return None;
             }
@@ -189,7 +227,8 @@ impl PreTriageRefreshCoordinator {
             }
         }
 
-        if current_tick < self.earliest_dispatch_tick && !max_wait_exceeded {
+        let downloads_settled = overlap && self.poll_sources_ended && !has_in_flight_engine_jobs;
+        if current_tick < self.earliest_dispatch_tick && !max_wait_exceeded && !downloads_settled {
             return None;
         }
 

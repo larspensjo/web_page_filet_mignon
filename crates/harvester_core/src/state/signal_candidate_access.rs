@@ -3,68 +3,22 @@ use crate::briefing::ArticleSummaryResult;
 use crate::signal_candidate::{
     ArchiveFinalSelection, ArchiveSelectionSource, ScoredCandidate, SelectionPolicy,
     SignalCandidateArchiveSelection, SignalCandidateSelection, SignalCandidateSession,
+    SignalExclusions,
 };
 use crate::signal_candidate_cache::{
     SignalCandidateCache, SignalCandidateCacheEntry, SignalCandidateCacheKey,
 };
 use crate::update::signal_candidate::SignalCandidateInputSnapshot;
-use crate::{FrozenBatchKey, StageKind, SummaryCacheKey};
 use harvester_engine::llm::dto::SignalCandidateResult;
-use harvester_engine::llm::prompt::PromptId;
 
-/// Whether the briefing may generate now, and on what list.
-///
-/// The `Ready` variant carries the resolved selection so the entry point does
-/// not recompute it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BriefingGenerateReadiness {
-    Ready { selection: ArchiveFinalSelection },
-    TriageOrCorpusNotReady,
-    SummariesNotSettled,
-    SignalScoringInProgress,
+pub(super) enum SignalCandidateDisplayState<'a> {
+    Pending,
+    Scoring,
+    Failed { reason: &'a str },
+    Completed { result: &'a SignalCandidateResult },
 }
 
 impl AppState {
-    pub(crate) fn frozen_signal_batch_key_for_request(
-        &self,
-        request_id: u64,
-    ) -> Option<FrozenBatchKey> {
-        let url = self.signal_candidate.url_for_request(request_id)?;
-        let snapshot = self.signal_candidate_inputs.get(url)?;
-        let bundle = crate::signal_candidate_cache::SignalCandidateInputBundle {
-            url,
-            outlet: &snapshot.outlet,
-            title: &snapshot.title,
-            published_at: &snapshot.published_at,
-            triage_priority: snapshot.triage_priority,
-            triage_tags_sorted: snapshot
-                .triage_tags_sorted
-                .iter()
-                .map(String::as_str)
-                .collect(),
-            summary: &snapshot.summary,
-            key_points: &snapshot.key_points,
-            upstream_summary_cache_digest: snapshot.upstream_summary_cache_digest.clone(),
-        };
-        let key = SignalCandidateCacheKey::try_new(
-            &bundle,
-            Some(snapshot.prompt_version),
-            Some(snapshot.model_id.as_str()),
-            &snapshot.context,
-        )
-        .ok()?;
-        Some(FrozenBatchKey {
-            content_hash: key.signal_input_hash,
-            prompt_id: PromptId::ArticleSignalCandidate,
-            prompt_version: key.prompt_version,
-            model_id: key.model_id,
-            context_hash: key.context_hash,
-            stage: StageKind::SignalCandidate,
-            url: url.to_string(),
-            rendered_system: String::new(),
-            rendered_user: String::new(),
-        })
-    }
     /// Pin the signal-candidate archive selection snapshot for the current dialog session.
     pub fn pin_signal_candidate_selection(&mut self, selection: SignalCandidateArchiveSelection) {
         self.pinned_signal_candidate_selection = Some(selection);
@@ -85,7 +39,16 @@ impl AppState {
     }
 
     pub fn signal_candidate_mut(&mut self) -> &mut SignalCandidateSession {
+        self.note_unfinished_inputs_changed();
         &mut self.signal_candidate
+    }
+
+    pub fn signal_exclusions(&self) -> &SignalExclusions {
+        &self.signal_exclusions
+    }
+
+    pub(crate) fn signal_exclusions_mut(&mut self) -> &mut SignalExclusions {
+        &mut self.signal_exclusions
     }
 
     pub fn signal_candidate_cache(&self) -> &SignalCandidateCache {
@@ -93,7 +56,9 @@ impl AppState {
     }
 
     pub(crate) fn set_signal_candidate_cache(&mut self, cache: SignalCandidateCache) {
+        self.note_unfinished_global_inputs_changed();
         self.signal_candidate_cache = cache;
+        self.rebuild_saved_results();
     }
 
     pub fn try_reuse_signal_candidate(
@@ -111,13 +76,18 @@ impl AppState {
         result: SignalCandidateResult,
         now_utc: String,
     ) {
-        self.signal_candidate_cache.insert(
-            key,
-            SignalCandidateCacheEntry {
-                result,
-                created_at_utc: now_utc,
-            },
-        );
+        self.note_unfinished_inputs_changed();
+        let entry = SignalCandidateCacheEntry {
+            result,
+            created_at_utc: now_utc,
+        };
+        self.pending_results
+            .push(crate::SavedResult::SignalCandidate(
+                key.clone(),
+                entry.clone(),
+            ));
+        self.signal_candidate_cache.insert(key.clone(), entry);
+        self.refresh_saved_signal(&key);
     }
 
     pub(crate) fn signal_candidate_input_snapshot(
@@ -148,55 +118,65 @@ impl AppState {
         self.signal_candidate_threshold = threshold.clamp(0, 100);
     }
 
-    pub fn summary_cache_key_for_url(&self, url: &str) -> Option<SummaryCacheKey> {
-        let content_hash = self
-            .triage()
-            .article_content_hash(url)
-            .or_else(|| self.pre_triage.article_content_hash(url))?;
-
-        self.summary_cache()
-            .iter()
-            .filter(|(key, _)| {
-                key.content_hash == content_hash && key.prompt_id == PromptId::ArticleSummary
-            })
-            .max_by(|(_, a), (_, b)| {
-                let parsed_a = chrono::DateTime::parse_from_rfc3339(&a.created_at_utc)
-                    .ok()
-                    .map(|dt| dt.with_timezone(&chrono::Utc));
-                let parsed_b = chrono::DateTime::parse_from_rfc3339(&b.created_at_utc)
-                    .ok()
-                    .map(|dt| dt.with_timezone(&chrono::Utc));
-
-                match (parsed_a, parsed_b) {
-                    (Some(a), Some(b)) => a.cmp(&b),
-                    _ => a.created_at_utc.cmp(&b.created_at_utc),
-                }
-            })
-            .map(|(key, _)| key.clone())
-    }
-
     pub(crate) fn summary_result_for_url(&self, url: &str) -> Option<&ArticleSummaryResult> {
         if let Some(summary) = self.briefing.summary_for_url(url) {
             return Some(summary);
         }
 
-        let content_hash = self
-            .triage()
-            .article_content_hash(url)
-            .or_else(|| self.pre_triage.article_content_hash(url))?;
-
-        self.summary_cache()
-            .lookup_any_by_content_hash(content_hash)
-            .map(|entry| &entry.result)
+        self.newest_summary_for_url(url)
     }
 
-    /// The live signal-candidate selection computed from the current session:
+    pub(crate) fn saved_signal_count(&self) -> u32 {
+        self.saved_results
+            .values()
+            .filter(|entry| entry.in_window && entry.actionable && entry.signal.is_some())
+            .count() as u32
+    }
+
+    pub(in crate::state) fn display_signal_states(
+        &self,
+    ) -> Vec<(&str, SignalCandidateDisplayState<'_>)> {
+        use crate::signal_candidate::SignalCandidateState;
+        let mut states: std::collections::BTreeMap<_, _> = self
+            .saved_results
+            .values()
+            .filter_map(|entry| {
+                entry.signal.as_ref().map(|result| {
+                    (
+                        entry.article.url.as_str(),
+                        SignalCandidateDisplayState::Completed { result },
+                    )
+                })
+            })
+            .collect();
+        for (url, state) in self.signal_candidate().iter_states() {
+            let state = match state {
+                SignalCandidateState::Pending => SignalCandidateDisplayState::Pending,
+                SignalCandidateState::Scoring { .. } => SignalCandidateDisplayState::Scoring,
+                SignalCandidateState::Failed { reason } => {
+                    SignalCandidateDisplayState::Failed { reason }
+                }
+                SignalCandidateState::Completed { .. } => continue,
+            };
+            states.entry(url).or_insert(state);
+        }
+        states.into_iter().collect()
+    }
+
+    /// The signal-candidate selection computed from saved current-key window results:
     /// the same threshold + exclusion logic the Archive dialog uses. Single
-    /// source of truth shared by the dialog snapshot and the briefing selector.
+    /// source of truth shared by the dialog snapshot and archive selection.
     pub(crate) fn signal_candidate_selection(&self) -> SignalCandidateSelection {
         let scored: Vec<ScoredCandidate> = self
-            .signal_candidate()
-            .iter_completed()
+            .saved_results
+            .values()
+            .filter(|entry| entry.in_window && entry.actionable)
+            .filter_map(|entry| {
+                entry
+                    .signal
+                    .as_ref()
+                    .map(|result| (entry.article.url.as_str(), result))
+            })
             .map(|(url, result)| ScoredCandidate {
                 url: url.to_string(),
                 result: result.clone(),
@@ -207,7 +187,7 @@ impl AppState {
             active_prompt_version: self
                 .active_version_for(harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate)
                 .unwrap_or_default(),
-            excluded: self.signal_candidate().excluded().clone(),
+            excluded: self.signal_exclusions().excluded().clone(),
         };
         SignalCandidateSelection::compute(&scored, policy)
     }
@@ -219,10 +199,10 @@ impl AppState {
     ///
     /// Note: in-flight scoring is intentionally not consulted here. Callers that
     /// must not act mid-scoring should gate before calling this accessor.
-    /// Callers must also gate on live [`crate::TriagePhase::Complete`].
+    /// Archive actions gate on run state; a completed live triage session is not required.
     pub fn archive_final_selection(&self) -> ArchiveFinalSelection {
         let base = self.archive_corpus();
-        let completed = self.signal_candidate().completed_count();
+        let completed = self.saved_signal_count();
         let failed = self.signal_candidate().failed_count();
 
         if completed == 0 && failed == 0 {
@@ -254,34 +234,5 @@ impl AppState {
         matches!(self.triage().phase(), crate::triage::TriagePhase::Complete)
             && !self.archive_corpus().is_empty()
             && self.briefing.can_start()
-    }
-
-    /// The corpus-relative readiness verdict for Generate Briefing.
-    ///
-    /// This deliberately does not include session/AI gates. The view and
-    /// entry-point guards compose those with this verdict when they need the
-    /// full "can generate now" answer.
-    pub fn briefing_generate_readiness(&self) -> BriefingGenerateReadiness {
-        let corpus = self.archive_corpus();
-        if corpus.is_empty()
-            || !matches!(self.triage().phase(), crate::triage::TriagePhase::Complete)
-        {
-            return BriefingGenerateReadiness::TriageOrCorpusNotReady;
-        }
-
-        let all_settled = corpus.ordered_urls().iter().all(|url| {
-            self.summary_result_for_url(url).is_some() || self.briefing.summary_failed_for_url(url)
-        });
-        if !all_settled {
-            return BriefingGenerateReadiness::SummariesNotSettled;
-        }
-
-        if self.signal_candidate().in_flight_count() > 0 {
-            return BriefingGenerateReadiness::SignalScoringInProgress;
-        }
-
-        BriefingGenerateReadiness::Ready {
-            selection: self.archive_final_selection(),
-        }
     }
 }

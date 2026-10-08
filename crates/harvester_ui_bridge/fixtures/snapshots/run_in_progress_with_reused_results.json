@@ -1,0 +1,253 @@
+{
+  "generation": 1,
+  "schema_version": 15,
+  "view": {
+    "ai_unavailable_message": null,
+    "archive_enabled": false,
+    "archive_meter": {
+      "selected_count": 1,
+      "status": "Scored",
+      "target": 150,
+      "token_estimate": 5,
+      "unsettled_count": 4
+    },
+    "archive_partial_coverage": {
+      "actionable_total": 5,
+      "triaged": 1
+    },
+    "checkpoint_status_message": null,
+    "desktop_job_list": {
+      "hidden_without_fetch_time": 0,
+      "mode": "SinceCheckpoint",
+      "query": "",
+      "rows": [
+        {
+          "bytes": 1024,
+          "fetched_utc": "1970-01-01T00:00:00Z",
+          "filter_status": null,
+          "has_analysis": false,
+          "has_summary": false,
+          "is_since_checkpoint": true,
+          "job_id": 1,
+          "link_count": 1,
+          "origin": "Direct",
+          "outcome": "Success",
+          "stage": "Done",
+          "summary_title": null,
+          "summary_tokens": null,
+          "tokens": 42,
+          "triage_annotation": null,
+          "url": "https://fixture.invalid/new-0"
+        },
+        {
+          "bytes": 1024,
+          "fetched_utc": "1970-01-01T00:00:00Z",
+          "filter_status": null,
+          "has_analysis": false,
+          "has_summary": false,
+          "is_since_checkpoint": true,
+          "job_id": 2,
+          "link_count": 1,
+          "origin": "Direct",
+          "outcome": "Success",
+          "stage": "Done",
+          "summary_title": null,
+          "summary_tokens": null,
+          "tokens": 42,
+          "triage_annotation": null,
+          "url": "https://fixture.invalid/new-1"
+        },
+        {
+          "bytes": 1024,
+          "fetched_utc": "1970-01-01T00:00:00Z",
+          "filter_status": null,
+          "has_analysis": false,
+          "has_summary": false,
+          "is_since_checkpoint": true,
+          "job_id": 3,
+          "link_count": 1,
+          "origin": "Direct",
+          "outcome": "Success",
+          "stage": "Done",
+          "summary_title": null,
+          "summary_tokens": null,
+          "tokens": 42,
+          "triage_annotation": null,
+          "url": "https://fixture.invalid/new-2"
+        },
+        {
+          "bytes": 1024,
+          "fetched_utc": "1970-01-01T00:00:00Z",
+          "filter_status": null,
+          "has_analysis": false,
+          "has_summary": false,
+          "is_since_checkpoint": true,
+          "job_id": 4,
+          "link_count": 1,
+          "origin": "Direct",
+          "outcome": "Success",
+          "stage": "Done",
+          "summary_title": null,
+          "summary_tokens": null,
+          "tokens": 42,
+          "triage_annotation": null,
+          "url": "https://fixture.invalid/new-3"
+        },
+        {
+          "bytes": 1024,
+          "fetched_utc": "1970-01-01T00:00:00Z",
+          "filter_status": null,
+          "has_analysis": true,
+          "has_summary": true,
+          "is_since_checkpoint": true,
+          "job_id": 5,
+          "link_count": 1,
+          "origin": "Direct",
+          "outcome": "Success",
+          "stage": "Done",
+          "summary_title": "Fixture summary",
+          "summary_tokens": 5,
+          "tokens": 42,
+          "triage_annotation": {
+            "category": "news",
+            "priority": 4,
+            "tags": [
+              "fixture",
+              "review"
+            ]
+          },
+          "url": "https://fixture.invalid/article"
+        }
+      ],
+      "scoped_count": 5,
+      "selected_job": null,
+      "truncated": false,
+      "visible_count": 5
+    },
+    "job_count": 5,
+    "last_paste_stats": null,
+    "llm_quota": {
+      "label": "LLM calls 0 / unlimited",
+      "limit": null,
+      "percent": null,
+      "severity": "Normal",
+      "used": 0
+    },
+    "reprocess_notice": null,
+    "resume_disabled_reason": "A run is already in progress.",
+    "resume_enabled": false,
+    "right_pane": {
+      "summary_markdown": null
+    },
+    "run_completion_notice": null,
+    "run_enabled": false,
+    "run_progress": {
+      "activity": [],
+      "run_active": true,
+      "stages": [
+        {
+          "completed": 0,
+          "ended_at_utc": null,
+          "failed": 0,
+          "reused": 0,
+          "stage": "ScanningSources",
+          "started_at_utc": null,
+          "status": "Pending",
+          "total": 0,
+          "total_is_final": false
+        },
+        {
+          "completed": 0,
+          "ended_at_utc": null,
+          "failed": 0,
+          "reused": 0,
+          "stage": "DownloadingArticles",
+          "started_at_utc": null,
+          "status": "Pending",
+          "total": 0,
+          "total_is_final": false
+        },
+        {
+          "completed": 5,
+          "ended_at_utc": null,
+          "failed": 0,
+          "reused": 0,
+          "stage": "LoadingArticles",
+          "started_at_utc": null,
+          "status": "Active",
+          "total": 5,
+          "total_is_final": false
+        },
+        {
+          "completed": 1,
+          "ended_at_utc": null,
+          "failed": 0,
+          "reused": 1,
+          "stage": "Triaging",
+          "started_at_utc": null,
+          "status": "Active",
+          "total": 5,
+          "total_is_final": false
+        },
+        {
+          "completed": 1,
+          "ended_at_utc": null,
+          "failed": 0,
+          "reused": 1,
+          "stage": "Summarizing",
+          "started_at_utc": null,
+          "status": "Active",
+          "total": 1,
+          "total_is_final": false
+        },
+        {
+          "completed": 1,
+          "ended_at_utc": null,
+          "failed": 0,
+          "reused": 1,
+          "stage": "ScoringSignals",
+          "started_at_utc": null,
+          "status": "Active",
+          "total": 1,
+          "total_is_final": false
+        }
+      ]
+    },
+    "run_state": "Active",
+    "signal_candidate_rows": [
+      {
+        "dupes_count": 0,
+        "gist_truncated": "Fixture outlet reports a concrete event with enough detail for review.",
+        "job_id": 5,
+        "outcome": "Selected",
+        "score": 84,
+        "score_band": "High",
+        "signal_key": "fixture-signal",
+        "source_tier": "Tier1",
+        "state_label": "Scored",
+        "themes": [
+          "fixture-theme"
+        ],
+        "url": "https://fixture.invalid/article"
+      }
+    ],
+    "stop_finish_button": {
+      "Enabled": {
+        "policy": "Finish"
+      }
+    },
+    "unfinished_work": {
+      "Known": {
+        "articles_with_work": 0,
+        "complete": 1,
+        "estimated_calls": 0,
+        "in_progress": 4,
+        "needs_scoring": 0,
+        "needs_summary": 0,
+        "needs_triage": 0,
+        "not_eligible": 0
+      }
+    }
+  },
+  "fatal_message": null
+}

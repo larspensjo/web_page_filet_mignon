@@ -122,22 +122,7 @@ Persisted result fields:
 
 Important note: this cache is prompt-versioned. A search adapter should treat triage metadata as versioned/enriched search metadata, not as immutable article truth.
 
-### 4. `.entity_index.ron`
-
-This is the archive-level entity sidecar index keyed by article URL.
-
-Persisted per-entry fields:
-
-- `fetched_utc: Option<String>`
-- `content_hash: Option<String>`
-- `companies: Vec<String>`
-- `technologies: Vec<String>`
-- `products: Vec<String>`
-- `themes: Vec<String>`
-
-This is currently the best persisted source for faceted entity search.
-
-### 5. `archive.md`
+### 4. `archive.md`
 
 Harvester can export a triage-filtered `archive.md` that concatenates selected raw Markdown documents inside delimiter blocks.
 
@@ -171,7 +156,7 @@ Use the following distinction:
 
 Reasoning:
 
-- URL is the best cross-file join key because `.harvester_state.ron` and `.entity_index.ron` are URL-oriented.
+- URL is the best cross-file join key because article frontmatter and `.harvester_state.ron` identify articles by URL.
 - `content_hash` is the best change detector because it represents the cleaned article content rather than filename churn.
 - file path is operational metadata, not business identity.
 
@@ -269,9 +254,9 @@ Recommended provenance mapping:
 - Markdown frontmatter provides: `url_raw`, `title`, `fetched_utc`, `encoding`, `token_count`, optional import fields.
 - Markdown body provides: `body_markdown`.
 - Adapter-derived parsing provides: `body_plaintext`, `url_normalized`, `source_file`.
-- `.harvester_state.ron` provides: `byte_count`, `downloaded_links`, pre-triage override data.
+- `.harvester_state.ron` provides: `byte_count` and extracted links; legacy downloaded paths and manual overrides are ignored by Harvester.
 - `.triage_cache.ron` provides: triage metadata keyed by `content_hash` plus prompt metadata.
-- `.entity_index.ron` provides: entity and theme fields.
+- `.summary_cache.jsonl` provides companies, technologies and products in saved summary entities; triage tags provide theme metadata. There is no separate entity index.
 
 ## Adapter Responsibilities
 
@@ -282,7 +267,7 @@ Recommended responsibilities:
 1. Scan article Markdown files in deterministic order.
 2. Parse frontmatter and body.
 3. Compute normalized URL.
-4. Join sidecar metadata from `.harvester_state.ron`, `.triage_cache.ron`, and `.entity_index.ron`.
+4. Join state and paid-result metadata from `.harvester_state.ron`, `.triage_cache.jsonl`, and `.summary_cache.jsonl`. Legacy RON result stores remain migration backups.
 5. Upsert documents into the external search system.
 6. Mark missing files as deleted or stale in the external index.
 
@@ -344,17 +329,12 @@ Recommended policy:
 2. Keep raw provenance fields so the UI can explain what generated the result.
 3. If multiple entries are materially relevant, expose only one primary triage block and optionally keep alternates in a non-indexed provenance array.
 
-### Join to entity index
+### Join to summary entities
 
-Join key:
-
-- URL
-
-Fallback key when available:
-
-- `content_hash`
-
-Because the current persisted index is URL-keyed, URL remains the operational join key today.
+Resolve the prepared article content hash against saved summaries. Keep prompt, model,
+context and creation-time provenance when selecting an entry. Read companies,
+technologies and products from the summary's entities; themes come from triage tags.
+The retired `.entity_index.ron` is no longer read or maintained.
 
 ## Indexing Strategy
 
@@ -601,7 +581,7 @@ Practical implications:
 1. Build a read-only adapter that scans Markdown files and emits normalized JSON documents.
 2. Join `.harvester_state.ron` for links and size metadata.
 3. Join `.triage_cache.ron` for category, priority, tags, and rationale.
-4. Join `.entity_index.ron` for companies, technologies, products, and themes.
+4. Join `.summary_cache.jsonl` for companies, technologies and products, and triage tags for themes.
 5. Add incremental reindexing using `url_normalized` plus `content_hash`.
 6. Add hybrid ranking or embeddings only after lexical search and facets are working well.
 
@@ -614,7 +594,7 @@ Available today without changing Harvester:
 - per-article body text
 - runtime-side links, bytes, and fetched metadata from `.harvester_state.ron`
 - versioned triage metadata from `.triage_cache.ron`
-- entity/theme metadata from `.entity_index.ron`
+- saved-summary entities and versioned triage tags from the paid-result stores
 - triage-filtered concatenated export in `archive.md`
 
 The main integration recommendation is:

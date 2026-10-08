@@ -2316,6 +2316,39 @@ Change: Removed the retired host from the workspace and VS Code configurations, 
 Lessons Learned: A host retirement must be checked across workspace membership, default membership, launch policy, editor tasks, and reporting code; removing only the source crate leaves stale operational contracts behind.
 Refs: Cargo.toml, scripts/lib/HarvesterLaunch.psm1, scripts/project-stats.ps1, docs/plans/Plan.TauriDesktopUi.md
 
+## 2026-09-17 - Phase 7 retirement run 2
+Type: Implementation
+Context: The Tauri desktop host no longer needed the Win32 layout, tab navigation, full-corpus job view, or briefing body UI surfaces retained during coexistence.
+Change: Removed those Win32-only core and IPC fields, retained the compiled briefing domain workflow, made the desktop job list the sole projection, removed summary-heading compensation, and regenerated the versioned snapshot fixtures.
+Refs: crates/harvester_core/src/view_model.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_ui_bridge/src/snapshot.rs, frontend/src/components/ReadingPane.tsx
+
+## 2026-09-18 - Phase 7 retirement run 3
+Type: Implementation
+Context: Prompt Lab and saved manual pre-triage decisions had no remaining UI
+entry point, while prompt/context files and automatic filtering remain runtime
+requirements.
+Change: Deleted Prompt Lab and manual-override persistence, retained runtime
+prompt metadata and context loading, added legacy-state tolerance coverage, and
+removed the final snapshot strip path.
+Refs: crates/harvester_core, crates/harvester_io/src/persistence.rs,
+crates/harvester_ui_bridge/src/snapshot.rs
+
+## 2026-09-18 - Phase 7 retirement run 4
+Type: Implementation
+Context: Desktop persistence still bypassed the shared effect boundary, and the
+final desktop payload retained fields with no frontend consumer.
+Change: Moved runtime snapshots into reducer-emitted effects serviced by the
+runner's injected persistence sink, preserving newest-wins coalescing and
+shutdown flush where the runner is dropped. Dry-run injects a no-op sink and
+remains write-free. Removed the driver capture path, dead reducer-side loader
+progress state, unused desktop headers and list metadata, unreachable manual
+filter statuses and label, and the duplicate desktop view entry point. Retained
+the throttled loader-progress message that drives the Loading articles progress
+bar and ETA. Bumped IPC schema version and regenerated snapshot fixtures.
+Refs: crates/harvester_core/src/effect.rs,
+crates/harvester_io/src/effect_runner/, crates/harvester_ui_bridge/src/driver.rs,
+docs/plans/Plan.TauriDesktopUi.md
+
 ## 2026-09-18 - Jev triage experiment harness launcher and runbook
 Type: Implementation
 Context: Phase 5 landed the fixed-secret launcher, mocked Pester coverage, and the user-facing operating instructions for the isolated `harvester_eval` experiment.
@@ -2331,3 +2364,415 @@ Change: Relevance `score` values are now accepted anywhere within the returned l
 Lessons Learned: A strict validator written from vendor documentation turns every undocumented detail into a hard failure; the first live call is the schema test, so keep it tiny and keep the raw bytes. A reported value called `score` next to a `legend` looked like an index but was an expectation over it.
 Prevention: `first_live_responses_validate` parses and validates the real bytes; `rounding_tolerance_and_score_range_still_reject_real_errors` keeps out-of-range scores and genuinely wrong mass failing.
 Refs: crates/harvester_eval/src/jev/response.rs, crates/harvester_eval/tests/phase2.rs, crates/harvester_eval/tests/fixtures/jev_live/, docs/JevTriageExperiment.Runbook.md
+
+## 2026-09-19 - Schema 2 archive exports and empty-export scan fix
+Type: Bug Fix
+Context: Downstream archive readers need the scraper's existing triage and
+signal judgments without reparsing article bodies. A zero-document export under
+a custom basename was later scanned as an article and failed with
+`MissingFrontmatter`.
+Change: Added canonical schema-2 archive blocks, escaped body markers,
+provenance-aware annotations, and an in-file line-offset index including the
+zero-document artifact signature.
+Lessons Learned: Generated artifacts need a content signature even when their
+normal payload is empty; filename-only exclusion is insufficient for custom
+names.
+Prevention: Keep index-only archives in shared exact-byte fixtures and verify a
+subsequent corpus export excludes them by signature.
+Refs: crates/harvester_engine/src/export.rs,
+crates/harvester_engine/tests/output.rs,
+crates/harvester_core/src/update/archive.rs, docs/ArchiveExportFormat.md
+
+## 2026-09-20 - Archive selection coverage counters
+Type: Implementation
+Context: The portfolio needs to see how much of a bounded export window the
+scraper held back, including articles without a loaded triage result.
+Change: Added submit-time triage priority snapshots and bounded-export index
+counters derived from the exporter-owned, filtered and canonicalized document
+map. Added byte-exact bounded-export coverage and invariant/zero-export tests,
+including distinct per-priority counts and the manual-exclusion reducer path.
+Coverage is included in the completion log; corrupt cached priorities are
+warned with their URL and retained in the `unavailable` invariant bucket.
+Refs: crates/harvester_engine/src/export.rs,
+crates/harvester_engine/tests/output.rs,
+crates/harvester_core/src/triage.rs,
+crates/harvester_core/src/update/archive.rs,
+crates/harvester_io/src/effect_runner/dispatch.rs,
+docs/ArchiveExportFormat.md
+
+
+## 2026-09-23 - Incremental corpus preparation and in-memory summary hand-off
+Type: Implementation
+Context: Repeated intake refreshes and summary starts reread and prepared the same corpus,
+including aggregate collection text that article triage did not use.
+Change: Added a process-lifetime metadata scan index in the effect runner, download-ordered
+window deltas with per-article preparation budgets, verdict-preserving pre-triage merges,
+and refresh-aware settlement. Summaries now use triage-session text. Processing starts
+load configuration once and re-prepare mismatched budgets before model dispatch; following
+summaries reuse the snapshot. Effective template overlays participate in budget calculation.
+Existing full-list tests use the full-window delta adapter; asynchronous configuration
+fixtures complete the new handshake without deleting tests. The budget test
+`triage_loader_respects_triage_budget` was migrated to
+`triage_loader_respects_shared_summary_budget`. Run progress remains accumulated
+in the reducer, including summary starts that no longer receive a disk-load message.
+Refs: crates/harvester_engine/src/briefing/corpus_index.rs,
+crates/harvester_core/src/update/processing.rs,
+crates/harvester_core/src/update/tests/delta_tests.rs,
+crates/harvester_engine/tests/corpus_scan_index.rs,
+crates/harvester_io/src/effect_runner/tests.rs
+
+Review follow-up: The index now selects the first filename match for each requested URL,
+returns those matches in download order, and parallelizes cold reads and re-preparation.
+The reducer waits for queued refresh demand and pending processing starts before dispatch,
+preserves completed sessions on start failures, and accepts a missing ArticleTriage context
+for standalone summaries. Context and overlay handlers, plus configuration fixtures, now
+share their implementations. Index reset is requested atomically so the host does not wait
+for a scan. Regression coverage includes duplicate URLs, pending refresh, completed-session
+preservation, standalone summary configuration, and corpus-clear reset. The engine order test
+is now `scan_tracks_new_changed_deleted_files_and_requested_order_excluding_archives`.
+Prepared text remains in pre-triage after hand-off, leaving three copies where two
+previously existed; sharing that text is a possible memory-use follow-up.
+
+## 2026-09-23 - Shared model dispatch and current-key scoring
+Type: Bug Fix
+Context: Independent triage and summary limits plus unbounded scoring could exceed the
+worker capacity. Scoring could also consume a historical summary or retain a score after
+its upstream input changed.
+Change: Added one reducer scheduler with scoring, summary, then triage priority and
+admission order within each stage. Cache hits consume no request slot. The synchronous
+budget and worker share an engine cap of 10; desktop still defaults to 3 and batch now
+defaults to 10. Batch API buffering uses a separate session-call allowance, with both
+settings logged as `[model-budget]`. Scoring admits pending work only with current-key
+triage and summary results, retains an input digest, and replaces changed Completed or Failed
+entries while refusing same-digest re-admission. Pending inputs update without another count;
+in-flight and deferred entries keep their original request until it settles. Session-call
+quota exhaustion halts dispatch for the process and leaves a visible restart warning.
+Provider credit exhaustion and the existing consecutive-rate-limit threshold halt the
+current run, then reset at the next explicit triage or summaries start. All halts fail
+pending entries across all three stages; stale completions from replaced sessions do not halt.
+Lessons Learned: A downstream queue needs both upstream provenance and its own admission
+identity. Free slots must be allocated centrally, including after cache replay. Count
+outstanding request IDs; preserving an in-flight score lets its paid result reach the cache.
+Prevention: Added emitted-effect regressions for shared capacity, priority, admission order,
+cache completion, historical-key rejection, changed terminal/in-flight scores, provider
+halts and restart semantics, stale quota completions, view settlement after score replacement,
+and deferred allowance separation. The renamed test
+`changed_in_flight_score_settles_and_caches_old_request_before_readmission` replaces
+`changed_in_flight_score_keeps_its_slot_until_old_completion_arrives`; the renamed
+`scoring_uses_run_frozen_triage_key_after_live_metadata_changes` replaces
+`scoring_rejects_triage_from_an_old_key`; and
+`current_summary_key_uses_current_metadata_instead_of_historical_timestamp` replaces
+`summary_cache_key_for_url_uses_parsed_rfc3339_order`. Existing tests were migrated, with no test files
+or coverage removed. The renamed CLI test `llm_concurrency_defaults_to_worker_cap` replaces
+`llm_concurrency_defaults_to_doubled_summary_parallelism`; completed-triage fixtures now
+seed their current cache identity, and pipeline progress tests respect the shared slot.
+The launch scripts still pass no concurrency setting and were left unchanged; Pester is
+reserved for the coordinator. No live model calls, UI/IPC edits, or corpus changes.
+Verification: `cargo build --offline`; `cargo test --offline -p harvester_engine
+-p harvester_core -p harvester_io -p harvester_batch -p harvester_ui_bridge`
+(engine 457 passed, 1 ignored; core 625; IO 106; batch 193; UI bridge 27);
+`cargo clippy --offline --all-targets -- -D warnings`; and `cargo fmt` passed.
+Final test totals: engine 458 (457 passed, existing `real_corpus_dry_run` ignored),
+core 622 passed (baseline 610), IO 106 passed, batch 193 passed (baseline 191),
+UI bridge 27 passed. No required Rust checks remain outstanding.
+Refs: crates/harvester_core/src/update/model_dispatch.rs,
+crates/harvester_core/src/update/model_dispatch_tests.rs,
+crates/harvester_core/src/update/signal_candidate.rs,
+crates/harvester_batch/src/runner/bootstrap.rs,
+crates/harvester_batch/src/cli.rs, docs/Architecture.md
+
+## 2026-09-24 - Identity-based unfinished-work summary
+Type: Implementation
+Context: Pipeline overlap needs completeness to survive window reloads and distinguish current-key results from stale or missing stage work.
+Change: Added reducer-computed per-stage verdicts and a stored per-identity aggregate, call estimates, and the pure strict-threshold reprocess-notice evaluator. The reducer refreshes an article identity on completion, plus any identity affected by cache eviction, and rebuilds after metadata, cache hydration, window, or broad session changes; mutator revisions also catch briefing-owned quota halts and restored sessions. The classifier and dispatch share key builders, with per-pass context hashes and indexed triage aliases. Pending entries remain in progress even with a stale key snapshot; admitted work is excluded from `articles_with_work`. The retained notice test is `state::unfinished_work::tests::reprocess_notice_uses_strict_article_and_quota_thresholds`.
+Verification: An included 10,450-member host-drain fixture with triage and summary caches measures article-completion reducer cost under the 40 ms budget and prints the prompt-version full-pass cost. The two existing host-drain tests remain unchanged. An explicitly ignored test prints the production-scale view cost and fails the 40 ms gate when run; this view-build cost predates the completeness summary and is an open, separately reviewed step before further pipeline work.
+Refs: crates/harvester_core/src/state/unfinished_work.rs, crates/harvester_core/src/update/tests/unfinished_work_tests.rs, crates/harvester_ui_bridge/tests/host_drain_cost.rs, docs/Architecture.md
+
+## 2026-09-25 - Reduce production-scale desktop view cost
+Type: Bug Fix
+Context: The original 10,450-article included-window fixture had no restored jobs or loaded triage session. A review scratch harness measured 19 ms for that jobless case, 172 ms after restoring 10,450 token-bearing jobs, and 555 ms with those jobs and a live triage session. Parallel test runs had also ranged from 20 to 47 ms even for the jobless case. The fixed host-drain budget remains 40 ms.
+Change: Reused the live archive corpus for display, switched pre-triage coverage to borrowed iteration, and used the triage cache's current-metadata priority aliases. Added a reducer-maintained cache-derived archive score index refreshed after global input-revision changes and by content hash on triage cache writes and evictions. Triage and pre-triage sessions index URL lookups; jobs store their canonical archive URL key; a reducer-maintained job-token index preserves later-job precedence. The view and archive dialog use the same token-estimate helper. Empty-query job selection skips summary lookup, repeated filter-phase checks are hoisted, and the view reuses archive corpus and summary coverage for readiness checks. The two existing drain fixtures remain; the enabled included-window fixture now restores all 10,450 completed jobs, with loaded Triaging and Complete variants. Timing tests serialize with each other to remove test-file contention.
+Lessons Learned: A jobless fixture hid canonical URL work, and an empty triage session hid linear per-URL scans. The original 18 ms result was not representative of restored production state. Archive scores and token identities need reducer-owned updates so view construction remains a read.
+Prevention: Compare stored indexes against from-scratch job, triage, filter, cache, and archive computations after restore, replacement, manual decisions, and cache writes. Keep committed IPC fixtures unchanged and report the spread across repeated dev-profile timing runs rather than one best result.
+Verification: Three final dev-profile runs of all six serialized host-drain tests passed with no ignores. View-build + comparison + projection totals in run order were 16/20/16 ms for the included window, 13/17/18 ms for loaded Triaging, and 19/22/22 ms for loaded Complete. The Complete median was 22 ms, above the 20 ms target but well below the fixed 40 ms budget; an earlier pre-final run reached 30 ms, so timing spread remains material. The two existing 9,475-job cases were 16/13/14 ms normal and 11/13/12 ms search. The article-completion reducer medians were 812/1012/818 microseconds; the prompt-version full passes took 493999/629959/623979 microseconds. `cargo build --offline`, `cargo test --offline -p harvester_core -p harvester_ui_bridge` (core 647, bridge 31; zero ignored), `cargo test --offline -p harvester_io -p harvester_batch` (IO 106, batch 193), `cargo clippy --offline --all-targets -- -D warnings`, and `cargo fmt` passed. Committed IPC fixtures passed unchanged.
+Refs: crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/state/batch.rs, crates/harvester_core/src/triage.rs, crates/harvester_core/src/pre_triage_filter.rs, crates/harvester_ui_bridge/tests/host_drain_cost.rs
+
+## 2026-09-25 - Reducer-owned waves, admission and run scopes
+Type: Implementation
+Context: Downloads and article-model stages need to overlap while retries, cached results and deferred replay retain consistent ownership.
+Change: Added process-lifetime keyed sessions, identity-based per-run admission, bounded waves, downstream release markers and replay origins. Full, Resume and Continue scopes arm dispatch, freeze configuration once per run and settle automatically without host advance messages. Progress counts admitted cache hits, grows with waves and exposes total_is_final through IPC schema 10. Startup hydration leaves scoring unadmitted. Wave releases and initial reprocessing notices use engine_logging rather than the 50-entry activity feed. Pure collect-only batch cycles now request Continue before rearming, the sole batch-host migration brought forward; collect-only replay and empty-cycle tests cover automatic Terminal and later-cycle isolation.
+Verification: Reducer walks cover three download bursts, 12/12/6 admission, independent stale-key and failure retries, non-blocking deferred replay, configuration reuse, hydration and monotonic progress. GUI/batch parity remains covered. Production-scale tests retain the 40 ms threshold. Indexed pending queues, identity indexes and changed-wave tracking replace repeated full-session scans; timing and size defaults are unchanged. View fixtures retain a genuinely open poll so active-run assertions remain meaningful with automatic settlement.
+Final checks: cargo build, both all-target Clippy checks with warnings denied, cargo fmt, and frontend check/build/fmt passed offline or without dependency installation. The four-crate Rust suite passed 989 tests (581 core, 106 IO, 195 batch, 25 bridge unit tests; integrations: brave 2, desktop job-list mode 2, jobs 11, LLM usage 10, noop 1, persistence 3, pre-triage filter 11, reducer behaviour 14, triage orchestration 22, host drain cost 6), with zero failures or ignored tests. Frontend: 82 tests in six files. One earlier run hit the existing persistence debounce timing test while checks overlapped; the isolated full rerun passed without changing that test. Frontend test literals only gained total_is_final; controls were unchanged.
+Test migrations: changed_digest_updates_pending_without_replacing_scoring_or_deferred -> changed_digest_preserves_pending_scoring_and_deferred_admission; load_progress_activates_loading_stage_with_intermediate_counts -> load_progress_counts_admission_instead_of_directory_scans; deferred_signal_rearm_does_not_enqueue_into_a_done_stage -> deferred_signal_rearm_starts_a_new_continue_run; rerun_resets_six_pending_stages_with_a_new_run_id_and_ignores_stale_sessions -> rerun_counts_current_cache_hits_under_a_new_run_id; advance_pulses_do_not_satisfy_the_post_dispatch_message_guard -> advance_pulses_cannot_overtake_configuration_or_article_loading; observation_counts_use_current_rearmed_epoch_not_historical_counters -> observation_counts_include_accumulated_rearmed_members; signal_candidate_cache_loaded_sweeps_eligible_summary -> signal_candidate_cache_loaded_leaves_scoring_unadmitted_until_run; triage_cache_hydration_sweeps_signal_candidates_after_metadata_and_summary_restore -> triage_cache_hydration_waits_for_explicit_scoring_admission. Existing test files and parity assertions remain.
+Refs: crates/harvester_core/src/pipeline_waves.rs, crates/harvester_core/src/update/waves.rs, crates/harvester_core/src/update/pipeline_run/tests.rs, crates/harvester_core/src/update/pipeline_run/wave_tests.rs, crates/harvester_core/tests/triage_orchestration.rs, crates/harvester_batch/src/runner/tests.rs, crates/harvester_ui_bridge/tests/host_drain_cost.rs, docs/Architecture.md
+
+## 2026-09-25 - Review fixes for batch admission and pipeline settlement
+Type: Bug Fix
+Context: Continue armed Batch API intake before polling, Stop stranded never-dispatched work, and unarmed rearm could leave Pending entries with no dispatcher. Scoring also recorded waves for rejected duplicate enqueue attempts.
+Change: Continue is requested only on pure collect-only cycles. Intake keeps its single post-download triage hand-off; `--drain` requests no run. Unarmed rearm leaves entries Deferred while remembering replay members. Accepted Stop withdraws Pending triage, summary and scoring entries without marking failures, then lets in-flight results settle and remain cached. Scoring records admission and its wave only after enqueue succeeds. Removed unused progress plumbing and made the batch shim use indexed triage identities and stored unfinished classes without cloning prepared articles. Progress counting uses borrowed identity keys.
+Lessons Learned: Run arming affects intake scheduling before configuration returns. Settlement requires pending work to have a dispatcher; Stop and unarmed replay must never create an unreachable queue. A replay test must replay an actual member in a fresh admission scope to exercise release markers.
+Prevention: Added batch intake and drain cycle tests, a three-article Stop reducer test, a duplicate-scoring Resume assertion, and a budget-one dispatch-order test. Rewrote `rerun_counts_current_cache_hits_under_a_new_run_id` as `rerun_counts_current_triage_and_summary_hits_without_readmitting_scoring`. Strengthened `deferred_triage_replays_once_and_does_not_block_completed_wave_members`; temporarily removing the summary release-marker guard made it fail, and restoring the guard made it pass. No test file was deleted.
+Verification: Offline build, four-crate Rust suite (993 passing tests), both all-target Clippy checks and cargo fmt passed. No IPC shape or frontend file changed in this review.
+Refs: crates/harvester_batch/src/runner.rs, crates/harvester_batch/src/runner/tests.rs, crates/harvester_core/src/update/pipeline_run/wave_tests.rs, crates/harvester_core/src/update/model_dispatch.rs, crates/harvester_core/src/update/waves.rs, docs/Architecture.md
+
+## 2026-09-25 - Mid-download run start no longer waits for downloads to end
+Type: Bug Fix
+Context: In desktop testing, pressing Run triage + summaries while downloads were arriving logged `[processing-start]` at once, but triage began only after the last download, 30 seconds later. The processing start waited for refresh demand to go idle, and every finished download records new demand, so the start was deferred until intake ended.
+Change: A processing start now waits only for its configuration and for an in-flight article load. It admits the articles already held, and the queued refresh is served afterwards and admitted as later waves. The idle-demand wait dated from the one-shot hand-off, when a start consumed the article list once and a queued refresh would have been missed.
+Lessons Learned: A wait on "no pending demand" is starvation-prone under a steady producer. The reducer walks used bursts with quiet gaps between them, so they never exposed the stall; a test must keep demand arriving while each load is in flight.
+Prevention: Added `run_requested_during_continuous_downloads_starts_triage_before_downloads_end`, which failed before the change. Rewrote `batch_and_processing_start_wait_for_pending_refresh_and_configuration` as `processing_start_waits_for_configuration_but_not_queued_refresh`, and `summaries_wait_for_queued_refresh_before_preparation_or_dispatch` as `summaries_prepare_through_one_load_despite_queued_refresh`; both assert the new ordering, and the later refresh is still admitted.
+Verification: cargo build, the four-crate Rust suite (994 passing tests), both all-target Clippy checks and cargo fmt passed.
+Refs: crates/harvester_core/src/update/processing.rs, crates/harvester_core/src/update/pipeline_run/wave_tests.rs, crates/harvester_core/src/update/tests/delta_tests.rs
+
+## 2026-09-26 - Entity-index upsert bursts no longer freeze the desktop host
+Type: Bug Fix
+Context: In desktop testing, the UI froze for 55 seconds right after a mid-download run start. `engine.log` showed the reducer's triage dispatch at 05:48:33 but the matching `[llm-dispatch]` at 05:49:28, with no reducer activity in between. The desktop driver executes effects on its own thread. The run start reused 163 cached triages and 143 cached summaries in one reducer step, and each emits `UpsertEntityIndexEntry`. The entity-index worker queue was a 256-slot `sync_channel`, and the worker loaded and rewrote the whole index per upsert: 1.2 s per cycle for the real 11 MB, 9,696-entry index in the dev profile. About 50 sends overflowed the queue and blocked the driver for roughly a minute. Before overlapping stages, triage and summary cache hits arrived in separate steps and stayed under the bound, so the per-upsert rewrite cost was hidden.
+Change: The worker drains every queued upsert and applies the batch with one load, merge and atomic write, still serialized on its thread. The queue is an unbounded channel, so effect execution never waits on disk. Replaying the burst against a copy of the real index, handing off 306 upserts took 0.2 ms instead of about a minute, and all were on disk within 2 s instead of about 6 minutes.
+Lessons Learned: A bounded channel between the host thread and a slow worker turns worker cost into UI latency once one reducer step emits more than the bound. When stages overlap, per-step effect counts grow with the window, so a bound that held for one stage at a time no longer does. The first suspects (reducer cost, view build) were ruled out by replaying the real caches and history read-only against the reducer; that replay took 0.5 s for the same step.
+Prevention: Added `entity_index_worker_writes_a_queued_burst_once`: 300 queued upserts produce exactly one index write and all 300 entries. It did not compile against the old per-message worker, which reported no write count.
+Verification: cargo build, the four-crate Rust suite (995 passing tests), both all-target Clippy checks and cargo fmt passed. A temporary read-only replay against the real `output/` files confirmed the timings above and was removed.
+Refs: crates/harvester_io/src/effect_runner/worker.rs, crates/harvester_io/src/effect_runner/mod.rs, crates/harvester_io/src/effect_runner/tests.rs
+
+## 2026-09-27 - Batch and import hosts use reducer-owned pipeline runs
+Type: Implementation
+Context: Pipeline sessions and wave admission were reducer-owned, but batch and import still chose stage order through legacy orchestration and a new-job gate. Batch API intake also needed a host-selected policy that waits for downloads before its one triage hand-off.
+Change: Batch intake now requests Full and pumps PipelineRunAdvance; recurring batch keeps overlapping intake, Batch API waits for downloads and releases one intake wave, and collect-only passes request Continue before deferred rearm. Drain disables arming and exits after its collection pass. Import requests Resume after import completion. Both paths settle through batch_status(). Startup metadata and the restored window are reduced before the first batch cycle reports a known unfinished count; the host prints the reducer-recorded reprocess notice after initial admission. Missing or empty API keys mark batch and import AI unavailable before run requests, so keyless Full runs poll and terminate without model work. Empty included windows admit an empty wave without disarming later arrivals. Removed inferred stage arming, BatchNextAction, TriageClicked, PrepareSummariesClicked, require_new_jobs_since, and the orchestration helpers. Added fake transport coverage for three partial collection cycles and exactly-once replay release. Documented Intake-first dashboard precedence and regenerated the changed run-progress UI snapshots.
+Test migrations: The ten import-only settlement tests `import_cycle_does_not_settle_while_triage_in_flight`, `import_cycle_does_not_settle_while_triage_pending`, `import_cycle_settles_when_all_phases_drained`, `should_settle_import_cycle_when_idle`, `should_not_settle_import_cycle_when_in_flight`, `should_not_settle_import_cycle_when_summaries_pending`, `should_settle_import_cycle_when_complete_and_no_pending`, `should_not_settle_import_cycle_when_pre_triage_loading`, `should_not_settle_import_cycle_when_pre_triage_reviewing`, and `should_not_settle_import_cycle_when_pre_triage_ready_to_triage` now use the import trigger tests `import_resume_waits_for_import_terminal_without_owning_stage_settlement` and `imported_articles_enter_resume_run_and_reach_summaries`, with shared stage settlement covered by `triage_loading_is_never_reported_as_settled`, `batch_status_is_running_when_pre_triage_load_is_in_flight`, `batch_status_is_running_when_summary_article_load_is_in_flight`, `unrequested_review_work_does_not_enter_a_stage_queue`, and deferred batch settlement tests. `test_orchestration_dispatch_skips_settlement_in_same_iteration` maps to `batch_api_collects_replays_and_releases_summary_waves_once_across_three_cycles`; `batch_api_intake_after_collection_waits_for_all_downloads_and_hands_off_once` was renamed `batch_api_intake_waits_for_downloads_and_hands_off_once`; `new_jobs_gate_is_disabled_for_batch_api_single_shot_mode` maps to `single_shot_cycle_processes_unfinished_work_without_new_jobs`; `test_should_run_ai_orchestration_when_enabled_without_new_jobs_gate` and `test_should_not_run_ai_orchestration_when_no_new_jobs_since_baseline` map to `recurring_cycle_retries_a_failed_article_without_new_jobs`; `test_should_run_ai_orchestration_when_new_jobs_arrived_since_baseline` maps to `recurring_staggered_downloads_dispatch_triage_and_settle_once` and `batch_api_intake_waits_for_downloads_and_hands_off_once`; `drain_rearms_without_requesting_a_run_or_model_work_and_settles` maps to `drain_with_restored_startup_work_issues_no_model_request_and_terminates`, now asserting rearm emits no model or configuration effect; `drain_never_orchestrates_so_no_new_batches_are_submitted` was migrated to `drain_bootstrap_disables_unarmed_intake_refreshes`; and `batch_next_action_dispatches_triage_from_reviewing` maps to `unrequested_review_work_does_not_enter_a_stage_queue`. The former Resume-only bodies of `recurring_cycle_retries_a_failed_article_without_new_jobs` and `single_shot_cycle_processes_unfinished_work_without_new_jobs` were replaced under the same names with Full runs through `run_dispatch_loop` and a fake model; `keyless_full_dispatch_loop_polls_and_settles_on_each_cycle` covers active-run advance and repeat intake.
+The reducer tests `triage_clicked_consumes_reviewing_pre_triage_into_triage_session`, `triage_clicked_consumes_ready_pre_triage_into_triage_session`, `triage_clicked_sets_current_working_corpus_to_unavailable_until_triage_completes`, `triage_clicked_emits_load_effects`, and `triage_clicked_emits_load_effect` now exercise Resume through `resume_run_consumes_reviewing_pre_triage_into_triage_session`, `resume_run_consumes_ready_pre_triage_into_triage_session`, `resume_run_sets_current_working_corpus_to_unavailable_until_triage_completes`, `resume_run_without_loaded_articles_emits_no_model_effects`, and `resume_run_triages_prepared_article`. `triage_clicked_while_active_is_noop` maps to `duplicate_resume_request_joins_active_run_without_duplicate_dispatch`; `triage_clicked_during_run_keeps_desktop_workspace_stable_after_legacy_navigation` maps to `duplicate_resume_request_keeps_desktop_workspace_stable_during_run`; `job_selected_during_run_keeps_desktop_workspace_stable_after_legacy_navigation` was renamed `job_selection_during_run_preserves_the_current_workspace`; and `triage_and_briefing_can_interleave` maps to `resume_run_enters_the_pipeline_after_briefing_readiness_failure`. `standalone_summaries_reprepare_before_dispatch_and_reject_wrong_budget`, `processing_start_waits_for_configuration_but_not_queued_refresh`, and `summaries_prepare_through_one_load_despite_queued_refresh` were migrated to `resume_reprepares_before_summary_dispatch_and_rejects_wrong_budget`, `resume_run_loads_the_current_window_before_triage`, and `resume_run_triages_and_summarizes_the_current_window`. `legacy_run_settles_and_resume_retries_failure_without_host_advances` was renamed `resume_run_retries_failed_work_in_a_new_run`.
+Verification: `cargo build --offline`; `cargo test --offline -p harvester_batch -p harvester_core -p harvester_io -p harvester_ui_bridge` (batch 193; core 587; core integrations: 2 brave, 2 desktop job-list, 11 jobs, 10 LLM usage, 1 noop, 3 persistence, 11 pre-triage filter, 14 reducer behavior, 22 triage orchestration; IO 107; bridge 25 unit and 6 host-drain tests); `cargo clippy --offline --all-targets -- -D warnings`; and `cargo --offline fmt`. The earlier host migration regenerated UI snapshots with `UPDATE_UI_FIXTURES=1 cargo test --offline -p harvester_ui_bridge`; these review fixes did not change fixtures and did not regenerate them. No launchers or live model calls were used.
+Refs: crates/harvester_batch/src/runner.rs, crates/harvester_batch/src/runner/bootstrap.rs, crates/harvester_batch/src/runner/dispatch_loop.rs, crates/harvester_batch/src/runner/reporting.rs, crates/harvester_batch/src/runner/tests.rs, crates/harvester_batch/src/import_mode.rs, crates/harvester_core/src/pipeline_waves.rs, crates/harvester_core/src/state/run_progress.rs, crates/harvester_core/src/update/pipeline_run.rs, crates/harvester_core/src/update/processing.rs, crates/harvester_ui_bridge/src/fixtures.rs, crates/harvester_ui_bridge/tests/host_drain_cost.rs, docs/Architecture.md, docs/DecisionLog.md, docs/Spec.briefing-archive-alignment.md
+
+## 2026-09-27 - Stop drains pipeline work and export follows run state
+Type: Implementation
+Context: Stopping an overlapping run must retain work already in flight while preventing new downloads, model requests, and downstream releases. Export must not split an active run's window or be blocked by work left unfinished after it settles.
+Change: Finish Stop now drains the current download and model requests, withdraws undispatched work without failing it, terminalizes the run after settlement, and returns the session to Idle. The engine accepts the next run with a fresh cancellation token. Core gates archive open and submit on Active or Stopping state and includes `archive_enabled` and `run_state` in the versioned desktop snapshot.
+Verification: `cargo build --offline`; `cargo test --offline -p harvester_engine -p harvester_io -p harvester_core -p harvester_ui_bridge -p harvester_batch` passed. Per-crate counts from the final test run: engine 459 (1 ignored), IO 107, core 671, UI bridge 31, batch 193. Both `cargo clippy --offline --all-targets -- -D warnings` and `cargo clippy --offline -p harvester_ui --all-targets -- -D warnings` passed, as did `cargo fmt`. Frontend `npm run check` passed (82 tests), `npm run build` passed, and `npm run fmt` reported no changes. UI fixtures were regenerated with `UPDATE_UI_FIXTURES=1`; no launchers or live model calls were used.
+Review fixes: Active runs with closed admission still refresh the pre-triage window after downloads; only Stop drains suppress ordinary refresh and new intake. The engine now rejects enqueues after Stop until `StartSession` sends Resume. Stopping counts started, unfinished downloads and pending refresh demand. Export gate messages clear at settlement without erasing checkpoint saves. The idle-with-corpus snapshot now stops before the last in-flight triage result and drains that successful result through the reducer, leaving no synthetic failed summary activity.
+Test migration: `accepted_stop_while_scoring_is_active_leaves_no_stage_active` -> `accepted_stop_drains_an_in_flight_score_before_terminalizing_the_run`; `accepted_stop_freezes_poll_run_while_pipeline_driver_is_idle` -> `accepted_stop_during_poll_drains_the_poll_without_ingesting_its_urls`; `accepted_stop_during_triage_leaves_skipped_stages_pending_and_never_dispatches_summaries` -> `accepted_stop_during_triage_drains_before_terminalizing_skipped_stages`; `urls_pasted_ignored_while_finishing` -> `urls_pasted_again_after_stop_drain` (now covers both during and after drain); `archive_clicked_after_triage_start_has_zero_pending_pre_triage_count` -> `archive_clicked_after_triage_start_is_gated_while_run_active` (retains the pending-count assertion after settlement). `pre_triage_refresh_after_triage_start_repopulates_pre_triage_without_mutating_active_triage` and `triage_rerun_after_complete_reuses_cache_when_available` were restored to their active-run forms; `compatible_triage_cache_hit_exports_the_stored_model_id` was substantially reworked under the same name. No test file was removed.
+Refs: crates/harvester_engine/src/engine.rs, crates/harvester_engine/tests/engine_stop.rs, crates/harvester_core/src/update/pipeline_run.rs, crates/harvester_core/src/update/archive.rs, crates/harvester_core/src/update/pipeline_run/wave_tests.rs, crates/harvester_core/src/update/tests/archive_tests.rs, crates/harvester_ui_bridge/src/ipc.rs, docs/Architecture.md, docs/DecisionLog.md
+
+## 2026-09-27 - Desktop Run is the single primary pipeline action
+Type: Implementation
+Context: The desktop needed one full pipeline action and a clear way to process known unfinished work after a run or Stop drain. Run controls, stage progress and export availability must reflect reducer-owned state.
+Change: Run now requests a Full run; Process unfinished sends a payload-free Resume intent gated by the stored unfinished-work summary and AI availability. Removed PollSources from the desktop intent vocabulary, versioned IPC as schema 12, and added reducer-generated fixtures for overlapping stages, unfinished work, Stop draining, export availability and the reprocess notice. Stage rows support overlapping work, open totals show Waiting for articles without ETA, and the reprocess notice stays inline. Archive actions follow core export availability.
+Verification: `cargo build --offline`; serialized `cargo test --offline -j 1 -p harvester_core -p harvester_ui_bridge -p harvester_batch` passed (597 core unit tests, 78 core integration tests, 27 bridge unit tests, 6 host-drain tests, and 193 batch tests); both requested Clippy commands, `cargo --offline fmt`, frontend `npm run check` (95 tests), `npm run build`, and `npm run fmt` passed. Fixtures were regenerated with a single `UPDATE_UI_FIXTURES=1` bridge test run. An earlier concurrent run triggered host-drain timing failures under test-process load; the isolated host-drain check and serialized complete suite passed. The IPC probe was not run.
+Test migrations: No test files were removed. RunSurface's three-action test was split into Run, Resume and active/Stopping cases; the active case retains Stop dispatch coverage, and the reprocess fixture case retains muted-row coverage. App's PollSources dispatch test became `dispatches Run and Process unfinished through the restricted intent channel`; core triage-start view assertions now check their scenario-specific state alongside the lifecycle matrix test `desktop_run_actions_follow_lifecycle_unfinished_work_and_ai_availability`.
+Review fixes: The reprocess notice now disappears when a run becomes Terminal. Waiting stages remain Active without a start timestamp until work is admitted; stages with no work return to Pending during Stop. Successful completions during Stop update progress counters before terminal settlement. The desktop fixture shape test includes the six new snapshots, and the primary Run button uses the shared hover styling.
+Refs: crates/harvester_core/src/ui_intent.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/view_model.rs, crates/harvester_ui_bridge/src/fixtures.rs, frontend/src/components/RunSurface.tsx, frontend/src/App.tsx, docs/Architecture.md, docs/DecisionLog.md
+
+## 2026-09-28 - Keyless replay benchmark for simplification baseline
+Type: Implementation
+Context: Later simplification phases need a repeatable measure of reducer, persistence, and desktop snapshot costs, plus a fixture that protects existing on-disk state and paid results.
+Change: Split the batch host into a library and thin CLI entry point and added a provider and effect-sink seam for the keyless replay benchmark. The batch harness shares the production single-shot cycle dispatch, progress boundary, and final state writes; the desktop harness uses desktop startup and real 75 ms ticks. The report covers completion time, reducer time by cheap message kind, state-clone time as its own bucket, effect counts, successful private-file writes including per-call model replay records, desktop driver iterations and phase times, view builds, snapshots, synchronous canned effect handling, and persisted RSS sources skipped when more than five have entries. The clone remains in the batch inbox path so its planned removal can be measured. Formatting full messages in the batch loop would have hidden that cost, so both hosts use a cheap message kind. Held article URLs are removed from seen sets only in the benchmark copy so the real poll filters can rediscover them. The synthetic carry-over fixture checks rewritten restored jobs and links, both window-size pairs, current and stale paid results, and product-filtered RSS and Brave seen sets. The three paid-result RON stores now serialize in sorted-key order; this owner-approved byte-order change makes cache-hit rewrites byte-identical and stabilizes fixture comparisons.
+How to run: `cargo run --offline -p harvester_batch --example replay_bench -- --host batch` or `cargo run --offline -p harvester_batch --example replay_bench -- --host desktop`. Pass `--source-dir` to select a copyable output folder, `--work-dir` to choose the private copy location, `--reuse-copy` to reuse a marked benchmark copy, and `--llm-latency-ms 1500` to model provider delay. The default work folder is `.local/bench/<timestamp>`. The benchmark measures synchronous model calls, while the launcher normally uses `--batch-api`; it does not measure provider batch submission and collection.
+Refs: crates/harvester_batch/examples/replay_bench.rs, crates/harvester_batch/examples/replay_support/mod.rs, crates/harvester_batch/tests/replay_bench.rs, crates/harvester_batch/tests/fixtures/carry_over, crates/harvester_io/src/triage_cache_store.rs, crates/harvester_io/src/summary_cache_store.rs, crates/harvester_io/src/signal_candidate_cache_store.rs
+
+
+## 2026-09-28 - Save paid results as they arrive and refuse unsafe stores
+Type: Bug Fix
+Context: Triage and summaries were saved only at settlement. Corrupt RON loads
+could become empty stores, and concurrent full-clone rewrites could finish in
+reverse order and replace newer paid results. Capacity eviction discarded old
+paid work.
+Change: Shared unlimited result storage, reducer-emitted incremental saves and
+one ordered coalescing sink replace these paths. JSONL migration preserves the
+RON backup, verifies before publication, and recovers torn tails to sidecars.
+Store failures disable AI with a visible filename and reason; CLI intake continues
+and returns non-zero. Every cache reader, including Batch API confirmation and
+summary refresh, reads the new store.
+Lessons Learned: Persistence must follow each accepted paid result rather than
+session settlement. An unreadable legacy store is an error, never an empty
+success. Concurrent full snapshots can lose data even when each write is atomic.
+Prevention: Regression tests cover early reducer effects, coalescing deadlines,
+explicit and shutdown flushes, crash recovery, migration byte preservation,
+retention beyond 10,000 entries, visible refusal and new-store confirmation.
+Store readers share an in-process append lock so tail recovery in the same host
+cannot truncate a live write. Import now loads saved triage results too; it can
+reuse them and refuses an unreadable triage store instead of overwriting its RON
+with only that import's results.
+Refs: crates/harvester_io/src/result_store/tests.rs,
+crates/harvester_io/src/result_sink.rs,
+crates/harvester_batch/tests/result_store_refusal.rs
+
+## 2026-09-29 - Poll limits leave un-emitted entries unseen
+Type: Bug Fix
+Context: RSS and Brave applied their per-poll caps after marking every newly returned entry seen, so entries past the cap disappeared from later polls.
+Change: RSS and Brave now mark only emitted URL-bearing entries as seen. RSS entries without a URL remain marked seen, preserving the prior behavior, and the stale dead-code allowance on `poll_rss_source` is gone.
+Lessons Learned: A poll cap is an intake boundary, so seen-state must match the entries actually handed to the reducer.
+Prevention: Added limit-one, two-poll regressions for both seen sets and strengthened `poll_rss_source_applies_max_after_dedup` to assert the next entry is returned by the second poll.
+Refs: crates/harvester_engine/src/rss_seen_set.rs, crates/harvester_engine/src/brave_seen_set.rs, crates/harvester_engine/src/source_poll.rs, crates/harvester_io/src/effect_helpers.rs
+
+## 2026-09-29 - Stop preserves intake for the next Full run
+Type: Bug Fix
+Context: Poll workers persist seen-set changes before their completion message reaches the reducer. A poll finishing after Stop therefore lost its URLs, and queued downloads cancelled before starting were not present in the persisted successful-job list.
+Change: The reducer captures late poll URLs and never-started queued downloads in a pending-intake list included in the existing runtime-persistence snapshot. Startup restores it; Full ingests the list before polling, while Resume leaves it pending.
+Lessons Learned: Persisting source cursors before reducer intake needs an explicit recovery channel for results that arrive after intake closes. Stop-cancelled work needs the same durable path as late poll results.
+Prevention: Regression walks cover Stop, persistence, simulated restart, Full ordering, Resume behavior, old state files, and queued downloads cancelled before their first progress event.
+Refs: crates/harvester_core/src/effect.rs, crates/harvester_core/src/update/pipeline_run.rs, crates/harvester_core/src/update/polling.rs, crates/harvester_io/src/persistence.rs, post_stop_poll_urls_persist_and_full_run_reingests_before_polling_after_restore, stop_preserves_downloads_that_were_queued_but_never_started
+
+## 2026-09-29 - Desktop and command-line starts share one output lock
+Type: Bug Fix
+Context: Separate GUI and batch lock files let the two hosts enter the same output folder concurrently, risking overlapping persistence and corpus writes.
+Change: Both hosts and the IPC probe now use `.harvester.lock`. Metadata identifies the host, and a refusal names the holder, PID, start time, and lock path. The desktop keeps its pre-window dialog, and the command-line path returns a non-zero failure with the same message.
+Lessons Learned: Lock metadata is part of the user-facing conflict report; file existence alone does not identify whether or who is using the output folder.
+Prevention: A two-direction public-contract test checks both host identities, holder details, and release when each guard is dropped. `--force-unlock` retains its override behavior.
+Refs: crates/harvester_io/src/run_lock.rs, crates/harvester_batch/src/runner.rs, crates/harvester_ui/src/host.rs, desktop_and_command_line_share_lock_and_report_holder_both_directions
+
+## 2026-09-30 - Pending intake respects completed download history
+Type: Bug Fix
+Context: A stopped run could preserve a queued URL while its worker completed successfully, or a late poll could return a URL already downloaded by another source. Clearing URL deduplication for every pending URL then downloaded it again.
+Change: Full-run intake checks each pending URL against job history. Successful or non-cancelled failed jobs block replay; URLs with no job or only cancelled jobs can be retried. A success during Stop removes its URL from pending intake. Stop writes a runtime snapshot only when it adds pending intake, and batch cycle persistence writes the reducer's pending list.
+Lessons Learned: A durable retry queue needs the job outcome as well as the source seen set. A queued reducer stage alone does not prove a worker never started.
+Prevention: Reducer regressions cover a restored successful job, a stopped queued job retried once, and Stop without a pending-list change. The replay harness clears a copied briefing checkpoint so held articles retain their original fetch times and still enter the processing window.
+Refs: crates/harvester_core/src/state/ingest.rs, crates/harvester_core/src/update/pipeline_run.rs, crates/harvester_batch/examples/replay_support/mod.rs, crates/harvester_batch/tests/replay_bench.rs
+
+## 2026-09-29 - Host AI availability rejects blank API keys consistently
+Type: Bug Fix
+Context: The desktop and command-line bootstraps made their own environment checks, and the OpenAI provider accepted whitespace-only keys as configured.
+Change: `harvester_io::host_bootstrap` now owns the shared missing, empty, and whitespace key check used by both hosts. `OpenAiProvider::from_env` also rejects blank values while preserving the provider's existing error messages.
+Lessons Learned: Availability policy belongs at the shared host boundary so both executables disable AI in the same state before they can schedule model work.
+Prevention: Bootstrap regressions cover missing and blank values on the desktop and command-line paths; provider tests cover the empty-value error without reading an existing key.
+Refs: crates/harvester_io/src/host_bootstrap.rs, crates/harvester_batch/src/runner/bootstrap.rs, crates/harvester_ui/src/host.rs, crates/openai_provider_kit/src/openai.rs
+
+## 2026-09-30 - Keyless reconciliation of collected Batch API results
+Type: Implementation
+Context: A collected manifest snapshot can contain the only durable copy of a paid result. Batch API retirement required confirmation of every successful collected record in the append-only result stores.
+Change: A temporary keyless reconciliation tool matched manifest-frozen keys against result-store JSONL, with nine temporary-folder regressions for validation, provenance and read-only behavior. The owner confirmed all 33 successful signal-candidate records with no missing, invalid or outstanding records. The tool and its tests were removed in the same phase after that check authorized retirement.
+Refs: crates/harvester_io/src/result_store.rs, docs/plans/Plan.Simplification.md
+
+## 2026-09-30 - Removing dry-run eliminates seen-state side effects (bug 1)
+Type: Bug Fix
+Context: The former dry-run polled sources and marked returned entries seen despite not downloading them.
+Change: Removed dry-run and the other batch-only modes with the Batch API. Default command-line invocation now polls, downloads, processes synchronously and exits. The fixed launcher has no runtime arguments. The owner first confirmed every successful collected result through the temporary read-only reconciliation, then its example and support code were removed.
+Lessons Learned: A preview that invokes a stateful poller cannot promise a read-only run. Collected does not mean persisted: confirm paid results by exact frozen keys before removing their recovery path.
+Prevention: The real CLI regression runs with no flags in a temporary folder and verifies exactly one poll, terminal settlement, persistence and exit. The synchronous processing regression also verifies a successful triage result without a mode flag.
+Refs: crates/harvester_batch/src/cli.rs, crates/harvester_batch/src/runner.rs, cli_with_no_flags_polls_one_cycle_persists_and_exits, default_cycle_processes_unfinished_work_without_new_jobs
+
+## 2026-09-30 - Quiet downloads no longer exhaust an iteration cap (bug 8)
+Type: Bug Fix
+Context: Dispatch and browser-import loops counted 100 ms receive timeouts toward a 10,000-iteration cap, failing legitimate long-running work.
+Change: Both loops use the shared 60-second monotonic no-progress watchdog. A received message or in-flight operation resets the idle deadline. Only a full period with neither condition fails, and engine_logging records the stuck pipeline/import operation and phase. Startup hydration uses the same watchdog.
+Lessons Learned: Poll count measures loop scheduling, not progress; quiet active operations must be distinguished from pending work that cannot dispatch.
+Prevention: Dispatch and import regressions survive 10,010 quiet in-flight iterations. Deterministic watchdog tests cover quiet downloads beyond the former elapsed cap, deadline reset by messages and a full idle duration after in-flight work ends. Preserved Stop, wave-overlap, ordering and synchronous-priority tests remain.
+Refs: crates/harvester_batch/src/no_progress.rs, crates/harvester_batch/src/runner/dispatch_loop.rs, crates/harvester_batch/src/import_mode.rs, crates/harvester_core/src/state/run_progress.rs
+
+## 2026-09-30 - Phase 4 review preserves synchronous contracts
+Type: Bug Fix
+Context: Batch API removal dropped mixed tests protecting the synchronous quota clamp and summary-wave barrier, and progress paints still supplied zero cost.
+Change: Rewrote the mixed tests to pin the clamp and same-step release after every triage member settles. Progress paints and resumes now use the worker-reported synchronous session cost. Removed unused host runtime data, sender parameters and the single-variant wave policy; active-run admission still permits overlapping downloads. Restored released provider changelog history and recorded the breaking API removal in 0.4.0 without the unused multipart dependency feature.
+Lessons Learned: Removing an execution path requires separating its feature-specific assertions from the shared contracts in mixed tests. Session usage must reach every progress refresh, including resumes after diagnostics.
+Prevention: Regressions cover zero-budget dispatch, both clamp limits, a two-member triage barrier, dashboard and heartbeat costs, and quiet imports past the former iteration cap. The launch test keeps its executable-with-spaces assertion while expecting the fixed policy's empty argument list.
+Refs: crates/harvester_core/src/update/model_dispatch_tests.rs, crates/harvester_core/src/update/pipeline_run/wave_tests.rs, crates/harvester_batch/src/runner/live_progress.rs, crates/harvester_batch/src/import_mode.rs, scripts/tests/HarvesterLaunch.Tests.ps1
+
+## 2026-09-30 - Retire aggregate briefing, stale-summary refresh and concatenated export
+Type: Implementation
+Context: The owner retained article processing and archive export while retiring unused aggregate and command-line workflows.
+Change: Removed aggregate/stream/history requests, stale-summary refresh, concatenated export, replay provider lookup and Prompt Lab overrides. Summary settlement retains paid results without issuing aggregate work. JSONL and RON migration skip retired prompt entries with a store/count warning. The corpus marker lists only archives; corpus schema 1 and IPC schema 12 remain. Live summary fixtures now enter through triage wave release, and manual pre-triage decisions live in fixture support. Existing disk artifacts are untouched.
+Refs: crates/harvester_core/src/update/test_support.rs, crates/harvester_core/src/update/tests/summary_settlement_tests.rs, crates/harvester_io/tests/retired_summary_entries.rs, crates/harvester_engine/src/corpus_manifest.rs, docs/plans/Plan.Simplification.md
+
+## 2026-09-30 - Preserve archive marker coverage and classify retired paid-result entries
+Type: Bug Fix
+Context: Review of the uncommitted feature removals found archive marker coverage lost with the concatenated exporter, and retired JSONL prompt entries misreported as malformed data.
+Change: Retargeted the marker regression to archive writes and refreshes, shared unknown-prompt detection between RON and JSONL, and asserted aggregated retirement warnings separately from malformed-line diagnostics. Polling tests use Full Run; unreachable corpus-clear fixtures/tests and obsolete deprecation allowances are removed. Added elapsed formatting coverage and reconciled the test ledger.
+Lessons Learned: Removing a feature's test can accidentally remove coverage of a surviving public output contract. Retired identifiers are an expected compatibility case, not malformed records.
+Prevention: Test the surviving output-producing path and assert warning classification with file/count context. Track the linked-page chain and retired snapshot workaround for the later desktop cleanup.
+Refs: crates/harvester_engine/tests/output.rs, crates/harvester_io/tests/retired_summary_entries.rs, docs/plans/Plan.Simplification.md
+
+## 2026-09-30 - Desktop render contract and unused feature removal
+Type: Implementation
+Context: The supported page did not consume workspace/trends state, article previews or linked-page download controls, while entity-index updates still generated disk work after model results.
+Change: Removed trends/entity-index state and I/O, linked-page completion and worker paths, indirect intake, preview payloads and legacy geometry effects. Audited all frontend consumers and bridge projection: the snapshot now exposes 23 top-level fields and one SummaryMarkdown body key under IPC 13. Regenerated all fixtures, including completion notices and AI unavailability, with full projection comparison. Selected links still resolve through core. Old downloaded paths still load, but runtime saves omit them; legacy geometry remains readable and desktop geometry stays distinct. Removed the unread provider-alert and token-total state, triage formatter and poll-quota warning. Search focus is frontend-local, with its IPC intent retired.
+Refs: crates/harvester_core/src/view_model.rs; crates/harvester_ui_bridge/src/snapshot.rs; crates/harvester_ui_bridge/src/ipc.rs; crates/harvester_io/src/persistence.rs; removed_desktop_intents_fail_closed; desktop_snapshot_pins_only_rendered_fields; selected_job_keeps_extracted_links_after_completion; old_link_paths_load_but_runtime_saves_drop_them_and_preserve_geometry
+
+## 2026-09-30 - Avoid whole-state compatibility work on every runtime save
+Type: Bug Fix
+Context: Carrying forward retired downloaded paths normalized every old and new link URL on every save, even when the old state contained no paths. Work grew with the whole runtime-state file.
+Change: Removed path carry-forward. Runtime saves deserialize only pending intake and geometry settings, skipping the old completed-job collection without allocating its jobs or links. Existing path-bearing files remain readable; the next reducer snapshot drops their paths.
+Lessons Learned: Compatibility reads should follow the surviving contract. Preserving ignored data can add seconds to routine saves when nested records trigger repeated parsing and allocations.
+Prevention: Regressions load old paths and verify they disappear on runtime save, and save successfully over an incompatible old completed payload while preserving pending intake and desktop geometry.
+Refs: crates/harvester_io/src/persistence.rs; old_link_paths_load_but_runtime_saves_drop_them_and_preserve_geometry; runtime_save_ignores_old_completed_payload_and_preserves_settings
+
+## 2026-10-01 - Slim runtime persistence and lazy extracted links
+Type: Implementation
+Context: Whole link collections dominated runtime-state persistence after each successful download.
+Change: Added a confined per-article JSON link store, a link-free persistence projection, reducer-emitted selection loading and download link writes. Startup migration preserves a byte-identical verified backup before publishing links and slim state. Interrupted writes retry idempotently; malformed link records are skipped with contextual logging. Both geometry pairs and pending intake survive. IPC 13 and archive bytes stay unchanged.
+Refs: crates/harvester_io/src/persistence.rs, crates/harvester_io/src/article_links.rs, crates/harvester_io/src/effect_runner/tests.rs, crates/harvester_batch/tests/replay_bench.rs
+
+## 2026-10-01 - Recover missing saved fetch times from corpus frontmatter
+Type: Bug Fix
+Context: The February saved-state data gap hid 22 jobs; the earlier corpus investigation found frontmatter fetch times for 9 and no article files for 13.
+Change: Startup I/O recovers valid missing timestamps through CorpusScanIndex using canonical article identity. Unrecoverable jobs keep the existing hidden-count note, remain persisted and block duplicate URL intake. The checked-in carry-over fixture has two dated jobs and leaves 0 hidden; focused tests exercise recovery from 2 missing dates to 1.
+Lessons Learned: Missing optional metadata in older state does not mean the downloaded work can be discarded. Recover from the durable article when available and retain the URL identity when it is not.
+Prevention: Startup regression tests cover frontmatter recovery, hidden counts, restart survival and duplicate-intake blocking for jobs without article files.
+Refs: crates/harvester_engine/src/briefing/corpus_index.rs, crates/harvester_io/src/host_bootstrap.rs, startup_recovers_frontmatter_fetch_time_and_lowers_hidden_count, job_without_article_stays_hidden_survives_restart_and_blocks_redownload
+
+## 2026-10-01 - Preserve restored state without trapping runtime saves
+Type: Bug Fix
+Context: Backup mismatch and parse failure blocked every later runtime save; unrecoverable dates repeated a full content scan at every startup. Late empty link replies could erase session links.
+Change: Preserve unique dated byte-identical backups and return one-line notices through reducer messages and the existing rendered status. Persist one-time frontmatter-only recovery through PersistRuntimeState. Skip empty link writes, merge restored links, ignore failed/stale-empty replies, and gate geometry migration. Queue normal link publications on the persistence worker before their runtime snapshots.
+Lessons Learned: A preserved backup is evidence of one source version, not a permanent veto on future versions. Recovery needs a persisted completion marker even when some records cannot be repaired. Empty asynchronous results cannot safely replace newer resident data.
+Prevention: Regressions cover restores, corruption, backup preservation and notices, empty writes, recovery on second startup, link reply races and geometry migration gating. Keep fixture byte comparisons and reducer/effect assertions alongside disk tests.
+Refs: crates/harvester_io/src/persistence.rs, crates/harvester_io/src/host_bootstrap.rs, crates/harvester_io/src/persistence_worker.rs, crates/harvester_core/tests/persistence.rs, crates/harvester_engine/src/briefing/corpus_index.rs
+
+## 2026-10-02 - Restore phase 7 save speed and drain quota-limited replays
+Type: Bug Fix
+Context: Desktop verification found 102–112 second slim-state saves, minute-long completion stalls and a replay stuck with nine requests left.
+Change: Consume discarded completed jobs through typed RON deserialization (measured saves fall from 86–94 seconds to 0.48–0.55 seconds on 11,262 records). Avoid no-op scheduler mutations that repeatedly invalidate the entire unfinished-work aggregate. Enqueue paid-result flush fences rather than waiting on the host loop; rejected model effects return terminal completion messages. Release the quota tracker before rejection reporting reacquires it for usage: the first rejected request formerly deadlocked the remaining nine. Preserve the benchmark copy's historical checkpoint, lowering it only enough to admit held articles. Add worker/host timing logs and nine regression tests; replace one existing writer test's fixed startup sleep with publication acknowledgements without removing its assertions. Offline build, the full workspace suite (1,263 passed, two ignored), both Clippy gates and formatting pass.
+Lessons Learned: A smaller file can deserialize much more slowly when an omitted field selects a generic parser path. Mutating accessors have invalidation costs even when the assigned value is unchanged. Completion reporting must never reacquire a held lock. A benchmark copy's processing window is part of its workload, not disposable setup state.
+Prevention: A 12,000-job/link-file save test locks the backup and preserves recovery sentinels; occupied-slot and halted-dispatch ticks retain aggregate revisions; blocked persistence/result writers cannot hold up completion delivery; ten quota rejections report both completion and usage; the pipeline settles with unfinished articles. Both replay hosts preserve historical scope and source bytes. Full real-corpus copies finish in 8.21 seconds (desktop) and 21.33 seconds (batch); deliberately reopening historical work terminates at the 1,000-call quota in 78.79 seconds.
+Refs: docs/plans/Plan.Simplification.md (phase 7 performance regression verification), crates/harvester_io/examples/runtime_save_bench.rs, crates/harvester_io/src/persistence.rs, crates/harvester_core/src/update/model_dispatch.rs, crates/harvester_engine/src/llm/handle.rs, crates/harvester_io/src/result_sink.rs, crates/harvester_batch/tests/replay_bench.rs
+
+## 2026-10-03 - Desktop run-stage bars show remaining work this run actually does
+Type: Implementation
+Context: The owner's desktop run had about 25 new articles in a 158-article window, but the model-stage bars still used the full window total. The synthetic replay had no reused results, so it did not expose that inflation.
+Change: Model-stage progress now excludes work settled without a model request at admission. The count carries the denominator because the bar compares queues across stages and no longer conveys the stage's own fraction; this reverses the reasoning in "Compact desktop run stage rows" from 2026-09-10. Reuse is resolved at admission so a reusable result does not wait behind queued work.
+Lessons Learned:
+- A remaining-work display must define what happens to withdrawn work, or Stop leaves the backlog large and the estimate counting forever.
+- A progress denominator must say whose work it counts. Work satisfied from saved results belongs to an earlier run.
+- Lazily applied cache hits queue behind slot-bound work, so instant reuse requires resolving it at admission.
+- Replay tests need representative data, including reuse, to catch this.
+- Counts recomputed from long-lived sessions lose members when sessions are pruned; per-run counters must accumulate identities themselves.
+Refs: frontend/src/components/RunSurface.tsx, frontend/src/components/RunSurface.test.tsx, crates/harvester_core/src/run_progress.rs, crates/harvester_core/src/update/waves.rs, crates/harvester_core/src/update/reuse.rs, crates/harvester_core/src/update/pipeline_run/reused_work_tests.rs
+
+## 2026-10-03 - Restore saved desktop results and export without another run
+Type: Bug Fix
+Context: Simplification bug 6 left archive annotations, priority coverage and summary export dependent on live sessions. After restart, priorities, Results and reading summaries disappeared even though paid results were saved; Last 24h also lacked hashes before the checkpoint, and the tab/article selection was lost.
+Change: Added one reducer-owned saved-results index over the display scope, fed by startup metadata and stores. Views and window-bound archive consumers share current-key results and stored model provenance; export bodies and estimates retain newest-any-key summary resolution. Startup loads overlays before metadata and supplies keyless model defaults. Slim optional fields remember tab and article, using the existing worker debounce and shutdown flush. Reading-pane wording distinguishes missing current summaries from unavailable AI through the existing snapshot field.
+Lessons Learned: A completed session is processing history, not durable result availability. Current-key display and any-key export are distinct policies that must be explicit even when they share an index. A window-filtered metadata message cannot reconstruct Last 24h before the checkpoint. Startup tests must drive the host clock and deferred refresh as the desktop does.
+Prevention: Regression tests hydrate without a run, cover stale/compatible keys and checkpoint/clock changes, compare actual archive bytes with a canned post-run export, exercise optional-field compatibility and close flush, and extend the unchanged carry-over fixture. Archive fixture hashes and the whole-root test count are reconciled in Phase 8 notes.
+Refs: docs/plans/Plan.Simplification.md (Phase 8 notes), crates/harvester_core/src/update/tests/saved_results_tests.rs, crates/harvester_io/src/effect_runner/restart_tests.rs, crates/harvester_batch/tests/replay_bench.rs, frontend/src/components/ReadingPane.test.tsx
+
+## 2026-10-04 - Align restart results with export window and avoid late navigation
+Type: Bug Fix
+Context: Phase 8 review found undated window articles missing from saved-result export inputs and startup selection restoration navigating after Run began, alongside duplicated rules and repeated index/view work.
+Change: Follow corpus frontmatter window semantics, preserving undated selection, annotations, priorities and coverage while keeping undated jobs hidden. Discard pending selection restoration during a run. Share pre-triage inclusion and keyed/keyless model defaults/resolution; gate paid-session fixture adapters to tests. Compare new summaries against the prior newest timestamp, retaining store-order tie-breaking for equal/older writes; borrow metadata/scoring results, avoid redundant global-revision rebuilds and replace nested URL searches with a lookup. Standardize the reading-pane placeholder spelling and move restart tests beside their module.
+Lessons Learned: Export coverage must derive window membership from the same source as the exporter, rather than job-list visibility. Deferred startup navigation loses its authority when a run starts. Hash-map iteration tie-breaking requires a fallback when a write is not strictly newer.
+Prevention: Reducer regressions cover missing/malformed dates, late hydration and summary ties/growth/replacement. A host regression compares actual keyless defaults with keyed configuration using an in-memory provider. Manual-exclusion fixtures exercise the existing article-load reply rather than rebuilding directly.
+Verification: Required offline build, full root suite (1,285 passed, two ignored), both Clippy gates and Rust formatting pass. Frontend check (117 passed), build and formatting pass. No prior test names disappeared; all seven archive fixture hashes are unchanged. GUI/probe checks were excluded by the task.
+Refs: crates/harvester_core/src/update/tests/saved_results_tests.rs, crates/harvester_core/src/state/saved_results.rs, crates/harvester_io/src/effect_runner/tests.rs, docs/plans/Plan.Simplification.md (Phase 8 review fixes)
+
+## 2026-10-04 - Compact command-line stage progress
+Type: Implementation
+Context: Scheduled runs need a readable progress surface that follows the same work counts as the desktop, without another host-owned stage projection.
+Change: Replaced the dashboard and session-counter projection with a pure six-line formatter reading reducer-owned run-progress stages. The header keeps elapsed time, session cost and the Ctrl+C hint; five stage rows show remaining new work or done counts while stopping, failures and waiting statuses. Terminal I/O retains cursor recovery and redraws; plain output reports stage-status transitions, the start of stopping, changed forced updates and 60-second heartbeats, suppressing identical lines. Count-only changes wait for those updates. Removed verbose/ASCII options and their per-pass transcript. Renamed checkpoint options with hidden compatibility aliases and kept the checkpoint filename, poll summary, cycle-start notices and import reporter. Golden strings, real reducer transitions, cursor/heartbeat/session-cost tests and CLI integration assertions cover the new surface. Cost tests now exercise the real header formatter instead of a duplicate test-only implementation.
+Verification: Offline build, batch tests (91 library plus six integration), whole-root tests (1,278 passed, two ignored), all-target Clippy with denied warnings, formatting and batch replay pass. The plan records benchmark measurements and the complete named test reconciliation. Terminal readability still merits a human morning-run check.
+Refs: crates/harvester_batch/src/progress/block.rs, crates/harvester_batch/src/progress.rs, crates/harvester_batch/src/runner/live_progress.rs, crates/harvester_batch/src/runner/reporting.rs, crates/harvester_batch/src/cli.rs, docs/plans/Plan.Simplification.md
+
+## 2026-10-04 - Bound redirected progress and avoid desktop view rebuilds
+Type: Bug Fix
+Context: Redirected output printed every count change and repeated forced frames, while each paint rebuilt the full desktop view just to read run progress. The stopping hint also omitted the second-interrupt hard exit and open intake hid Pending/Failed labels.
+Change: Plain progress now compares a status-only signature, emits status transitions, the start of stopping, changed forced frames and 60-second heartbeats, and suppresses identical lines. Added read-only AppState::run_progress_view(), using the existing RunProgress::view; the desktop view embeds the same accessor output. The stopping header describes the immediate second-interrupt exit; only Active article stages can show Waiting for articles. Normalized the five review-flagged working files to LF.
+Lessons Learned: A small command-line display should request only its needed snapshot. Progress logs should track status transitions rather than item counts, and forced paints still need duplicate suppression.
+Prevention: Regression tests cover count throttling and heartbeat freshness, duplicate forced/resume/final paints, immediate stopping, status-only signatures including Waiting, Pending/Failed golden strings, the stopping hint, Unicode display-width clipping at 20 columns with the last column reserved, and accessor equality with the embedded desktop snapshot. Added four batch tests and one core test; the plan lists every name and reconciles the HEAD inventory.
+Verification: Required offline build, full root suite (1,278 passed, two ignored), all-target Clippy with denied warnings, cargo fmt and fmt --check passed. The requested keyless batch replay completed in 14.022 s against the recorded 14.096 s baseline, with 18 progress lines and no identical consecutive repeats. It made 98 canned model calls versus the baseline's 102, so this is not an identical-work timing comparison; the cause of that call-count difference remains unestablished. No provider or scheduling policy was changed. The earlier 14.096 -> 16.879 s regression was attributable to full desktop view construction during paints; the shared small accessor removes that work.
+Refs: crates/harvester_core/src/state/run_progress.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_batch/src/runner/live_progress.rs, crates/harvester_batch/src/progress/block.rs, crates/harvester_batch/src/progress.rs, docs/plans/Plan.Simplification.md, .local/bench/20261004-183351/report.json
+
+## 2026-10-07 - Desktop archive meter counts selected saved results
+Type: Implementation
+Context: The meter switched from the triage set to the selection when scoring settled, producing a roughly 300-to-110 jump, and token counting did not answer the owner's question.
+Change: Added an article-count meter over the selected saved results with no fallback, a reducer-owned startup-readiness record, manual exclusions held as reducer state, and IPC 15.
+Lessons Learned:
+- A display that falls back to a broader population when its own data is missing produces spikes; showing zero with a hint is more honest.
+- Startup projections need one readiness record with explicit pending, empty and failed outcomes, not per-consumer flag checks.
+- "Loaded" is not "resolved": the corpus scan arrives before pre-triage, and unresolved pre-triage defaults to included.
+Refs: docs/plans/Plan.ArchiveCountMeter.md, crates/harvester_core/src/update/tests/mod.rs, crates/harvester_core/src/signal_candidate.rs, crates/harvester_core/src/update/tests/archive_meter_tests.rs, exclusions_survive_scoring_session_changes, override_fingerprint_is_unchanged_for_the_same_set, idle_meter_count_equals_dialog_default_export_count, startup_message_orders_never_over_count, excluded_scored_article_is_not_counted_between_scan_and_pre_triage, selection_restore_waits_for_initial_pre_triage_resolution, empty_output_folder_startup_reaches_ready_with_zero, prompt_context_failure_reads_unavailable_with_zero, meter_ignores_out_of_window_and_non_actionable_scores, mid_run_count_grows_monotonically_while_scoring_is_pending, selection_restores_after_refused_startup_result_store, selection_restores_after_missing_or_blank_startup_model, selection_restores_after_startup_prompt_context_failure, selection_restore_waits_for_every_pending_startup_input_even_after_failure, crates/harvester_io/src/host_bootstrap.rs, hydrate_empty_output_folder_records_empty_article_window, hydrate_state_from_disk_reduces_exclusions_before_startup_replies

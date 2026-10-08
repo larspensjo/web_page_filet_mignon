@@ -1,7 +1,7 @@
 use harvester_engine::llm::run_metadata::LlmRunMetadata;
 use harvester_engine::llm::{
     content_hash, load_replay_record, persist_replay_record, replay_filename_request_id,
-    sanitize_replay_request_id, PromptId, ReplayProvider, ReplayRecord, TokenUsage,
+    sanitize_replay_request_id, PromptId, ReplayRecord, TokenUsage,
 };
 use serde_json::json;
 use tempfile::tempdir;
@@ -41,23 +41,6 @@ fn persist_and_load_roundtrip() {
     let path = persist_replay_record(dir.path(), &record).unwrap();
     let loaded = load_replay_record(&path).unwrap();
     assert_eq!(record, loaded);
-}
-
-#[test]
-fn replay_provider_loads_and_finds_record() {
-    let dir = tempdir().unwrap();
-    let record = mock_record("session--2");
-    persist_replay_record(dir.path(), &record).unwrap();
-    let provider = ReplayProvider::load_from_dir(dir.path()).unwrap();
-    let fetched = provider
-        .lookup(
-            &record.input_content_hash,
-            record.prompt_id,
-            record.prompt_version,
-        )
-        .cloned()
-        .unwrap();
-    assert_eq!(record, fetched);
 }
 
 #[test]

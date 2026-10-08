@@ -8,8 +8,7 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use engine_logging::{engine_error, engine_info, engine_warn};
 use harvester_core::{
-    update, AiAvailability, AiUnavailableReason, AppState, IntentContext, IntentEffect, Msg,
-    DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH,
+    update, AppState, IntentContext, IntentEffect, Msg, DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH,
 };
 use harvester_engine::llm::{ModelId, ProviderKind, OPENAI_MODEL_GPT_5_4_NANO};
 use harvester_io::{
@@ -19,7 +18,7 @@ use harvester_io::{
         HostLlmDefaults,
     },
     load_desktop_window_size, EffectRunner, PersistenceWorker, PlatformEffectHandler, RuntimePaths,
-    GUI_LOCK_IDENTITY,
+    DESKTOP_LOCK_IDENTITY,
 };
 use harvester_ui_bridge::{
     decode_intent, fetch_body as bridge_fetch_body, run_driver, BodyKey, BodyResponse, BodyTable,
@@ -222,12 +221,13 @@ fn probe_report(
 pub fn run(probe: bool) -> Result<(), String> {
     let root = repository_root();
     initialize_logging(&root);
+    let paths = runtime_paths(&root);
     if probe {
+        let _lock = acquire_lock(&paths.output_dir, DESKTOP_LOCK_IDENTITY, false)?;
         return run_probe(root);
     }
-    let paths = runtime_paths(&root);
     let _lock =
-        acquire_lock(&paths.output_dir, GUI_LOCK_IDENTITY, false).inspect_err(|message| {
+        acquire_lock(&paths.output_dir, DESKTOP_LOCK_IDENTITY, false).inspect_err(|message| {
             rfd::MessageDialog::new()
                 .set_title("Harvester already running")
                 .set_description(message)
@@ -251,7 +251,7 @@ pub fn run(probe: bool) -> Result<(), String> {
         running: Arc::new(AtomicBool::new(true)),
         probe_data: None,
     };
-    let (app_state, effect_runner) = prepare_state(&paths, width, &sender)?;
+    let (app_state, effect_runner) = prepare_state(&paths, &sender)?;
     let run_state = state.clone();
     let builder = tauri::Builder::default()
         .manage(state.clone())
@@ -276,7 +276,6 @@ pub fn run(probe: bool) -> Result<(), String> {
                 app_state,
                 receiver,
                 state.clone(),
-                paths.clone(),
                 effect_runner,
             );
             Ok(())
@@ -760,7 +759,6 @@ fn finish_probe(host: &HostState, samples: Vec<harvester_ui_bridge::probe::Probe
 
 fn prepare_state(
     paths: &RuntimePaths,
-    width: i32,
     sender: &mpsc::Sender<Msg>,
 ) -> Result<(AppState, EffectRunner), String> {
     let state = AppState::new();
@@ -769,23 +767,21 @@ fn prepare_state(
         session_id_prefix: "session-",
     };
     let llm_concurrency = llm_max_concurrency_requests_from_env();
-    let (runner, limits, _) = build_effect_runner(
+    let (runner, limits, availability) = build_effect_runner(
         paths,
         sender.clone(),
         llm_concurrency,
         &defaults,
         Box::new(PlatformHandler),
+        Box::new(PersistenceWorker::new(
+            paths.state_path.clone(),
+            paths.blacklist_path.clone(),
+        )),
         "OPENAI_API_KEY not set; LLM features disabled",
-        None,
+        Some("OPENAI_API_KEY is empty; LLM features disabled"),
     )?;
-    let availability =
-        std::env::var("OPENAI_API_KEY")
-            .is_err()
-            .then_some(AiAvailability::Unavailable {
-                reason: AiUnavailableReason::MissingApiKey,
-            });
     let (state, effects) =
-        prepare_desktop_startup_state(state, paths, width, llm_concurrency, availability, limits);
+        prepare_desktop_startup_state(state, paths, llm_concurrency, Some(availability), limits);
     if !effects.is_empty() {
         runner.enqueue(effects);
     }
@@ -797,7 +793,6 @@ fn start_driver(
     state: AppState,
     receiver: mpsc::Receiver<Msg>,
     host: HostState,
-    paths: RuntimePaths,
     effect_runner: EffectRunner,
 ) {
     let sender = host.sender.clone();
@@ -807,11 +802,21 @@ fn start_driver(
             thread::sleep(Duration::from_millis(75));
         }
     });
-    let persistence = Arc::new(Mutex::new(PersistenceWorker::new(
-        paths.state_path.clone(),
-        paths.blacklist_path.clone(),
-    )));
     let runner = Arc::new(Mutex::new(effect_runner));
+    if let Some(window) = app.get_webview_window("main") {
+        let close_runner = Arc::clone(&runner);
+        window.on_window_event(move |event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                if let Err(error) = close_runner
+                    .lock()
+                    .expect("result sink close lock")
+                    .flush_results()
+                {
+                    engine_error!("[results] desktop close flush failed: {}", error);
+                }
+            }
+        });
+    }
     let driver_host = host.clone();
     let command_app = app.clone();
     let signal_app = app.clone();
@@ -849,12 +854,6 @@ fn start_driver(
                     *snapshot.write().expect("snapshot lock") = Some(envelope.clone());
                     let _ = signal_app.emit("harvester://snapshot", envelope);
                 }
-            },
-            move |snapshot| {
-                persistence
-                    .lock()
-                    .expect("persistence lock")
-                    .enqueue(snapshot)
             },
             bodies,
             {

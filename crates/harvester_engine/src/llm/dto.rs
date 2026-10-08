@@ -52,32 +52,6 @@ pub struct ArticleSummary {
     pub entities: SummaryEntities,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BriefingStory {
-    pub headline: String,
-    pub body: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AggregateBriefing {
-    pub executive_summary: String,
-    pub top_stories: Vec<BriefingStory>,
-    pub article_count: u32,
-}
-
-/// Executive-summary-only result for the first step of the briefing stream.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BriefingExecutiveSummaryResult {
-    pub executive_summary: String,
-}
-
-/// One step of the briefing stream: either a new item, or the exhaustion sentinel.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BriefingNextItem {
-    Item { headline: String, body: String },
-    Exhausted,
-}
-
 /// Outlet authority tier. Lower variant = higher authority. `Tier1` is best.
 /// Ord/PartialOrd derive ordering by variant position, so `Tier1 < Tier2 < Tier3`,
 /// which matches the selection tie-breaker rule ("best `source_tier` wins").
@@ -147,25 +121,5 @@ mod triage_priority_dto_tests {
             serde_json::from_str::<TriagePriority>("3").unwrap(),
             TriagePriority::new(3).unwrap()
         );
-    }
-}
-
-#[cfg(test)]
-mod briefing_stream_dto_tests {
-    use super::*;
-
-    #[test]
-    fn next_item_variants_constructable() {
-        let item = BriefingNextItem::Item {
-            headline: "H".to_string(),
-            body: "B".to_string(),
-        };
-        assert!(matches!(item, BriefingNextItem::Item { .. }));
-        assert_eq!(BriefingNextItem::Exhausted, BriefingNextItem::Exhausted);
-
-        let exec = BriefingExecutiveSummaryResult {
-            executive_summary: "S".to_string(),
-        };
-        assert_eq!(exec.executive_summary, "S");
     }
 }

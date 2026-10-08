@@ -1,0 +1,180 @@
+{
+  "generation": 1,
+  "schema_version": 15,
+  "view": {
+    "ai_unavailable_message": null,
+    "archive_enabled": true,
+    "archive_meter": {
+      "selected_count": 0,
+      "status": "NotScoredYet",
+      "target": 150,
+      "token_estimate": 0,
+      "unsettled_count": 1
+    },
+    "archive_partial_coverage": null,
+    "checkpoint_status_message": null,
+    "desktop_job_list": {
+      "hidden_without_fetch_time": 0,
+      "mode": "SinceCheckpoint",
+      "query": "",
+      "rows": [
+        {
+          "bytes": 1024,
+          "fetched_utc": "2023-11-14T22:13:20Z",
+          "filter_status": null,
+          "has_analysis": true,
+          "has_summary": false,
+          "is_since_checkpoint": true,
+          "job_id": 1,
+          "link_count": 1,
+          "origin": "Direct",
+          "outcome": "Success",
+          "stage": "Done",
+          "summary_title": null,
+          "summary_tokens": null,
+          "tokens": null,
+          "triage_annotation": {
+            "category": "news",
+            "priority": 5,
+            "tags": [
+              "fixture",
+              "review"
+            ]
+          },
+          "url": "https://fixture.invalid/article"
+        }
+      ],
+      "scoped_count": 1,
+      "selected_job": null,
+      "truncated": false,
+      "visible_count": 1
+    },
+    "job_count": 1,
+    "last_paste_stats": null,
+    "llm_quota": {
+      "label": "LLM calls 0 / unlimited",
+      "limit": null,
+      "percent": null,
+      "severity": "Normal",
+      "used": 0
+    },
+    "reprocess_notice": null,
+    "resume_disabled_reason": null,
+    "resume_enabled": true,
+    "right_pane": {
+      "summary_markdown": null
+    },
+    "run_completion_notice": null,
+    "run_enabled": true,
+    "run_progress": {
+      "activity": [
+        {
+          "outcome": "Started",
+          "seq": 0,
+          "stage": "DownloadingArticles",
+          "title": null,
+          "url": "https://fixture.invalid/article"
+        },
+        {
+          "outcome": "Succeeded",
+          "seq": 1,
+          "stage": "DownloadingArticles",
+          "title": null,
+          "url": "https://fixture.invalid/article"
+        },
+        {
+          "outcome": "Succeeded",
+          "seq": 2,
+          "stage": "Triaging",
+          "title": "Fixture article",
+          "url": "https://fixture.invalid/article"
+        }
+      ],
+      "run_active": false,
+      "stages": [
+        {
+          "completed": 1,
+          "ended_at_utc": "2023-11-14T22:13:20Z",
+          "failed": 0,
+          "reused": 0,
+          "stage": "ScanningSources",
+          "started_at_utc": "2023-11-14T22:13:20Z",
+          "status": "Done",
+          "total": 1,
+          "total_is_final": true
+        },
+        {
+          "completed": 1,
+          "ended_at_utc": "2023-11-14T22:13:20Z",
+          "failed": 0,
+          "reused": 0,
+          "stage": "DownloadingArticles",
+          "started_at_utc": "2023-11-14T22:13:20Z",
+          "status": "Done",
+          "total": 1,
+          "total_is_final": true
+        },
+        {
+          "completed": 1,
+          "ended_at_utc": "2023-11-14T22:13:21Z",
+          "failed": 0,
+          "reused": 0,
+          "stage": "LoadingArticles",
+          "started_at_utc": "2023-11-14T22:13:21Z",
+          "status": "Done",
+          "total": 1,
+          "total_is_final": true
+        },
+        {
+          "completed": 1,
+          "ended_at_utc": "2023-11-14T22:13:21Z",
+          "failed": 0,
+          "reused": 0,
+          "stage": "Triaging",
+          "started_at_utc": "2023-11-14T22:13:21Z",
+          "status": "Done",
+          "total": 1,
+          "total_is_final": true
+        },
+        {
+          "completed": 0,
+          "ended_at_utc": "2023-11-14T22:13:21Z",
+          "failed": 0,
+          "reused": 0,
+          "stage": "Summarizing",
+          "started_at_utc": null,
+          "status": "Done",
+          "total": 0,
+          "total_is_final": true
+        },
+        {
+          "completed": 0,
+          "ended_at_utc": "2023-11-14T22:13:21Z",
+          "failed": 0,
+          "reused": 0,
+          "stage": "ScoringSignals",
+          "started_at_utc": null,
+          "status": "Done",
+          "total": 0,
+          "total_is_final": true
+        }
+      ]
+    },
+    "run_state": "Idle",
+    "signal_candidate_rows": [],
+    "stop_finish_button": "Disabled",
+    "unfinished_work": {
+      "Known": {
+        "articles_with_work": 1,
+        "complete": 0,
+        "estimated_calls": 2,
+        "in_progress": 0,
+        "needs_scoring": 0,
+        "needs_summary": 1,
+        "needs_triage": 0,
+        "not_eligible": 0
+      }
+    }
+  },
+  "fatal_message": null
+}

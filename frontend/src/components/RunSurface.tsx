@@ -12,10 +12,35 @@ const ETA_REFRESH_INTERVAL_MS = 5_000;
 type RunView = SnapshotEnvelope["view"];
 type StageName = StageProgress["stage"];
 
+const ARTICLE_SCALE_STAGES: readonly StageName[] = [
+	"DownloadingArticles",
+	"Triaging",
+	"Summarizing",
+	"ScoringSignals",
+];
+
 export type ActiveStageEta = {
 	stage: StageName;
 	seconds: number;
 };
+
+export type StageRowPresentation = {
+	stage: StageProgress;
+	countText: string;
+	bar: {
+		remaining: number;
+		scale: number;
+		percent: number;
+	} | null;
+};
+
+/** Return the admitted and completed work this run actually performs at a stage. */
+export function newWork(stage: StageProgress): { total: number; done: number } {
+	return {
+		total: Math.max(0, stage.total - stage.reused),
+		done: Math.max(0, stage.completed - stage.reused),
+	};
+}
 
 /** Estimate each active stage independently, without mixing heterogeneous work units. */
 export function estimateActiveStageEtas(
@@ -26,13 +51,15 @@ export function estimateActiveStageEtas(
 	if (!Number.isFinite(nowMs)) return [];
 
 	return stages.flatMap((stage) => {
-		if (stage.status !== "Active" || stage.started_at_utc === null) return [];
+		if (
+			stage.status !== "Active" ||
+			!stage.total_is_final ||
+			stage.started_at_utc === null
+		)
+			return [];
 		const startedAt = Date.parse(stage.started_at_utc);
-		const total = Math.max(stage.total, 0);
-		const settled = Math.min(
-			Math.max(stage.completed, 0) + Math.max(stage.failed, 0),
-			total,
-		);
+		const { total, done } = newWork(stage);
+		const settled = Math.min(done + Math.max(stage.failed, 0), total);
 		const elapsedMs = nowMs - startedAt;
 		if (
 			!Number.isFinite(startedAt) ||
@@ -49,6 +76,48 @@ export function estimateActiveStageEtas(
 				seconds: Math.ceil(((total - settled) * elapsedMs) / settled / 1000),
 			},
 		];
+	});
+}
+
+/** Present waiting work on a shared article scale using only the current snapshot. */
+export function presentStageRows(
+	stages: StageProgress[],
+	stopping: boolean,
+): StageRowPresentation[] {
+	const articleScale = Math.max(
+		0,
+		...stages
+			.filter((stage) => ARTICLE_SCALE_STAGES.includes(stage.stage))
+			.map((stage) => newWork(stage).total),
+	);
+	return stages.map((stage) => {
+		const loading = stage.stage === "LoadingArticles";
+		const { total: newTotal, done: newDone } = newWork(stage);
+		const remaining = Math.max(0, newTotal - newDone - stage.failed);
+		const count = loading
+			? `${stage.completed} done`
+			: stopping
+				? `${newDone} done`
+				: newTotal === 0
+					? "0 to do"
+					: `${remaining} of ${newTotal} to do`;
+		const countText =
+			stage.failed > 0 ? `${count} · ${stage.failed} failed` : count;
+		const scale =
+			stage.stage === "ScanningSources" ? stage.total : articleScale;
+		const displayedRemaining = stopping ? 0 : remaining;
+		return {
+			stage,
+			countText,
+			bar: loading
+				? null
+				: {
+						remaining: displayedRemaining,
+						scale,
+						percent:
+							scale > 0 ? Math.min(100, (displayedRemaining / scale) * 100) : 0,
+					},
+		};
 	});
 }
 
@@ -99,16 +168,6 @@ function stopEnabled(state: StopFinishButtonState): boolean {
 	return typeof state === "object" && state !== null && "Enabled" in state;
 }
 
-function progressPercent(stage: StageProgress): number {
-	if (stage.total <= 0) return 0;
-	return Math.min(100, ((stage.completed + stage.failed) / stage.total) * 100);
-}
-
-function stageCount(stage: StageProgress): string {
-	const completed = `${stage.completed} done`;
-	return stage.failed > 0 ? `${completed}, ${stage.failed} failed` : completed;
-}
-
 function activityOutcome(entry: ActivityEntry): string {
 	if (typeof entry.outcome === "string") return entry.outcome;
 	if ("Failed" in entry.outcome)
@@ -137,8 +196,13 @@ function ActivityFeed({ activity }: { activity: ActivityEntry[] }) {
 function stageStatus(
 	stage: StageProgress,
 	eta: ActiveStageEta | undefined,
+	stopping: boolean,
 ): string {
-	if (stage.status !== "Active") return statusLabel(stage.status);
+	if (stopping || stage.status !== "Active") return statusLabel(stage.status);
+	if (!stage.total_is_final)
+		return stage.completed + stage.failed >= stage.total
+			? "Waiting for articles"
+			: "In progress";
 	if (eta) return formatStageEta(eta);
 	if (stage.total === 0) return statusLabel(stage.status);
 	return stage.completed + stage.failed < stage.total
@@ -149,17 +213,18 @@ function stageStatus(
 function StageList({
 	stages,
 	stageEtas,
+	isStopping,
 }: {
 	stages: StageProgress[];
 	stageEtas: ActiveStageEta[];
+	isStopping: boolean;
 }) {
 	const etaByStage = new Map(stageEtas.map((eta) => [eta.stage, eta]));
 
 	return (
 		<ol className="stage-list" aria-label="Pipeline stages">
-			{stages.map((stage) => {
+			{presentStageRows(stages, isStopping).map(({ stage, countText, bar }) => {
 				const muted = stage.status === "Pending" && stage.total === 0;
-				const percent = progressPercent(stage);
 				return (
 					<li
 						className={`stage-row${muted ? " stage-row--muted" : ""}${
@@ -168,24 +233,30 @@ function StageList({
 								: ""
 						}`}
 						data-stage={stage.stage}
+						data-status={stage.status}
 						key={stage.stage}
 					>
 						<span className="stage-name">{stageLabel(stage.stage)}</span>
-						<div className="stage-count">{stageCount(stage)}</div>
-						<div
-							className="stage-bar"
-							role="progressbar"
-							aria-label={`${stageLabel(stage.stage)} progress`}
-							aria-valuemin={0}
-							aria-valuemax={stage.total}
-							aria-valuenow={Math.min(
-								stage.total,
-								stage.completed + stage.failed,
-							)}
-							style={{ "--stage-progress": `${percent}%` } as CSSProperties}
-						/>
+						<div className="stage-count">{countText}</div>
+						{bar ? (
+							// biome-ignore lint/a11y/useSemanticElements: The bar is drawn through --stage-progress; native meter styling requires vendor pseudo-elements.
+							<div
+								className="stage-bar"
+								role="meter"
+								aria-label={`${stageLabel(stage.stage)} work to do`}
+								aria-valuemin={0}
+								aria-valuemax={bar.scale}
+								aria-valuenow={bar.remaining}
+								aria-valuetext={countText}
+								style={
+									{ "--stage-progress": `${bar.percent}%` } as CSSProperties
+								}
+							/>
+						) : (
+							<span className="stage-bar-slot" aria-hidden="true" />
+						)}
 						<span className="stage-status">
-							{stageStatus(stage, etaByStage.get(stage.stage))}
+							{stageStatus(stage, etaByStage.get(stage.stage), isStopping)}
 						</span>
 					</li>
 				);
@@ -197,11 +268,21 @@ function StageList({
 export function RunSurface({ view }: { view: RunView }) {
 	const { run_progress: progress, run_completion_notice: notice } = view;
 	const now = useEtaNow(progress.run_active);
-	const stageEtas = progress.run_active
-		? estimateActiveStageEtas(progress.stages, now)
-		: [];
-	const canRunPipeline = view.triage_can_start || view.summaries_can_start;
 	const canStop = stopEnabled(view.stop_finish_button);
+	const isStopping =
+		typeof view.run_state === "object" && "Stopping" in view.run_state;
+	const stageEtas =
+		progress.run_active && !isStopping
+			? estimateActiveStageEtas(progress.stages, now)
+			: [];
+	const unfinishedCount =
+		view.unfinished_work === "Unknown"
+			? null
+			: view.unfinished_work.Known.articles_with_work;
+	const resumeLabel =
+		unfinishedCount === null
+			? "Process unfinished"
+			: `Process unfinished (${unfinishedCount})`;
 
 	return (
 		<section className="run-surface" aria-labelledby="run-surface-heading">
@@ -212,37 +293,56 @@ export function RunSurface({ view }: { view: RunView }) {
 						<span className="run-state">Running</span>
 					) : (
 						<span className="run-state">
-							Idle · {view.job_count} articles · {view.archive_filtered_count}{" "}
-							ready to archive
+							Idle · {view.job_count} articles ·{" "}
+							{view.archive_meter.selected_count} ready to archive
 						</span>
 					)}
 				</div>
 				<div className="run-actions">
 					<button
-						className="run-poll"
+						className="run-primary"
 						type="button"
-						disabled={!view.poll_sources_enabled}
-						onClick={() => void dispatchIntent({ type: "PollSources" })}
+						disabled={!view.run_enabled}
+						onClick={() => void dispatchIntent({ type: "RunPipeline" })}
 					>
-						Poll Sources
+						Run
 					</button>
 					<button
 						type="button"
-						disabled={!canRunPipeline}
-						onClick={() => void dispatchIntent({ type: "RunPipeline" })}
+						className="run-resume"
+						disabled={!view.resume_enabled}
+						title={view.resume_disabled_reason ?? undefined}
+						onClick={() =>
+							void dispatchIntent({ type: "ResumeUnfinishedWork" })
+						}
 					>
-						Run triage + summaries
+						{resumeLabel}
 					</button>
 					<button
 						className="run-stop"
 						type="button"
-						disabled={!canStop}
+						disabled={isStopping || !canStop}
 						onClick={() => void dispatchIntent({ type: "StopOrFinish" })}
 					>
-						Stop
+						{isStopping ? "Stopping…" : "Stop"}
 					</button>
 				</div>
 			</div>
+			{view.ai_unavailable_message && (
+				<p
+					className={`run-reprocess-notice${view.ai_unavailable_message.startsWith("AI features unavailable: saved results could not be opened:") ? " run-reprocess-notice--warning" : ""}`}
+					role="status"
+				>
+					{view.ai_unavailable_message}
+				</p>
+			)}
+			{view.reprocess_notice && (
+				<p className="run-reprocess-notice" role="status">
+					{`This run is reprocessing ${view.reprocess_notice.articles} unfinished article${
+						view.reprocess_notice.articles === 1 ? "" : "s"
+					} (up to ${view.reprocess_notice.estimated_calls} model calls).`}
+				</p>
+			)}
 
 			{notice && (
 				<div className="run-notice" role="status">
@@ -263,7 +363,11 @@ export function RunSurface({ view }: { view: RunView }) {
 
 			{progress.run_active && (
 				<div className="run-details">
-					<StageList stages={progress.stages} stageEtas={stageEtas} />
+					<StageList
+						stages={progress.stages}
+						stageEtas={stageEtas}
+						isStopping={isStopping}
+					/>
 					<ActivityFeed activity={progress.activity} />
 				</div>
 			)}

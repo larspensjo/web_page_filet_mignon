@@ -47,8 +47,13 @@ pub enum StageStatus {
 pub struct StageRecord {
     pub status: StageStatus,
     pub completed: u32,
+    /// Settled without a model request this run; always <= completed; zero for
+    /// stages without model work. An item judged new work at admission stays new
+    /// work even if it later settles from a result produced earlier in this run.
+    pub reused: u32,
     pub failed: u32,
     pub total: u32,
+    pub total_is_final: bool,
     pub started_at_utc: Option<DateTime<Utc>>,
     pub ended_at_utc: Option<DateTime<Utc>>,
 }
@@ -58,8 +63,10 @@ impl Default for StageRecord {
         Self {
             status: StageStatus::Pending,
             completed: 0,
+            reused: 0,
             failed: 0,
             total: 0,
+            total_is_final: false,
             started_at_utc: None,
             ended_at_utc: None,
         }
@@ -104,6 +111,14 @@ pub struct RunProgress {
     pub(crate) terminal: bool,
 }
 
+#[derive(Clone, Copy, Default)]
+pub(crate) struct StageCounts {
+    pub completed: u32,
+    pub failed: u32,
+    pub total: u32,
+    pub reused: u32,
+}
+
 impl RunProgress {
     pub(crate) fn new(
         run_id: u64,
@@ -142,6 +157,8 @@ impl RunProgress {
         }
         if matches!(record.status, StageStatus::Pending) {
             record.status = StageStatus::Active;
+        }
+        if total > 0 && record.started_at_utc.is_none() {
             record.started_at_utc = now;
         }
         record.total = record.total.max(total);
@@ -149,19 +166,19 @@ impl RunProgress {
     pub(crate) fn counts(
         &mut self,
         stage: PipelineStage,
-        completed: u32,
-        failed: u32,
-        total: u32,
+        counts: StageCounts,
         now: Option<DateTime<Utc>>,
     ) {
-        self.activate(stage, total, now);
+        self.activate(stage, counts.total, now);
         let record = self.stage_mut(stage);
-        record.completed = record.completed.max(completed);
-        record.failed = record.failed.max(failed);
-        record.total = record.total.max(total);
+        record.completed = record.completed.max(counts.completed);
+        record.failed = record.failed.max(counts.failed);
+        record.total = record.total.max(counts.total);
+        record.reused = record.reused.max(counts.reused);
     }
     pub(crate) fn finish(&mut self, stage: PipelineStage, now: Option<DateTime<Utc>>) {
         let record = self.stage_mut(stage);
+        record.total_is_final = true;
         if matches!(record.status, StageStatus::Pending) {
             return;
         }
@@ -177,12 +194,39 @@ impl RunProgress {
     pub(crate) fn stop(&mut self, now: Option<DateTime<Utc>>) {
         for stage in PipelineStage::ALL {
             let record = self.stage_mut(stage);
+            record.total_is_final = true;
             if matches!(record.status, StageStatus::Active) {
-                record.status = StageStatus::Done;
+                record.status = if record.completed == 0 && record.failed > 0 {
+                    StageStatus::Failed
+                } else {
+                    StageStatus::Done
+                };
                 record.ended_at_utc = now;
             }
         }
         self.terminal = true;
+    }
+    pub(crate) fn begin_stopping(&mut self) {
+        for stage in PipelineStage::ALL {
+            let record = self.stage_mut(stage);
+            record.total_is_final = true;
+            if record.status == StageStatus::Active
+                && record.total == 0
+                && record.completed == 0
+                && record.failed == 0
+            {
+                record.status = StageStatus::Pending;
+            }
+        }
+    }
+    pub(crate) fn settle(&mut self, now: Option<DateTime<Utc>>) {
+        self.stop(now);
+        for record in &mut self.stages {
+            if record.status == StageStatus::Pending {
+                record.status = StageStatus::Done;
+                record.ended_at_utc = now;
+            }
+        }
     }
     pub(crate) fn push_activity(
         &mut self,
@@ -218,8 +262,13 @@ pub struct StageProgress {
     pub stage: PipelineStage,
     pub status: StageStatus,
     pub completed: u32,
+    /// Settled without a model request this run; always <= completed; zero for
+    /// stages without model work. An item judged new work at admission stays new
+    /// work even if it later settles from a result produced earlier in this run.
+    pub reused: u32,
     pub failed: u32,
     pub total: u32,
+    pub total_is_final: bool,
     pub started_at_utc: Option<DateTime<Utc>>,
     pub ended_at_utc: Option<DateTime<Utc>>,
 }
@@ -235,8 +284,10 @@ impl RunProgress {
                         stage,
                         status: r.status,
                         completed: r.completed,
+                        reused: r.reused,
                         failed: r.failed,
                         total: r.total,
+                        total_is_final: r.total_is_final,
                         started_at_utc: r.started_at_utc,
                         ended_at_utc: r.ended_at_utc,
                     }
@@ -252,9 +303,15 @@ impl RunProgress {
 pub enum PipelineRunPhase {
     Idle,
     Requested,
-    Dispatched { since_seq: u64 },
-    AwaitingSettle,
     Stopping,
+}
+
+/// Export-facing lifecycle state for the current pipeline run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RunState {
+    Idle,
+    Active,
+    Stopping { in_flight: usize },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -268,6 +325,7 @@ pub struct PipelineActivity {
     pub poll_in_progress: usize,
     pub jobs_pending_or_in_flight: usize,
     pub pre_triage_loading: usize,
+    pub intake_refresh_pending: bool,
     pub triage_pending_or_in_flight: usize,
     pub summary_pending_or_in_flight: usize,
     pub signal_pending_or_in_flight: usize,
@@ -277,7 +335,8 @@ pub struct PipelineActivity {
 
 impl PipelineActivity {
     pub fn is_settled(&self) -> bool {
-        self.poll_in_progress == 0
+        !self.intake_refresh_pending
+            && self.poll_in_progress == 0
             && self.jobs_pending_or_in_flight == 0
             && self.pre_triage_loading == 0
             && self.triage_pending_or_in_flight == 0

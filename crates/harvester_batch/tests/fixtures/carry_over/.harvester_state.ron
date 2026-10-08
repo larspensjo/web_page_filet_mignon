@@ -1,0 +1,32 @@
+(
+    completed: [
+        (
+            url: "https://carry-over.synthetic/article-0",
+            tokens: Some(240),
+            bytes: Some(4200),
+            links: [
+                (
+                    url: "https://carry-over.synthetic/linked-resource",
+                    downloaded_path: Some("linked/carry-over-resource.md"),
+                ),
+            ],
+            fetched_utc: Some("2026-09-20T09:15:00Z"),
+        ),
+        (
+            url: "https://carry-over.synthetic/article-1",
+            tokens: Some(240),
+            bytes: Some(4201),
+            links: [
+                (
+                    url: "https://carry-over.synthetic/linked-resource",
+                    downloaded_path: Some("linked/carry-over-resource.md"),
+                ),
+            ],
+            fetched_utc: Some("2026-09-20T09:15:00Z"),
+        ),
+    ],
+    window_width: Some(1280),
+    window_height: Some(800),
+    desktop_window_width: Some(1512),
+    desktop_window_height: Some(982),
+)

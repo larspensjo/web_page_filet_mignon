@@ -28,14 +28,12 @@ pub fn build_corpus_manifest(written_at_utc: &str) -> Value {
             "articles": ["*.md", "linked/*.md"],
             "generated_artifacts": [
                 "archive.md",
-                "archive-*.md",
-                "export.txt",
-                "manifest.json",
-                "summary_refresh_reports/",
-                ".summary_refresh_last.json"
+                "archive-*.md"
             ],
             "internal_state": [
                 ".*.ron",
+                ".*.jsonl",
+                ".article_links/",
                 "llm_results/",
                 "logs/"
             ]
@@ -60,6 +58,15 @@ mod tests {
             manifest["layout"]["articles"].as_array().unwrap(),
             &vec![json!("*.md"), json!("linked/*.md")]
         );
+        assert_eq!(
+            manifest["layout"]["generated_artifacts"],
+            json!(["archive.md", "archive-*.md"])
+        );
+        assert_eq!(CORPUS_SCHEMA_VERSION, 1);
+        assert!(manifest["layout"]["internal_state"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(".article_links/")));
         assert!(manifest["layout"]["internal_state"]
             .as_array()
             .unwrap()
@@ -82,5 +89,43 @@ mod tests {
             parsed["schema_version"].as_u64(),
             Some(CORPUS_SCHEMA_VERSION as u64)
         );
+    }
+
+    fn internal_state_matches(name: &str) -> bool {
+        build_corpus_manifest("2026-09-28T00:00:00Z")["layout"]["internal_state"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .any(|pattern| {
+                pattern.split_once('*').is_some_and(|(prefix, suffix)| {
+                    name.starts_with(prefix) && name.ends_with(suffix)
+                })
+            })
+    }
+
+    #[test]
+    fn migration_temp_names_match_declared_internal_state_pattern() {
+        for name in [
+            ".harvester_state.pre-slim-20261001T120000.000000001-0.ron",
+            ".harvester_state.pre-slim-partial-20261001T120000.000000001.ron",
+            ".harvester_state.slim-partial-20261001T120000.000000001.ron",
+        ] {
+            assert!(internal_state_matches(name));
+        }
+        for kind in ["triage", "summary", "signal_candidate"] {
+            assert!(internal_state_matches(&format!(
+                ".{kind}_cache.migrating-20260928T120000.000000001.jsonl"
+            )));
+        }
+    }
+
+    #[test]
+    fn torn_tail_sidecar_names_match_declared_internal_state_pattern() {
+        for kind in ["triage", "summary", "signal_candidate"] {
+            assert!(internal_state_matches(&format!(
+                ".{kind}_cache.torn-20260928T120000.000000001.jsonl"
+            )));
+        }
     }
 }

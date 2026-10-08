@@ -1,10 +1,18 @@
 import aiUnavailable from "@fixtures/snapshots/ai_unavailable.json";
+import exportUnavailable from "@fixtures/snapshots/export_unavailable_during_run.json";
 import emptyCorpus from "@fixtures/snapshots/idle_empty_corpus.json";
+import emptyOutputFolderStarted from "@fixtures/snapshots/idle_empty_output_folder_started.json";
 import last24Hours from "@fixtures/snapshots/idle_last_24_hours.json";
 import withCorpus from "@fixtures/snapshots/idle_with_corpus.json";
 import withSelection from "@fixtures/snapshots/idle_with_selection.json";
+import overlappingActiveStages from "@fixtures/snapshots/overlapping_active_stages.json";
+import reprocessNotice from "@fixtures/snapshots/reprocess_notice.json";
 import runFinishedWithNotice from "@fixtures/snapshots/run_finished_with_notice.json";
 import runInProgressWithFailures from "@fixtures/snapshots/run_in_progress_with_failures.json";
+import runInProgressWithReusedResults from "@fixtures/snapshots/run_in_progress_with_reused_results.json";
+import stoppedWithUnfinishedWork from "@fixtures/snapshots/stopped_with_unfinished_work_export_enabled.json";
+import stoppingWithInFlightWork from "@fixtures/snapshots/stopping_with_in_flight_work.json";
+import unfinishedWorkAvailable from "@fixtures/snapshots/unfinished_work_available.json";
 import showArchiveDialog from "@fixtures/ui_commands/show_archive_dialog.json";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -33,12 +41,20 @@ const last24 = last24Hours as unknown as SnapshotEnvelope;
 const selected = withSelection as unknown as SnapshotEnvelope;
 const reviewFixtures = [
 	["idle empty corpus", emptyCorpus],
+	["idle empty output folder started", emptyOutputFolderStarted],
 	["idle last 24 hours", last24Hours],
 	["idle with corpus", withCorpus],
 	["run in progress with failures", runInProgressWithFailures],
+	["run in progress with reused results", runInProgressWithReusedResults],
 	["run finished with notice", runFinishedWithNotice],
 	["AI unavailable", aiUnavailable],
 	["idle with selection", withSelection],
+	["overlapping active stages", overlappingActiveStages],
+	["unfinished work available", unfinishedWorkAvailable],
+	["stopping with in-flight work", stoppingWithInFlightWork],
+	["stopped with unfinished work", stoppedWithUnfinishedWork],
+	["export unavailable during run", exportUnavailable],
+	["reprocess notice", reprocessNotice],
 ] as const;
 let snapshot: SnapshotEnvelope | null = corpus;
 let bodyResponses = new Map<string, BodyResponse | null>();
@@ -108,6 +124,48 @@ describe("job list", () => {
 					fetched_utc: expect.anything(),
 				});
 			}
+		}
+	});
+
+	it("pins the reduced IPC 15 snapshot in every bridge fixture", () => {
+		const fields = [
+			"job_count",
+			"desktop_job_list",
+			"last_paste_stats",
+			"archive_meter",
+			"archive_partial_coverage",
+			"stop_finish_button",
+			"signal_candidate_rows",
+			"ai_unavailable_message",
+			"run_progress",
+			"archive_enabled",
+			"run_state",
+			"run_completion_notice",
+			"run_enabled",
+			"resume_enabled",
+			"resume_disabled_reason",
+			"unfinished_work",
+			"reprocess_notice",
+			"checkpoint_status_message",
+			"llm_quota",
+			"right_pane",
+		].sort();
+		expect(fields).toHaveLength(20);
+		for (const [, fixture] of reviewFixtures) {
+			expect(fixture.schema_version).toBe(15);
+			expect(Object.keys(fixture.view).sort()).toEqual(fields);
+			expect(Object.keys(fixture.view.archive_meter).sort()).toEqual(
+				[
+					"selected_count",
+					"target",
+					"token_estimate",
+					"unsettled_count",
+					"status",
+				].sort(),
+			);
+			expect(Object.keys(fixture.view.right_pane)).toEqual([
+				"summary_markdown",
+			]);
 		}
 	});
 
@@ -817,34 +875,6 @@ describe("job list", () => {
 		]);
 	});
 
-	it("suppresses a matching leading summary heading only in the rendered body", async () => {
-		const rich = runFinishedWithNotice as unknown as SnapshotEnvelope;
-		const reference = rich.view.right_pane.summary_markdown;
-		if (!reference)
-			throw new Error("finished-run fixture must contain a summary body ref");
-		snapshot = rich;
-		const fetchedBody = Object.freeze<BodyResponse>({
-			content_hash: reference.content_hash,
-			text: "# Fixture summary\n\nSummary body",
-		});
-		bodyResponses.set(reference.key, fetchedBody);
-		await renderLoaded();
-		expect(await screen.findByText("Summary body")).toBeInTheDocument();
-		expect(
-			screen.getByRole("heading", { name: "Fixture summary", level: 2 }),
-		).toBeInTheDocument();
-		expect(
-			screen.queryByRole("heading", { name: "Fixture summary", level: 1 }),
-		).not.toBeInTheDocument();
-		expect(bodyResponses.get(reference.key)).toEqual({
-			content_hash: reference.content_hash,
-			text: "# Fixture summary\n\nSummary body",
-		});
-		expect(
-			vi.mocked(invoke).mock.calls.filter(([name]) => name === "fetch_body"),
-		).toEqual([["fetch_body", { key: reference.key }]]);
-	});
-
 	it("keeps a non-matching leading summary heading", async () => {
 		const rich = runFinishedWithNotice as unknown as SnapshotEnvelope;
 		const reference = rich.view.right_pane.summary_markdown;
@@ -1005,13 +1035,18 @@ describe("job list", () => {
 		rendered.unmount();
 	});
 
-	it("dispatches PollSources through the restricted intent channel", async () => {
+	it("dispatches Run and Process unfinished through the restricted intent channel", async () => {
+		snapshot = unfinishedWorkAvailable as unknown as SnapshotEnvelope;
 		await renderLoaded();
-		fireEvent.click(screen.getByRole("button", { name: "Poll Sources" }));
+		fireEvent.click(screen.getByRole("button", { name: "Run" }));
+		fireEvent.click(
+			screen.getByRole("button", { name: /Process unfinished \(/ }),
+		);
 		await waitFor(() =>
-			expect(invoke).toHaveBeenCalledWith("dispatch_intent", {
-				payload: { type: "PollSources" },
-			}),
+			expect(intents().map(([, arg]) => arg)).toEqual([
+				{ payload: { type: "RunPipeline" } },
+				{ payload: { type: "ResumeUnfinishedWork" } },
+			]),
 		);
 	});
 });
@@ -1113,6 +1148,24 @@ describe("modals and chrome", () => {
 		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 	});
 
+	it("gates Archive and its open dialog from the core export flag", async () => {
+		for (const runFixture of [exportUnavailable, stoppingWithInFlightWork]) {
+			snapshot = runFixture as unknown as SnapshotEnvelope;
+			await renderWithCommands();
+			expect(screen.getByRole("button", { name: "Archive…" })).toBeDisabled();
+			emitUiCommand(showArchiveDialog);
+			expect(screen.getByRole("button", { name: /^Export/ })).toBeDisabled();
+			cleanup();
+			listeners.clear();
+		}
+
+		snapshot = stoppedWithUnfinishedWork as unknown as SnapshotEnvelope;
+		await renderWithCommands();
+		expect(screen.getByRole("button", { name: "Archive…" })).toBeEnabled();
+		expect(snapshot.view.archive_enabled).toBe(true);
+		expect(snapshot.view.resume_enabled).toBe(true);
+	});
+
 	it("Ctrl+L opens Add URLs, paste submits, Escape closes", async () => {
 		await renderWithCommands();
 		fireEvent.keyDown(window, { key: "l", ctrlKey: true });
@@ -1136,14 +1189,12 @@ describe("modals and chrome", () => {
 		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 	});
 
-	it("Ctrl+F dispatches RevealJobsSearch and focuses the search box locally", async () => {
+	it("Ctrl+F focuses the search box locally without dispatching an intent", async () => {
 		await renderWithCommands();
 		const input = screen.getByRole("textbox", { name: "Search jobs" });
 		expect(document.activeElement).not.toBe(input);
 		fireEvent.keyDown(window, { key: "f", ctrlKey: true });
-		expect(intents()).toEqual([
-			["dispatch_intent", { payload: { type: "RevealJobsSearch" } }],
-		]);
+		expect(intents()).toEqual([]);
 		expect(document.activeElement).toBe(input);
 	});
 
@@ -1172,16 +1223,14 @@ describe("modals and chrome", () => {
 		]);
 	});
 
-	it("renders the archive token meter, quota meter and checkpoint status in the header", async () => {
+	it("renders the archive article meter, quota meter and checkpoint status in the header", async () => {
 		snapshot = {
 			...corpus,
 			view: { ...corpus.view, checkpoint_status_message: "Saving checkpoint…" },
 		};
 		await renderWithCommands();
 		const header = document.querySelector("header") as HTMLElement;
-		expect(
-			within(header).getByText("Archive 84 / 100k tokens"),
-		).toBeInTheDocument();
+		expect(within(header).getByText("0 / 150 articles")).toBeInTheDocument();
 		expect(
 			within(header).getByText("LLM calls 0 / unlimited"),
 		).toBeInTheDocument();

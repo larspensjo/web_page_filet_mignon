@@ -1,5 +1,15 @@
 use super::*;
 
+// This module tests the refresh coordinator independently of processing admission.
+// The containing test module is #[cfg(test)]; no production fixture is exported.
+fn isolated_poll(mut state: AppState) -> (AppState, Vec<Effect>) {
+    let effects = crate::update::polling::handle_poll_sources_clicked(&mut state);
+    if !effects.is_empty() {
+        crate::update::pipeline_run::begin_run_if_needed(&mut state);
+    }
+    (state, effects)
+}
+
 fn count_triage_loads(effects: &[Effect]) -> usize {
     effects
         .iter()
@@ -47,7 +57,6 @@ fn complete_job_for_test(state: AppState, job_id: crate::JobId) -> AppState {
         Msg::JobDone {
             job_id,
             result: crate::JobResultKind::Success,
-            content_preview: None,
             extracted_links: Vec::new(),
             fetched_utc: None,
         },
@@ -65,7 +74,10 @@ fn triage_loaded_matching_request_id_applies_articles() {
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            articles: loaded_triage_articles(1),
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                loaded_triage_articles(1),
+                100_000,
+            ),
         },
     );
     assert!(
@@ -93,7 +105,10 @@ fn triage_loaded_stale_request_id_is_ignored() {
         state,
         Msg::TriageArticlesLoaded {
             request_id: stale_id,
-            articles: loaded_triage_articles(1),
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                loaded_triage_articles(1),
+                100_000,
+            ),
         },
     );
     assert_eq!(
@@ -156,106 +171,6 @@ fn triage_load_failed_stale_request_id_is_ignored() {
 }
 
 #[test]
-fn triage_articles_load_progress_updates_matching_request() {
-    init_logging();
-    let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
-    let (state, request_id) = tick_until_dispatch(state);
-
-    let (state, _) = update(
-        state,
-        Msg::TriageArticlesLoadProgress {
-            request_id,
-            files_scanned: 25,
-            files_total: 80,
-        },
-    );
-
-    assert_eq!(
-        state.view().operation_progress,
-        Some(crate::view_model::OperationProgress {
-            label: "Updating triage candidates".to_string(),
-            completed: 25,
-            total: 80,
-        })
-    );
-}
-
-#[test]
-fn triage_articles_load_progress_ignores_stale_request() {
-    init_logging();
-    let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
-    let (state, _request_id) = tick_until_dispatch(state);
-
-    let (state, _) = update(
-        state,
-        Msg::TriageArticlesLoadProgress {
-            request_id: 999,
-            files_scanned: 25,
-            files_total: 80,
-        },
-    );
-
-    assert_eq!(
-        state.view().operation_progress,
-        Some(crate::view_model::OperationProgress {
-            label: "Updating triage candidates".to_string(),
-            completed: 0,
-            total: 1,
-        })
-    );
-}
-
-#[test]
-fn triage_articles_load_progress_cleared_on_success() {
-    init_logging();
-    let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
-    let (state, request_id) = tick_until_dispatch(state);
-    let (state, _) = update(
-        state,
-        Msg::TriageArticlesLoadProgress {
-            request_id,
-            files_scanned: 25,
-            files_total: 80,
-        },
-    );
-
-    let (state, _) = update(
-        state,
-        Msg::TriageArticlesLoaded {
-            request_id,
-            articles: loaded_triage_articles(1),
-        },
-    );
-
-    assert!(state.view().operation_progress.is_none());
-}
-
-#[test]
-fn triage_articles_load_progress_cleared_on_failure() {
-    init_logging();
-    let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
-    let (state, request_id) = tick_until_dispatch(state);
-    let (state, _) = update(
-        state,
-        Msg::TriageArticlesLoadProgress {
-            request_id,
-            files_scanned: 25,
-            files_total: 80,
-        },
-    );
-
-    let (state, _) = update(
-        state,
-        Msg::TriageArticlesLoadFailed {
-            request_id,
-            reason: "boom".to_string(),
-        },
-    );
-
-    assert!(state.view().operation_progress.is_none());
-}
-
-#[test]
 fn multiple_job_dones_within_quiet_window_emit_exactly_one_triage_load() {
     init_logging();
     let mut state = AppState::new();
@@ -292,7 +207,10 @@ fn restore_completed_jobs_schedules_and_dispatches_after_quiet_window() {
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            articles: loaded_triage_articles(1),
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                loaded_triage_articles(1),
+                100_000,
+            ),
         },
     );
 
@@ -318,7 +236,7 @@ fn restore_completed_jobs_schedules_and_dispatches_after_quiet_window() {
 }
 
 #[test]
-fn restore_completed_jobs_loading_text_explains_startup_preparation() {
+fn restore_completed_jobs_blocks_triage_during_startup_preparation() {
     init_logging();
     let snapshot = vec![crate::CompletedJobSnapshot {
         url: "https://example.com/restored".to_string(),
@@ -331,35 +249,11 @@ fn restore_completed_jobs_loading_text_explains_startup_preparation() {
     let (state, _) = update(AppState::new(), Msg::RestoreCompletedJobs(snapshot));
     let state = apply_pending_pre_triage_refresh_evaluation(state);
 
-    let view = state.view();
-    assert_eq!(
-        view.operation_progress,
-        Some(crate::view_model::OperationProgress {
-            label: "Preparing triage list".to_string(),
-            completed: 0,
-            total: 1,
-        })
-    );
-    assert_eq!(
-        view.triage_blocked_reason,
-        Some("Triage is unavailable while startup prepares the article set".to_string())
-    );
-}
-
-#[test]
-fn job_done_loading_text_explains_refresh_preparation() {
-    init_logging();
-    let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
-
-    let view = state.view();
-    assert_eq!(
-        view.operation_progress,
-        Some(crate::view_model::OperationProgress {
-            label: "Updating triage candidates".to_string(),
-            completed: 0,
-            total: 1,
-        })
-    );
+    assert!(state.pre_triage_coordinator.refresh_pending());
+    assert!(state.pre_triage().entries().is_empty());
+    let (state, _request_id) = tick_until_dispatch(state);
+    assert!(state.pre_triage().entries().is_empty());
+    assert!(state.triage_in_flight_request_id().is_some());
 }
 
 #[test]
@@ -387,7 +281,10 @@ fn new_demand_while_in_flight_queues_and_dispatches_after_response() {
         state,
         Msg::TriageArticlesLoaded {
             request_id: first_request_id,
-            articles: loaded_triage_articles(1),
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                loaded_triage_articles(1),
+                100_000,
+            ),
         },
     );
 
@@ -434,7 +331,7 @@ fn poll_burst_multiple_job_dones_yields_exactly_one_triage_load() {
     init_logging();
 
     let state = AppState::new();
-    let (state, _) = update(state, Msg::PollSourcesClicked);
+    let (state, _) = isolated_poll(state);
 
     // Complete 3 jobs during the burst (immediately done, so jobs_in_flight=0 between calls).
     let state = add_completed_job_for_test(state, "https://example.com/1");
@@ -483,7 +380,7 @@ fn poll_burst_waits_for_engine_jobs_to_drain_before_dispatching() {
     );
 
     // Start the poll burst.
-    let (state, _) = update(state, Msg::PollSourcesClicked);
+    let (state, _) = isolated_poll(state);
 
     // Complete job1 — demand is scheduled, job2 still in flight.
     let state = complete_job_for_test(state, job_id1);
@@ -524,7 +421,7 @@ fn poll_burst_zero_urls_no_triage_load_dispatched() {
     init_logging();
 
     let state = AppState::new();
-    let (state, _) = update(state, Msg::PollSourcesClicked);
+    let (state, _) = isolated_poll(state);
     let (state, _) = update(state, Msg::AllSourcesPollEnded);
 
     // No jobs → no demand → no dispatch.
