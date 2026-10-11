@@ -36,11 +36,54 @@ Done means:
   runbook gives exact commands for every user-executed step;
 - the live smoke run and the held-out run are written as user-executed steps,
   blocked until the key exists;
-- the production consequences of a full replacement (tags, rationale, taking
-  triage out of the Batch API diversion) and the signal-candidate admission job
-  are **sketched, not built**.
+- the production consequences of a full replacement (tags, rationale) and the
+  signal-candidate admission job are **sketched, not built**. Taking triage out
+  of the Batch API diversion was a third consequence when this plan was written;
+  Plan.Simplification removed that diversion, so it no longer applies.
 
 ## Settled decisions
+
+### Batch API removal (recorded 2026-10-07)
+
+`Plan.Simplification` phase 4 retired the Batch API, its provider-wait and
+collection lifecycle, and the batch-only modes on 2026-09-30. Every premise in
+this plan that treats the Batch API as current describes the past. What that
+changes:
+
+- **The app writes only sync triage records.** `cache_status` is `"miss"` for
+  every new recording, and `"batch_collected"` is historical evidence only. The
+  real `llm_results/` held 7,002 `batch_collected` records on 2026-10-07, all
+  dated 2026-07 to 2026-09 and none in October.
+- **Freeze a recent window.** An October-onwards selection is 100% sync path.
+  OpenAI `wall_ms` is then a real latency baseline, and the batch-path identity
+  handling (where `input_content_hash` means the untruncated clean-text hash
+  rather than the sent-text hash) never has to fire. A window reaching back
+  before October 2026 keeps both paths and both caveats, so prefer a recent one
+  unless a wider window is needed for sample size. **The dataset frozen on
+  2026-09-17 is exactly such a window** — 439 of its 800 records are batch-path
+  and carry `wall_ms = 0` — which is Open Question 6.
+- **No orchestration follow-on is needed for speed.** Triage already runs
+  synchronously. `DeferredToBatch`,
+  `crates/harvester_batch/src/batch_coordinator.rs` and
+  `crates/harvester_batch/src/runner/batch_runtime.rs` no longer exist; where
+  this plan still names them, read them as historical notes, not as targets.
+- **`load_failed` has an expected floor.** 162 recordings carry retired briefing
+  prompt ids (`AggregateBriefing` 110, `BriefingExecutiveSummary` 15,
+  `BriefingNextItem` 37) that no longer deserialize into `PromptId`. The
+  precondition report counts them as `load_failed`. They are benign, not
+  corruption; only counts above that floor indicate a data problem. The floor is
+  new relative to the freeze: the 2026-09-17 manifest records `load_failed: 0`
+  because those prompt ids were still live in `PromptId` then.
+
+Evidence: the keyless `freeze --dry-run` over the user's real output directory
+on 2026-10-07 scanned 30,609 records and reported 8,769 matching, 800 articles
+selected, 0 unmapped, 0 identity anomalies, sync/batch 800/0, a date range of
+2026-09-30 to 2026-10-07, and `load_failed=162 (0.5%)`. Its priority histogram
+was {1: 35, 2: 165, 3: 226, 4: 272, 5: 102}: priority 5 at 12.8% and 374
+articles at priority 4+5, well above the 2026-09-17 measurement that settled
+`--limit` at 800 (4.5%, 54 priority-5 and 331 priority-4+5). On this window
+priority-5 support is no longer the binding constraint on sample size, so Open
+Question 2 is worth revisiting if a smaller run becomes attractive.
 
 ### From the brief
 
@@ -57,6 +100,10 @@ Done means:
   prompt + rubric render to, not by timestamp alone.
   *Rejected:* timestamp-only selection (the prompt changed over time; older
   records are not comparable).
+  **Recorded 2026-10-07:** prefer a window starting in October 2026 or later.
+  Prompt identity already excludes the incomparable older records; an
+  October-onwards window is additionally free of the Batch API's zero `wall_ms`
+  and its separate hash meaning (see "Batch API removal").
 - **Same evidence to both arms.** Jev receives the frozen article text (nonce
   wrapper stripped) and the same rubric text as `editorial_criteria`. No title,
   URL or date in the primary arm; the source spec's template that sends
@@ -96,14 +143,15 @@ Done means:
 ### From the blindspot pass and the user's answers
 
 - **Quality first, speed second, cost observed.** The report leads with quality
-  and the controlled classifications. OpenAI latency cannot be taken from batch
-  recordings (85% of the last 30 days' calls went through the Batch API and
-  their `wall_ms` is 0); report OpenAI latency only from the sync-recorded
-  subset, labelled historical, and Jev latency as measured now. **Cost never
-  appears as an acceptance gate** — it is reported for both arms and nothing
-  more. **A speed win in production would require taking triage out of the Batch
-  API diversion** (`crates/harvester_batch` coordinator, the `DeferredToBatch`
-  flow); that orchestration change is sketched as a follow-on, not built.
+  and the controlled classifications. **Revised 2026-10-07, see "Batch API
+  removal" below.** Batch recordings carry `wall_ms = 0`, so a selection
+  reaching back before October 2026 must still report OpenAI latency from the
+  sync-recorded subset only, labelled historical. An October-onwards selection
+  is entirely sync-recorded, so its `wall_ms` is a real OpenAI latency baseline
+  measured under production conditions, not a zero to be excluded. Jev latency
+  is measured now. **Cost never appears as an acceptance gate** — it is
+  reported for both arms and nothing more. A speed win in production no longer
+  needs any orchestration change: triage already runs synchronously.
 - **End state under test is full replacement.** Jev's priority and categories
   replace the OpenAI triage entirely. Consequences in scope for the experiment:
   - **Tags**: the rubric's TAG GUIDANCE already names a preferred vocabulary.
@@ -260,7 +308,12 @@ taken from the brief.
   default `"miss"`). Records are written to `LlmConfig::replay_output_dir()` =
   `<output_dir>/llm_results`.
 - **`input_content_hash` does not mean the same thing on the two write paths.**
-  This is the single most consequential fact for the freeze:
+  This is the single most consequential fact for the freeze. **The batch write
+  path was retired on 2026-09-30 (see "Batch API removal"), so every
+  `batch_runtime.rs` reference below describes the code that produced the
+  historical records and is reachable only in git history. The two-identity
+  design still applies to any window that includes those records, and is inert
+  for an October-onwards window.**
   - **Sync** (`llm/handle.rs:493`, `handle.rs:672`): `content_hash(input_content)`
     — a SHA-256 over the **truncated text actually sent**.
   - **Batch** (`crates/harvester_batch/src/runner/batch_runtime.rs:292`):
@@ -337,9 +390,11 @@ taken from the brief.
   (`ModelPricing::new` multiplies dollars by 1,000,000), which is the unit this
   plan reuses for Jev. Recorded `cost_microdollars` is used as-is for the
   OpenAI arm.
-- **Batch records report `wall_ms = 0`** (`batch_runtime.rs:304`), so recorded
-  latency is unusable for them; they are excluded from every latency statistic
-  and counted separately.
+- **Batch records report `wall_ms = 0`** (`batch_runtime.rs:304`, since
+  removed), so recorded latency is unusable for them; they are excluded from
+  every latency statistic and counted separately. This only bites on a window
+  reaching back before October 2026; a later window carries real `wall_ms`
+  throughout.
 - **Clap 4 with derive** is the established CLI convention
   (`crates/harvester_batch/Cargo.toml`), and `reqwest 0.13.1` with `rustls`,
   `tokio 1`, `chrono`, `sha2`, `hex` and `fastrand` are already workspace-proven
@@ -519,7 +574,10 @@ design holds. Entirely keyless.
     cross-path duplicate counts; sync vs batch share; identity anomalies; date
     range; validation-failure count; instruction-like count; total frozen bytes
     and a rough Jev input-token estimate. **Dry-run writes no manifest, no
-    article files and no frozen rubric.**
+    article files and no frozen rubric.** The rejection breakdown carries a
+    standing `load_failed` floor of 162 records from retired briefing prompt ids
+    (see "Batch API removal"); treat only counts above that floor as a data
+    problem.
 12. **`src/report/baseline.rs`**: the baseline-only report, from recordings
     alone — priority histogram, category histogram, tag histogram and tag
     cardinality, cost totals and per-article cost split by sync and batch, and
@@ -1282,17 +1340,16 @@ accident.
 
 **If Jev replaces triage:**
 
-- **Speed**: the quoted latency win is only realisable if triage leaves the
-  Batch API diversion. Today most triage calls are deferred
-  (`DeferredToBatch`, `crates/harvester_batch/src/batch_coordinator.rs`,
-  `crates/harvester_core/src/update/pipeline_run.rs`) and return hours later at
-  half price. A follow-on orchestration change would route `ArticleTriage`
-  synchronously to the Jev adapter while summaries and signal-candidate scoring
-  keep their batch path — a batch-eligibility change in
-  `crates/harvester_batch/src/runner/batch_runtime.rs` and the coordinator's
-  diversion rule, with its own plan, decision-log entry and tests. It would also
-  end the `input_content_hash` divergence for triage records, since the batch
-  path is where the untruncated clean-text hash comes from.
+- **Speed**: **superseded 2026-10-07.** This plan was written when most triage
+  calls were deferred to the Batch API and returned hours later at half price,
+  so a latency win depended on a follow-on orchestration change that took triage
+  out of that diversion. `Plan.Simplification` phase 4 removed the Batch API,
+  the `DeferredToBatch` flow and the batch coordinator, so triage already runs
+  synchronously: nothing stands between the measured latency and production, and
+  there is no batch-eligibility rule left to amend. The `input_content_hash`
+  divergence is likewise closed for new records, because the batch path that
+  produced the untruncated clean-text hash is gone; records written before
+  October 2026 still carry it.
 - **Provider seam**: Jev returns a distribution, not a JSON string, so it cannot
   be an `LlmProvider` as the trait stands. A production path needs either a
   triage-specific port that both providers implement, or an adapter that
@@ -1386,18 +1443,19 @@ new tool. It stays a sketch until the triage verdict is in.
   > build surface".
 
   A second entry follows only if the verdict is adopted: the triage provider
-  change and the batch-diversion change, which is Phase 8's business, not this
-  plan's.
+  change, which is Phase 8's business, not this plan's. The batch-diversion
+  change this sentence also called for is moot; Plan.Simplification removed the
+  diversion.
 - **`docs/FutureIdeas.md`**: this work sits inside `[FI-LLM-Replay-0001]`,
   `[FI-Observability-ReplayDiagnostics-0001]`, `[FI-LLM-Providers-0001]` and
   `[FI-LLM-RetryPolicy-0001]`. It is **not**
   `[FI-Observability-ReplayDiagnostics-0002]`, which covers extractor and
   converter comparisons over fixture corpora, not provider judgment quality; do
   not cite that item for this work. If the follow-on production change is
-  deferred rather than planned, add one `Architecture / BatchOrchestration` item
-  for taking triage out of the Batch API diversion and one `LLM / Providers`
-  item for the constrained-judgment provider seam, referencing the runbook's
-  verdict.
+  deferred rather than planned, add one `LLM / Providers` item for the
+  constrained-judgment provider seam, referencing the runbook's verdict. The
+  `Architecture / BatchOrchestration` item this plan previously called for is no
+  longer needed, because the Batch API diversion is gone.
 - **`.gitignore`**: `/.local/experiments/` (Phase 1).
 - **Not touched**: `docs/CorpusFormat.md`, `CORPUS_SCHEMA_VERSION`,
   `harvester-corpus.json`, `docs/visual_design/VisualDesignSpec.md`,
@@ -1417,6 +1475,9 @@ new tool. It stays a sketch until the triage verdict is in.
    chose 800 over 400, 200 or oversampling priorities 4–5: quality first, and
    only 800 gives usable priority-5 support. The natural priority mix is kept, so
    no class-balance caveat applies. `--limit` defaults to 800.
+   **Partly overtaken by Open Question 5:** the priority mix measured on
+   2026-10-07 differs materially from the 2026-09-17 measurement this decision
+   rests on. The decision stands; the premise moved.
 3. **Live-only facts that can change the design.** Whether the shared request
    budget accommodates the priority, relevance, five category and roughly thirty
    tag questions alongside a long article in one call; whether question text is
@@ -1425,3 +1486,44 @@ new tool. It stays a sketch until the triage verdict is in.
    recorded in the runbook's schema-conformance step, and any of them may force
    a documented change (most likely: splitting the `noul` questions into a
    second call, which changes the cost and latency story).
+4. **Whether to run the experiment at all.** The user's decision, open as of
+   2026-10-07. The motivation recorded in this plan was partly a latency win
+   that depended on taking triage out of the Batch API diversion; that diversion
+   is gone and triage is already synchronous, so the speed case is now a direct
+   comparison rather than a prerequisite for one. The quality case is unchanged.
+   Nothing in later phases runs, and no key is needed, until this is settled.
+5. **The priority mix has shifted, but the dataset is already frozen;
+   `--limit 800` stays.** The 2026-10-07 dry-run measured priority 5 at 12.8% of
+   the 800 it would select (102 articles) against the 4.5% (54) that settled
+   Open Question 2 on 2026-09-17, and priority 4+5 at 374 against 331. That
+   describes **a hypothetical new freeze over an October window, not the dataset
+   in hand**: `.local/experiments/jev-triage/manifest.json` was written on
+   2026-09-17 and its 800 articles carry the September mix, so the support the
+   Phase 7 held-out run actually has is the 54 priority-5 (roughly 27 held out)
+   that Open Question 2 records. **The user kept `--limit 800` on 2026-10-11.**
+   There is consequently nothing to revisit until a new freeze is on the table —
+   whether because a threshold change forces a fresh held-out sample (Phase 7
+   step 2) or because Open Question 6 is answered by re-freezing. At that point,
+   re-read the new dry-run's priority histogram before accepting the default: if
+   priority 5 still sits near 12%, `--limit 400` would yield roughly the 54
+   priority-5 articles that 800 gave in September, at half the blind-review
+   burden and half the live cost. Two cautions: the shift is measured on a
+   single eight-day window and may reflect what happened to be harvested rather
+   than a durable change, and `--limit` is a selection input, so changing it
+   produces a different frozen dataset rather than a modified one.
+6. **Whether to re-freeze on a post-Batch-API window.** Open as of 2026-10-11,
+   and the more consequential half of Open Question 5. The frozen dataset was
+   selected before the Batch API was retired and is **55% batch-path: 439 of its
+   800 records are `batch_collected` and carry `wall_ms = 0`**, so the OpenAI
+   latency baseline it can support rests on the other 361 articles, and the
+   batch-path identity rule applies to the majority of it. A fresh freeze over
+   October onwards would be 100% sync, giving a clean latency baseline on all
+   800 and no dual-path caveat (see "Batch API removal"). The cost is that the
+   smoke run and the development round already carried out on the present
+   dataset do not transfer: a new freeze is a new `manifest_hash`, hence new run
+   ids and a repeat of Phase 6 and Phase 7 step 1. Deciding this *before* the
+   held-out run is much cheaper than discovering afterwards that the latency
+   half of the verdict rests on 361 articles. It bears on Open Question 4: if
+   the experiment runs mainly for the quality verdict, the present dataset is
+   adequate as it stands; if the latency comparison carries real weight in the
+   decision, re-freezing first is the stronger choice.
