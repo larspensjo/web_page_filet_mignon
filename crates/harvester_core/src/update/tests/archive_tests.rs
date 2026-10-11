@@ -1,5 +1,41 @@
 use super::*;
 
+fn triage_state_with_content_twins(shared_hash: &str) -> AppState {
+    let mut state = complete_triage_state_for_test(3);
+    let mut articles: Vec<_> = state
+        .triage()
+        .articles()
+        .iter()
+        .map(|article| LoadedArticle {
+            url: article.url.clone(),
+            source_title: article.source_title.clone(),
+            prepared_text: "triage-content ".repeat(220),
+            content_hash: article.content_hash.clone(),
+            fetched_utc: article.fetched_utc.clone(),
+        })
+        .collect();
+    articles[0].content_hash = shared_hash.into();
+    articles[1].content_hash = shared_hash.into();
+    let results: Vec<_> = articles
+        .iter()
+        .map(|article| state.triage().result_for_url(&article.url).unwrap().clone())
+        .collect();
+    state.set_pre_triage(crate::PreTriageSession::load_articles(
+        articles.clone(),
+        &crate::PreTriagePolicy::default(),
+    ));
+    let mut session = crate::triage::TriageSession::new_loading(None);
+    session.set_articles(articles);
+    session.transition_to_triaging();
+    for (i, result) in results.into_iter().enumerate() {
+        session.complete_article(i, result);
+    }
+    session.complete();
+    state.set_triage(session);
+    crate::fixture_support::save_session_results(&mut state);
+    state
+}
+
 #[test]
 fn signal_export_keeps_pinned_membership_and_submit_time_member_annotations_and_summaries() {
     use harvester_engine::{archive_url_key, ArchiveFoldReason};
@@ -189,34 +225,93 @@ fn merged_signal_export_keeps_pin_and_promotes_live_representative_on_exclusion(
 }
 
 #[test]
-fn full_mode_and_missing_signal_snapshot_export_full_pin_with_empty_membership() {
+fn full_mode_and_missing_signal_snapshot_export_folded_full_pin_with_identical_membership() {
+    use harvester_engine::{archive_url_key, ArchiveFoldReason};
     init_logging();
     for use_signal_candidates in [false, true] {
-        let mut state = with_signal_candidate_metadata(complete_triage_state_for_test(2));
+        let mut state =
+            with_signal_candidate_metadata(triage_state_with_content_twins("hash-tc-0"));
+        let unavailable = state.archive_final_selection();
+        assert_eq!(
+            unavailable.source,
+            crate::ArchiveSelectionSource::FullCorpusSignalUnavailable
+        );
+        assert_eq!(unavailable.ordered_urls.len(), 2);
+        let unscored_member =
+            &unavailable.folds[&archive_url_key("https://triage-complete.com/0")][0];
+        assert_eq!(unscored_member.reason, ArchiveFoldReason::IdenticalContent);
+        assert!(unscored_member.signal_key.is_none());
+        for i in 0..3 {
+            state = add_completed_job_with_tokens_for_test(
+                state,
+                &format!("https://triage-complete.com/{i}"),
+                500,
+            );
+        }
+        seed_summaries_for_triage_hashes(&mut state, 3);
         complete_signal_candidate(&mut state, 0, 90, "shared-event");
-        complete_signal_candidate(&mut state, 1, 80, "shared-event");
+        complete_signal_candidate(&mut state, 1, 95, "different-twin-slug");
+        complete_signal_candidate(&mut state, 2, 80, "shared-event");
         crate::fixture_support::save_session_results(&mut state);
+        state.set_signal_candidate_threshold(100);
+        let no_candidates = state.archive_final_selection();
+        assert_eq!(
+            no_candidates.source,
+            crate::ArchiveSelectionSource::FullCorpusNoCandidates
+        );
+        assert_eq!(no_candidates.ordered_urls, unavailable.ordered_urls);
+        assert_eq!(
+            no_candidates.folds[&archive_url_key("https://triage-complete.com/0")][0].reason,
+            ArchiveFoldReason::IdenticalContent
+        );
+        state.set_signal_candidate_threshold(60);
+        let unfolded_estimate =
+            state.archive_token_estimates(state.archive_corpus().ordered_urls());
         let (mut state, effects) = update(state, Msg::ArchiveClicked);
-        let article_count = effects
+        let (article_count, estimates) = effects
             .iter()
             .find_map(|effect| match effect {
-                Effect::OpenArchiveDialog { article_count, .. } => Some(*article_count),
+                Effect::OpenArchiveDialog {
+                    article_count,
+                    token_estimates,
+                    ..
+                } => Some((*article_count, *token_estimates)),
                 _ => None,
             })
             .unwrap();
         let full_pin = state.pinned_full_archive_selection().unwrap().clone();
+        assert_eq!(state.pinned_archive_corpus().unwrap().count(), 3);
         assert_eq!(
             full_pin.ordered_urls,
-            state.pinned_archive_corpus().unwrap().ordered_urls()
+            vec![
+                "https://triage-complete.com/0",
+                "https://triage-complete.com/2"
+            ]
         );
         assert_eq!(article_count, full_pin.ordered_urls.len());
         assert_eq!(article_count, 2);
+        assert_eq!(unfolded_estimate.full_tokens, 1500);
+        assert_eq!(estimates.full_tokens, unfolded_estimate.full_tokens - 500);
+        assert_eq!(unfolded_estimate.summary_tokens, 15);
+        assert_eq!(
+            estimates.summary_tokens,
+            unfolded_estimate.summary_tokens - 5
+        );
+        assert_eq!(estimates.summary_coverage, 2);
         assert!(!state
             .pinned_signal_candidate_selection()
             .unwrap()
             .folds
             .is_empty());
-        assert!(full_pin.folds.is_empty());
+        let members = &full_pin.folds[&archive_url_key("https://triage-complete.com/0")];
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].url, "https://triage-complete.com/1");
+        assert_eq!(
+            members[0].signal_key.as_deref(),
+            Some("different-twin-slug")
+        );
+        assert_eq!(members[0].reason, ArchiveFoldReason::IdenticalContent);
+        assert_eq!(full_pin.folds.len(), 1);
         if use_signal_candidates {
             state.clear_pinned_signal_candidate_selection();
         }
@@ -230,7 +325,7 @@ fn full_mode_and_missing_signal_snapshot_export_full_pin_with_empty_membership()
                 basename: "archive.md".into(),
                 set_checkpoint: false,
                 submitted_at: chrono::Utc::now(),
-                use_summaries: false,
+                use_summaries: true,
                 use_signal_candidates,
             },
         );
@@ -241,15 +336,78 @@ fn full_mode_and_missing_signal_snapshot_export_full_pin_with_empty_membership()
         if let Effect::ArchiveRequested {
             ordered_urls,
             folds,
+            annotations,
+            summaries,
             ..
         } = effect
         {
             assert_eq!(*ordered_urls, full_pin.ordered_urls);
             assert_eq!(*folds, full_pin.folds);
             assert_eq!(article_count, ordered_urls.len());
+            assert_eq!(
+                folds[&archive_url_key("https://triage-complete.com/0")][0].reason,
+                ArchiveFoldReason::IdenticalContent
+            );
+            assert_eq!(
+                annotations[&archive_url_key("https://triage-complete.com/1")]
+                    .signal_key
+                    .as_deref(),
+                Some("different-twin-slug")
+            );
+            assert!(summaries.contains_key(&archive_url_key("https://triage-complete.com/1")));
         }
         assert!(state.pinned_full_archive_selection().is_none());
     }
+}
+
+#[test]
+fn full_mode_and_final_selection_keep_empty_clean_text_separate() {
+    let empty_hash = harvester_engine::llm::replay::content_hash("");
+    // Startup corpus metadata carries the hash, not a stored clean-text length.
+    let mut state = with_signal_candidate_metadata(triage_state_with_content_twins(&empty_hash));
+    let unavailable = state.archive_final_selection();
+    assert_eq!(
+        unavailable.source,
+        crate::ArchiveSelectionSource::FullCorpusSignalUnavailable
+    );
+    assert_eq!(unavailable.ordered_urls.len(), 3);
+    assert!(unavailable.folds.is_empty());
+    complete_signal_candidate(&mut state, 0, 50, "first");
+    complete_signal_candidate(&mut state, 1, 40, "second");
+    let no_candidates = state.archive_final_selection();
+    assert_eq!(
+        no_candidates.source,
+        crate::ArchiveSelectionSource::FullCorpusNoCandidates
+    );
+    assert_eq!(no_candidates.ordered_urls, unavailable.ordered_urls);
+    assert!(no_candidates.folds.is_empty());
+    let (state, effects) = update(state, Msg::ArchiveClicked);
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::OpenArchiveDialog {
+            article_count: 3,
+            ..
+        }
+    )));
+    let pin = state.pinned_full_archive_selection().unwrap().clone();
+    assert_eq!(pin.ordered_urls, unavailable.ordered_urls);
+    assert!(pin.folds.is_empty());
+    let request_id = state.archive_request_id();
+    let (_, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "empty-text.md".into(),
+            set_checkpoint: false,
+            submitted_at: chrono::Utc::now(),
+            use_summaries: false,
+            use_signal_candidates: false,
+        },
+    );
+    assert!(effects.iter().any(
+        |effect| matches!(effect, Effect::ArchiveRequested { ordered_urls, folds, .. }
+            if *ordered_urls == pin.ordered_urls && folds.is_empty())
+    ));
 }
 
 #[test]

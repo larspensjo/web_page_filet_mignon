@@ -358,6 +358,96 @@ fn idle_meter_count_equals_dialog_default_export_count() {
     assert_eq!(state.archive_meter_view().unsettled_count, 0);
     dialog(state, DialogDefault::OnAllSettled);
 }
+
+#[test]
+fn identical_content_with_different_slugs_agrees_in_meter_rows_dialog_and_export() {
+    use harvester_engine::{archive_url_key, ArchiveFoldReason};
+    let mut f = Fixture::new(&[
+        ("a", Some(5), true, None),
+        ("b", Some(5), true, None),
+        ("c", Some(5), true, None),
+    ]);
+    f.articles[1].content_hash = f.articles[0].content_hash.clone();
+    let keys = [
+        "vistra-loan-nuclear-uprates",
+        "entirely-different-slug",
+        "doe-loan-vistra-nuclear-fleet-uprates",
+    ];
+    let mut state = f.ready();
+    for (i, key) in keys.iter().enumerate() {
+        state = save_score(state, &f.articles[i], key);
+        assert_eq!(state.archive_meter_view().selected_count, 1);
+        assert_eq!(
+            state.archive_meter_view().selected_count,
+            state.signal_candidate_selection().selected_urls.len()
+        );
+    }
+    let rows = state.build_signal_candidate_rows();
+    assert_eq!(rows.len(), 3);
+    let rep = rows
+        .iter()
+        .find(|row| row.url == f.articles[0].url)
+        .unwrap();
+    assert_eq!(rep.outcome, Some(crate::SignalCandidateOutcome::Selected));
+    for row in &rows {
+        // Content twins do not enlarge the article's canonical-key group.
+        let expected_dupes = usize::from(row.url != f.articles[1].url);
+        assert_eq!(row.dupes_count, expected_dupes);
+        if row.url != rep.url {
+            assert_eq!(
+                row.outcome,
+                Some(crate::SignalCandidateOutcome::Deduplicated {
+                    kept_gist: rep.gist_truncated.clone()
+                })
+            );
+        }
+    }
+    let meter = state.archive_meter_view();
+    let state = dialog(state, DialogDefault::OnAllSettled);
+    let full_pin = state.pinned_full_archive_selection().unwrap();
+    assert_eq!(full_pin.ordered_urls.len(), 2);
+    assert!(full_pin
+        .folds
+        .values()
+        .flatten()
+        .all(|member| member.reason == ArchiveFoldReason::IdenticalContent));
+    let request_id = state.archive_request_id();
+    let (_, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "identical-test.md".into(),
+            set_checkpoint: false,
+            submitted_at: now(),
+            use_summaries: true,
+            use_signal_candidates: true,
+        },
+    );
+    let (urls, folds) = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::ArchiveRequested {
+                ordered_urls,
+                folds,
+                ..
+            } => Some((ordered_urls, folds)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(urls.len(), meter.selected_count);
+    assert_eq!(meter.token_estimate, 20);
+    assert_eq!(urls, &[f.articles[0].url.clone()]);
+    let members = &folds[&archive_url_key(&urls[0])];
+    assert_eq!(members.len(), 2);
+    assert_eq!(
+        (&members[0].url, members[0].reason),
+        (&f.articles[1].url, ArchiveFoldReason::IdenticalContent)
+    );
+    assert_eq!(
+        (&members[1].url, members[1].reason),
+        (&f.articles[2].url, ArchiveFoldReason::SameEvent)
+    );
+}
 #[test]
 fn mid_session_result_write_failure_keeps_meter_and_dialog_selection() {
     let state = Fixture::selected().ready();

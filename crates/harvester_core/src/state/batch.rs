@@ -217,10 +217,8 @@ impl AppState {
     /// Called when the archive dialog is opened so that both the open and submit
     /// handlers operate on the identical corpus the user saw when confirming.
     pub fn pin_archive_corpus(&mut self, corpus: crate::working_corpus::CurrentWorkingCorpus) {
-        self.pinned_full_archive_selection = Some(crate::signal_candidate::FullArchiveSelection {
-            ordered_urls: corpus.ordered_urls().to_vec(),
-            folds: Default::default(),
-        });
+        self.pinned_full_archive_selection =
+            Some(self.full_archive_selection(corpus.ordered_urls()));
         self.pinned_archive_corpus = Some(corpus);
     }
 

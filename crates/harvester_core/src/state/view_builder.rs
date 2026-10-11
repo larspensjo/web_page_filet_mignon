@@ -380,6 +380,10 @@ impl AppState {
             .filter_map(|(url, state)| match state {
                 SignalCandidateState::Completed { result } => Some(ScoredCandidate {
                     url: (*url).to_string(),
+                    content_hash: self
+                        .content_hash_for_url(url)
+                        .and_then(crate::signal_candidate::foldable_content_hash)
+                        .map(str::to_owned),
                     result: (*result).clone(),
                 }),
                 _ => None,

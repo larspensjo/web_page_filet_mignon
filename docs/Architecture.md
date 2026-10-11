@@ -312,8 +312,13 @@ Archive selection and processing remain window-bound.
 Manual exclusions are reducer state, persisted through the reducer-emitted
 `PersistSignalCandidateOverrides` effect and cleared by a checkpoint export.
 The pure signal selection groups all above-threshold canonical keys before
-exclusions and carries fold membership in representative election order (tier,
-score, URL). Slug-only normalization folds compound names and aliases, removes
+exclusions, removes the named exclusions, then folds identical clean-text hashes
+by tier, score and URL before electing same-event representatives. Unknown hashes
+and the SHA-256 of empty clean text never cause an identical-content fold.
+Content followers retain reason `identical_content` under the final representative,
+including when their surviving copy is later folded as `same_event`; all membership
+stays in representative election order (tier, score, URL).
+Slug-only normalization folds compound names and aliases, removes
 noise and quantities, and requires a shared lead plus class-specific object
 evidence (or three shared objects without disjoint event classes). Explicit
 period, year and version differences veto a merge, including fiscal `fqN`/`fyNN`
@@ -325,11 +330,18 @@ object, while plural `sales` remains results evidence. Keys are bucketed by lead
 ascending byte order and grouped by complete linkage, so every member must match
 every other member. Same-event members retain their own raw slugs with reason
 `same_event`. Exclusions remove only articles with the named canonical key;
-excluding a representative promotes the next eligible member. Membership accessors
-supply the candidate rows' duplicate counts and kept representative gist.
+excluding a representative promotes the next eligible member. Candidate rows count
+their canonical-key group's above-threshold members minus one, even for a
+below-threshold row whose key matches that group. Identical-content twins from
+other key groups do not enlarge this count. The kept gist follows the article's
+final exported representative.
 The dialog pins the signal selection and its membership, and a full-mode URL
-list with empty membership beside the triage corpus. Full mode and the
-missing-signal-snapshot fallback use that full-mode pin. Submit sends the chosen
+list folded by known non-empty clean-text hashes beside the triage corpus.
+Full mode keeps the earliest corpus-ranked copy and records its followers as
+`identical_content`, with no same-event collapse. Its article count and token
+estimates use this folded list. Full mode and the missing-signal-snapshot fallback
+export that same full-mode pin with its membership; triage coverage notices retain
+their original population. Submit sends the chosen
 membership through `ArchiveRequested`, with annotations and summaries covering
 members too. The exporter promotes the first surviving member if its selected
 representative is missing, and writes the additive `folded` headers and bounded
@@ -342,7 +354,8 @@ summary under any key, with full article tokens when no summary resolves. The
 legacy summary accessor still prefers a live session summary before that lookup.
 The grouped `archive_meter` counts only selected saved current-key scored articles
 that are actionable and in the checkpoint window, applying the score threshold,
-merged same-event group representatives and manual exclusions. It shows the
+manual exclusions, identical-content folds and merged same-event group
+representatives. It shows the
 recomputed selection count, which may decrease when a newly scored key regroups
 existing articles. Only the dialog pin fixes a selection for one export. It never
 falls back to the triage corpus. Its fixed article target is 150; its summary-token

@@ -172,8 +172,10 @@ fn outcome_deduplicates_merged_event_keys() {
 
     let rep = "https://example.com/anthropic-rep/".to_string() + &"a".repeat(96);
     let dupe = "https://example.com/anthropic-dupe/".to_string() + &"b".repeat(96);
+    let low = "https://example.com/vistra-low/".to_string() + &"c".repeat(96);
     insert_done_job(&mut state, 1, &rep);
     insert_done_job(&mut state, 2, &dupe);
+    insert_done_job(&mut state, 3, &low);
     complete_candidate(
         &mut state,
         &rep,
@@ -190,6 +192,14 @@ fn outcome_deduplicates_merged_event_keys() {
         SourceTier::Tier2,
         "duplicate Vistra loan gist",
     );
+    complete_candidate(
+        &mut state,
+        &low,
+        40,
+        "doe-loan-vistra-nuclear-fleet-uprates",
+        SourceTier::Tier2,
+        "below-threshold Vistra loan gist",
+    );
 
     let rows = state.build_signal_candidate_rows();
     let dupe_row = rows.iter().find(|row| row.url == dupe).expect("dupe row");
@@ -205,6 +215,12 @@ fn outcome_deduplicates_merged_event_keys() {
         })
     );
     assert_eq!(dupe_row.dupes_count, 1);
+    let low_row = rows.iter().find(|row| row.url == low).expect("low row");
+    assert_eq!(
+        low_row.outcome,
+        Some(SignalCandidateOutcome::BelowThreshold)
+    );
+    assert_eq!(low_row.dupes_count, 1);
     let version = state
         .active_version_for(harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate)
         .unwrap_or_default();
@@ -226,6 +242,10 @@ fn outcome_deduplicates_merged_event_keys() {
     );
     assert_eq!(
         rows.iter().find(|row| row.url == dupe).unwrap().dupes_count,
+        1
+    );
+    assert_eq!(
+        rows.iter().find(|row| row.url == low).unwrap().dupes_count,
         1
     );
 }

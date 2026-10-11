@@ -3,7 +3,8 @@
 Written 2026-10-07 from the design brief relayed by the AI_portfolio repository (the consumer
 of `archive.md`). Revised 2026-10-07 after a Codex review: every issue and recommendation was
 applied, with the user's and the orchestrator's answers folded in (see "Decisions carried
-in"). Status: Phases 1-3 complete and committed (2026-10-11); Phase 4 next, see "Handoff".
+in"). Status: Phases 1-3 committed; Phase 4 complete and verified (2026-10-11), uncommitted;
+Phase 5 next, see "Handoff".
 Implementation runs phase by phase; nothing is committed unless the user asks.
 
 Durable documents (design docs, the decision log, code comments) must describe behaviours,
@@ -58,7 +59,7 @@ Settled after review:
   entry refines the 2026-10-07 meter entry (Phase 5).
 - **No on/off switch for the merge rule** (settled by the orchestrator, open to challenge). The
   per-document `folded` list is the audit trail, and turning off "use signal candidates" already
-  yields an unmerged export.
+  skips same-event merging; identical-content folding still applies in full mode.
 - **A missing representative is replaced, not fatal** (settled by the orchestrator, open to
   challenge; it overrides the reviewer's preferred remedy of failing the export). If a
   representative cannot be exported, the exporter promotes the next surviving member of its group
@@ -841,21 +842,71 @@ Filled in during implementation.
 | Vistra, Foxconn, Reflection, Amazon, FTC: keys before to groups after | Vistra 13 -> 1; Foxconn 9 -> 1; Reflection 9 -> 5; Amazon 10 -> 6; FTC 5 -> 1. All requested one-group and floor targets met; no target lowered. Northrop's report-only family is 4 -> 2 rather than the hand estimate of 1; no vocabulary extension made to chase it. |
 | Second benchmark: `output/archive-2026-10-11.md`, keys / groups after | 129 / 105 (24 fewer, 18.6%); previously 104 before review. The year grammar separates doc 22's 2028 target from doc 27's FY31 target; their real slugs are a new hard separation guard. Vistra's spelled `4-2-billion` and suffixed `4-2b` amounts still agree (docs 3/7/12/17/52 merge; docs 8/34 retain their separate `conditional` lead). Read-only `cargo run --offline -p harvester_core --example archive_redundancy_report -- --archive output/archive-2026-10-11.md`. |
 | Window articles (confirms `window_count` 584) and the `--since` used | 584; `--since 2026-10-02T13:00:00Z`, `--until 2026-10-07T04:57:36Z`; all 197 exported documents present. Midnight since gives 686. |
-| Shared-content-hash groups in the window / among the 197 exported | 3 / 0; all 3 window groups are extraction failures (empty text x16, interstitial x3, YouTube boilerplate x2); 0 are syndicated copies. Empty text is not an identical-content candidate. |
+| Shared-content-hash groups in the window / exported comparison | Historical measurement: 3 / 0 among the 197 exported. Re-measured 2026-10-11 with the required read-only command: same 584 window articles and 3 shared-hash groups (empty text x16, verification interstitial x3, YouTube boilerplate x2); 2 non-empty candidate groups, 0 real syndicated copies. Bodies of both non-empty groups were read to confirm extraction failures. Empty text is not an identical-content candidate. The current `output/archive.md` contains 129 later documents, with 0 matching this historical window and 0 exported duplicate groups; that exported comparison does not re-measure the original 197-document archive. No output file was written. |
 | Must-stay-separate cases (real / synthetic / veto), all passing | 14 document-based real cases (50 cross-set pairs) / 33 key-only cases, including 15 marker-veto pairs and 11 pairs verified in the read-only scoring cache. Ten synthetic merge targets cover compatible markers/amounts. Rule-table vocabulary coverage witnesses: 158 must-merge pairs and 158 matched must-stay-separate pairs in `rule-table-cases.json`; singular-sale coverage migrated to independent loan evidence. The coverage guard is not proof that each synthetic boundary isolates its vocabulary entry. Non-actor residuals remain documented above. |
 
 ## Handoff
 
-Updated 2026-10-11, after Phase 3.
+Updated 2026-10-11, after Phase 4 verification and approved-review fixes.
 
-**Phase 4 starts here.** Run `/implement-with-codex` on Phase 4 (identical-content fold, both
-modes). Baseline to pin before dispatch: `harvester_core` 600, `harvester_engine` 424 (one
-ignored), `harvester_io` 154; workspace 1,341 passed. Audit any test removal. Phase 4 must
-update the Phase 2 missing-snapshot regression in `update/tests/archive_tests.rs` (full mode and
-the fallback currently emit an empty fold report) rather than add a parallel test. Empty clean
-text never folds (settled; see Decisions). Expect zero or one real hit on the 2026-10-07 window
-(Measurements); the fold is still required. `output/archive.md` may be read by an AI_portfolio
-intake: never overwrite or re-export it; use the 2026-10-11 copy for any comparison.
+**Phase 4 complete and verified; uncommitted.** Signal selection now follows threshold ->
+all above-threshold key grouping -> exclusions -> identical-content election -> same-event
+election -> final sorting. Identical-content followers retain their reason under the final
+exported representative and all members remain in election order. URL membership follows
+the final document; canonical-key membership retains the above-threshold key population.
+Full mode keeps the earliest corpus-ranked copy, pins both URLs and membership, and uses
+that list for dialog counts and estimates and both full-mode submit paths. The existing
+missing-snapshot regression was migrated, not duplicated, and checks the folded URLs and
+non-empty report together. Coverage notices remain about triage coverage.
+
+Empty clean text is recognized using its canonical SHA-256 in corpus metadata; no stored
+length is available in `WindowArticle`. Both the hash of empty text and an absent/empty
+hash are treated as unknown for folding. The scoring hash accessor stays unchanged, and
+selection performs no I/O or logging. No engine exporter, UI, frontend, IPC, fixture bytes,
+schema, prompt or scoring-cache-key change was needed. Architecture documents both modes.
+
+Trusted baseline at `0064bcd`: core 600, engine 424 (one ignored), I/O 154; workspace 1,341.
+Verified before review fixes: core 608, engine 424 (one ignored), I/O 154; workspace 1,349 passed with the
+same two ignored tests. Eight new tests cover
+content election, unknown/empty hashes, exclusions, reason propagation, permutations,
+non-transitive interaction with same-event groups, meter/row/dialog/export agreement and
+empty-text full-mode/final-selection contracts. No existing test was deleted. Offline build,
+all three crate suites, workspace suite, all-target clippy with denied warnings, cargo fmt
+and fmt --check pass. The first workspace run hit the known loaded-triaging desktop timing
+flake (42 ms against 40 ms); its isolated rerun passed, and the clean workspace rerun passed
+all six timing checks and the driver trailing-snapshot test.
+The read-only measurement is recorded above, including the later archive's lack of overlap.
+No file under `output/` was changed or re-exported; changes remain uncommitted.
+
+**Approved-review fixes applied and verified.** The archive-open `[working-corpus]`
+line keeps `count` as the corpus size and reports removed copies as
+`identical_content_folded = corpus_count - article_count`. Empty-text recognition
+uses one `EMPTY_CLEAN_TEXT_HASH` beside the engine's `content_hash`, re-exported by
+`llm`; a new engine unit test checks the digest against `content_hash("")`.
+Rows again use canonical-key membership for `dupes_count` (group size minus one),
+including below-threshold rows whose key matches an above-threshold group;
+identical-content twins in other key groups do not enlarge that count. Outcomes
+and kept gists still follow the final exported representative. Existing regressions
+were migrated and extended, and each tested permutation starts from the original input.
+Offline build, core suite (608 passed), engine suite (425 passed, one ignored),
+I/O suite (154 passed), all-target clippy with denied warnings, cargo fmt and
+fmt --check pass. No test was deleted. Main-thread verification after the review fixes:
+`cargo build`, full workspace `cargo test` (1,350 passed, 0 failed, two existing ignored; no
+timing flake), all-target clippy with denied warnings and `cargo fmt --check` all pass.
+DecisionLog refinements remain for Phase 5. No output, fixture, IPC, UI, frontend, schema, prompt or cache-key
+change; no launcher, live LLM API, git write command or commit.
+
+**Phase 5 starts here.** Run it on the main thread or with `/implement-with-codex`
+(documentation only; no build needed). Do not merge the branch before Phase 5: DecisionLog
+2026-10-07 still says full-mode export and fallbacks are unchanged, which identical-content
+folding now refines. The review-fix pass added a short 2026-10-11 "Preserve duplicate-count
+meaning during content folding" diary entry; Phase 5 may fold it into the extended grouping
+entry. `dupes_count` on result rows keeps per-key meaning (canonical-key group size minus
+one; settled by the orchestrating session, cheap to change, frontend does not render it).
+
+Next: Phase 5 project memory and close-out. The optional owner desktop export was skipped
+(Lars via orchestrator, 2026-10-11): the window has no real syndicated copies, so there is
+nothing to inspect. No agent launcher or live LLM API was run.
 
 **Phase 3 done and committed.** Owner by-eye check, 2026-10-11: Lars reviewed all 15 merged
 groups of the 2026-10-11 copy (129 -> 105, least certain first: Rocket Lab-Iridium,
@@ -967,7 +1018,7 @@ Decisions from this run:
   identical-content candidate (see Measurements: all three shared-hash groups in the window are
   extraction failures).
 
-Notes for Phase 4:
+Notes carried forward:
 
 - Second benchmark: `output/archive-2026-10-11.md` (129 documents, git-ignored copy);
   the reviewed read-only report measured 105 groups (104 before the year fix); preserve it

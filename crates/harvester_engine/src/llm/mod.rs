@@ -50,7 +50,7 @@ pub use providers::OpenAiProvider;
 pub use quota::{LlmQuotaTracker, LlmQuotas, LlmUsageTotals};
 pub use replay::{
     content_hash, load_replay_record, persist_replay_record, replay_filename_request_id,
-    sanitize_replay_request_id, ReplayRecord,
+    sanitize_replay_request_id, ReplayRecord, EMPTY_CLEAN_TEXT_HASH,
 };
 pub use run_metadata::{CacheStatus, LlmFailureMetadata, LlmRunMetadata};
 pub use template_validation::{validate_template, TemplateField, TemplateValidationError};

@@ -8,6 +8,7 @@ use harvester_core::signal_key_merge::{
     group_signal_keys,
     report::{build_grouping_report, exported_docs, parse_archive_index, ReportExpectations},
 };
+use harvester_engine::llm::EMPTY_CLEAN_TEXT_HASH;
 use harvester_engine::{archive_url_key, scan_archive_window_metadata, WindowArticle};
 
 const FIXTURE: &str =
@@ -82,8 +83,7 @@ fn print_content_report(articles: &[WindowArticle], docs: Option<&BTreeMap<Strin
         println!("Archive documents in window: {matched} / {}", docs.len());
     }
     // SHA-256 of empty clean text represents failed extraction, not copies.
-    let empty_text =
-        by_hash.remove("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    let empty_text = by_hash.remove(EMPTY_CLEAN_TEXT_HASH);
     let duplicate_groups: Vec<_> = by_hash
         .into_iter()
         .filter(|(_, members)| members.len() > 1)

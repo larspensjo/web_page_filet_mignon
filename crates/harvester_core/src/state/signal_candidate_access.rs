@@ -1,9 +1,9 @@
 use super::AppState;
 use crate::briefing::ArticleSummaryResult;
 use crate::signal_candidate::{
-    ArchiveFinalSelection, ArchiveSelectionSource, ScoredCandidate, SelectionPolicy,
-    SignalCandidateArchiveSelection, SignalCandidateSelection, SignalCandidateSession,
-    SignalExclusions,
+    foldable_content_hash, ArchiveFinalSelection, ArchiveSelectionSource, FullArchiveSelection,
+    ScoredCandidate, SelectionPolicy, SignalCandidateArchiveSelection, SignalCandidateSelection,
+    SignalCandidateSession, SignalExclusions,
 };
 use crate::signal_candidate_cache::{
     SignalCandidateCache, SignalCandidateCacheEntry, SignalCandidateCacheKey,
@@ -165,20 +165,17 @@ impl AppState {
 
     /// The signal-candidate selection computed from saved current-key window results:
     /// the same threshold + exclusion logic the Archive dialog uses. Single
-    /// source of truth shared by the dialog snapshot and archive selection.
+    /// source of truth for identical-content and same-event folds shared by the
+    /// meter, dialog snapshot and archive selection.
     pub(crate) fn signal_candidate_selection(&self) -> SignalCandidateSelection {
         let scored: Vec<ScoredCandidate> = self
             .saved_results
             .values()
             .filter(|entry| entry.in_window && entry.actionable)
-            .filter_map(|entry| {
-                entry
-                    .signal
-                    .as_ref()
-                    .map(|result| (entry.article.url.as_str(), result))
-            })
-            .map(|(url, result)| ScoredCandidate {
-                url: url.to_string(),
+            .filter_map(|entry| entry.signal.as_ref().map(|result| (entry, result)))
+            .map(|(entry, result)| ScoredCandidate {
+                url: entry.article.url.clone(),
+                content_hash: foldable_content_hash(&entry.article.content_hash).map(str::to_owned),
                 result: result.clone(),
             })
             .collect();
@@ -192,10 +189,46 @@ impl AppState {
         SignalCandidateSelection::compute(&scored, policy)
     }
 
+    /// Fold known non-empty clean-text hashes in corpus rank order, independently
+    /// of scoring and exclusions. Full exports never collapse same-event slugs.
+    pub(crate) fn full_archive_selection(&self, urls: &[String]) -> FullArchiveSelection {
+        use harvester_engine::{archive_url_key, ArchiveFoldReason, ArchiveFoldedArticle};
+        let mut selection = FullArchiveSelection {
+            ordered_urls: Vec::new(),
+            folds: Default::default(),
+        };
+        let mut by_hash: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+        for url in urls {
+            let hash = self
+                .content_hash_for_url(url)
+                .and_then(foldable_content_hash);
+            if let Some(rep) = hash.and_then(|hash| by_hash.get(hash)) {
+                selection
+                    .folds
+                    .entry(archive_url_key(rep))
+                    .or_default()
+                    .push(ArchiveFoldedArticle {
+                        url: url.clone(),
+                        signal_key: self
+                            .saved_results_for_url(url)
+                            .and_then(|entry| entry.signal.as_ref())
+                            .map(|result| result.signal_key.clone()),
+                        reason: ArchiveFoldReason::IdenticalContent,
+                    });
+            } else {
+                selection.ordered_urls.push(url.clone());
+                if let Some(hash) = hash {
+                    by_hash.insert(hash, url.as_str());
+                }
+            }
+        }
+        selection
+    }
+
     /// The exact ordered URL list the Archive would export right now: the triage
     /// base corpus narrowed by the settled signal-candidate selection, falling
-    /// back to the full base corpus when the selection is empty or no candidates
-    /// were scored.
+    /// back to the full base corpus with identical-content folding when the
+    /// selection is empty or no candidates were scored.
     ///
     /// Note: in-flight scoring is intentionally not consulted here. Callers that
     /// must not act mid-scoring should gate before calling this accessor.
@@ -206,18 +239,20 @@ impl AppState {
         let failed = self.signal_candidate().failed_count();
 
         if completed == 0 && failed == 0 {
+            let full = self.full_archive_selection(base.ordered_urls());
             return ArchiveFinalSelection {
-                ordered_urls: base.ordered_urls().to_vec(),
-                folds: Default::default(),
+                ordered_urls: full.ordered_urls,
+                folds: full.folds,
                 source: ArchiveSelectionSource::FullCorpusSignalUnavailable,
             };
         }
 
         let selection = self.signal_candidate_selection();
         if selection.selected_urls.is_empty() {
+            let full = self.full_archive_selection(base.ordered_urls());
             return ArchiveFinalSelection {
-                ordered_urls: base.ordered_urls().to_vec(),
-                folds: Default::default(),
+                ordered_urls: full.ordered_urls,
+                folds: full.folds,
                 source: ArchiveSelectionSource::FullCorpusNoCandidates,
             };
         }

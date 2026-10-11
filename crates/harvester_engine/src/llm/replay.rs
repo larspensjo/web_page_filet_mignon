@@ -44,6 +44,10 @@ fn default_cache_status() -> String {
     "miss".to_string()
 }
 
+/// SHA-256 of empty clean text, which provides no evidence for content folding.
+pub const EMPTY_CLEAN_TEXT_HASH: &str =
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
 /// Returns a SHA-256 hex digest for the provided input.
 pub fn content_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
@@ -158,4 +162,14 @@ fn sanitize_request_id(value: &str) -> String {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{content_hash, EMPTY_CLEAN_TEXT_HASH};
+
+    #[test]
+    fn empty_clean_text_hash_matches_content_hash() {
+        assert_eq!(content_hash(""), EMPTY_CLEAN_TEXT_HASH);
+    }
 }

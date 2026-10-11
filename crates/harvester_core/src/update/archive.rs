@@ -14,22 +14,27 @@ pub(super) fn handle_archive_clicked(state: &mut AppState) -> Vec<Effect> {
     clear_export_unavailable_status(state);
     let request_id = state.allocate_next_archive_request_id();
     let corpus = state.archive_corpus(); // triage-only; pre-triage excluded
-    let article_count = corpus.count();
+    let corpus_count = corpus.count();
     let fingerprint = corpus.fingerprint();
     let source = corpus.source();
-    let token_estimates = state.archive_token_estimates(corpus.ordered_urls());
+    state.pin_archive_corpus(corpus);
+    let full_selection = state
+        .pinned_full_archive_selection()
+        .expect("full-mode pin");
+    let article_count = full_selection.ordered_urls.len();
+    let token_estimates = state.archive_token_estimates(&full_selection.ordered_urls);
     let signal_candidate_snapshot = build_signal_candidate_snapshot(state);
     engine_info!(
-        "[working-corpus] source={:?} count={} fingerprint={:#010x} caller=archive-open request_id={}",
+        "[working-corpus] source={:?} count={} identical_content_folded={} fingerprint={:#010x} caller=archive-open request_id={}",
         source,
-        article_count,
+        corpus_count,
+        corpus_count - article_count,
         fingerprint,
         request_id,
     );
     // Count pre-triage articles ready for review. resolved_included_urls() is phase-gated:
     // returns empty when phase is Idle (after consume) or during Reviewing (phase-gated).
     let pending_pre_triage_count = state.pre_triage().resolved_included_urls().len();
-    state.pin_archive_corpus(corpus);
     let since_utc = state.briefing_since_utc();
     state.pin_signal_candidate_selection(signal_candidate_snapshot.clone());
     let signal_candidate_default = {
@@ -179,6 +184,7 @@ pub(super) fn handle_dialog_submitted(
         .pinned_full_archive_selection()
         .cloned()
         .expect("corpus and full-mode selection are pinned together");
+    let folded_full_count = full_selection.ordered_urls.len();
     state.clear_pinned_archive_corpus();
     engine_info!(
         "[working-corpus] source=pinned count={} fingerprint={:#010x} caller=archive-submit request_id={}",
@@ -209,7 +215,7 @@ pub(super) fn handle_dialog_submitted(
     } else {
         engine_info!(
             "[signal-archive] submit decision=use_full_corpus url_count={}",
-            full_count
+            folded_full_count
         );
         (full_selection.ordered_urls, full_selection.folds)
     };

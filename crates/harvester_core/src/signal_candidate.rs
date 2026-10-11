@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use harvester_engine::llm::dto::SignalCandidateResult;
 use harvester_engine::llm::prompt::PromptVersion;
+use harvester_engine::llm::EMPTY_CLEAN_TEXT_HASH;
 
 use crate::cache_utils::hex_digest;
 
@@ -292,7 +293,22 @@ impl SignalCandidateSession {
 #[derive(Debug, Clone)]
 pub struct ScoredCandidate {
     pub url: String,
+    pub content_hash: Option<String>,
     pub result: SignalCandidateResult,
+}
+
+/// Corpus metadata stores the SHA-256 of clean text, even when extraction is empty.
+/// Empty text and absent hashes provide no evidence that two articles are copies.
+pub(crate) fn foldable_content_hash(hash: &str) -> Option<&str> {
+    (!hash.is_empty() && hash != EMPTY_CLEAN_TEXT_HASH).then_some(hash)
+}
+
+fn election_order(a: &ScoredCandidate, b: &ScoredCandidate) -> std::cmp::Ordering {
+    a.result
+        .source_tier
+        .cmp(&b.result.source_tier)
+        .then(b.result.signal_score.cmp(&a.result.signal_score))
+        .then(a.url.cmp(&b.url))
 }
 
 #[derive(Debug, Clone)]
@@ -359,6 +375,7 @@ pub struct SignalCandidateSelection {
     pub folds: ArchiveFoldReport,
     key_groups: SignalKeyGroups,
     groups: HashMap<String, SignalCandidateGroupMembership>,
+    export_groups: HashMap<String, SignalCandidateGroupMembership>,
     group_for_url: HashMap<String, String>,
 }
 
@@ -370,10 +387,11 @@ impl Default for SignalCandidateSelection {
 
 impl SignalCandidateSelection {
     pub fn compute(input: &[ScoredCandidate], policy: SelectionPolicy) -> Self {
-        let above_threshold: Vec<_> = input
+        let mut above_threshold: Vec<_> = input
             .iter()
             .filter(|candidate| candidate.result.signal_score >= policy.threshold)
             .collect();
+        above_threshold.sort_by(|a, b| election_order(a, b));
         let key_groups = group_signal_keys(above_threshold.iter().map(|c| &c.result.signal_key));
         let excluded_keys: HashSet<_> = policy
             .excluded
@@ -385,52 +403,96 @@ impl SignalCandidateSelection {
             .map(|key| canonical_signal_key(&key.signal_key))
             .collect();
         let mut candidates_by_group: HashMap<String, Vec<&ScoredCandidate>> = HashMap::new();
-        let mut group_for_url = HashMap::new();
-        for candidate in above_threshold {
+        for candidate in &above_threshold {
             let group_id = key_groups
                 .group_id(&candidate.result.signal_key)
                 .expect("grouped candidate key")
                 .to_string();
-            group_for_url.insert(candidate.url.clone(), group_id.clone());
             candidates_by_group
                 .entry(group_id)
                 .or_default()
                 .push(candidate);
         }
-        let mut groups = HashMap::new();
-        let mut folds = ArchiveFoldReport::new();
+        // Elect content representatives globally after exclusions, before using
+        // the already computed key groups to elect same-event representatives.
+        let eligible: Vec<_> = above_threshold
+            .iter()
+            .copied()
+            .filter(|candidate| {
+                !excluded_keys.contains(&canonical_signal_key(&candidate.result.signal_key))
+            })
+            .collect();
+        let mut by_hash = HashMap::new();
+        let mut content_rep_for_url = HashMap::new();
+        let mut survivors_by_group: HashMap<_, Vec<_>> = HashMap::new();
+        for candidate in &eligible {
+            let hash = candidate
+                .content_hash
+                .as_deref()
+                .and_then(foldable_content_hash);
+            let rep = hash
+                .map(|hash| *by_hash.entry(hash).or_insert(*candidate))
+                .unwrap_or(*candidate);
+            content_rep_for_url.insert(candidate.url.as_str(), rep);
+            if rep.url == candidate.url {
+                let group = key_groups
+                    .group_id(&candidate.result.signal_key)
+                    .expect("grouped key");
+                survivors_by_group
+                    .entry(group)
+                    .or_default()
+                    .push(*candidate);
+            }
+        }
+        let mut final_rep_for_url = HashMap::new();
         let mut reps = Vec::new();
-        for (group_id, mut candidates) in candidates_by_group {
-            candidates.sort_by(|a, b| {
-                a.result
-                    .source_tier
-                    .cmp(&b.result.source_tier)
-                    .then(b.result.signal_score.cmp(&a.result.signal_score))
-                    .then(a.url.cmp(&b.url))
-            });
+        for survivors in survivors_by_group.values() {
+            let rep = survivors[0];
+            reps.push(rep);
+            for survivor in survivors {
+                final_rep_for_url.insert(survivor.url.as_str(), rep);
+            }
+        }
+        let mut folds = ArchiveFoldReport::new();
+        for candidate in eligible {
+            let content_rep = content_rep_for_url[candidate.url.as_str()];
+            let final_rep = final_rep_for_url[content_rep.url.as_str()];
+            final_rep_for_url.insert(candidate.url.as_str(), final_rep);
+            if final_rep.url != candidate.url {
+                let reason = if content_rep.url != candidate.url {
+                    ArchiveFoldReason::IdenticalContent
+                } else {
+                    ArchiveFoldReason::SameEvent
+                };
+                folds
+                    .entry(archive_url_key(&final_rep.url))
+                    .or_default()
+                    .push(ArchiveFoldedArticle {
+                        url: candidate.url.clone(),
+                        signal_key: Some(candidate.result.signal_key.clone()),
+                        reason,
+                    });
+            }
+        }
+        let mut groups = HashMap::new();
+        // Key membership remains about the original above-threshold key population.
+        // URL membership follows the final exported document, including content
+        // followers whose own slug belongs to a different key group.
+        for (group_id, candidates) in candidates_by_group {
             let urls = candidates
                 .iter()
                 .map(|candidate| candidate.url.clone())
                 .collect();
-            candidates.retain(|candidate| {
-                !excluded_keys.contains(&canonical_signal_key(&candidate.result.signal_key))
-            });
-            let representative = candidates.first().map(|candidate| candidate.url.clone());
-            if let Some(rep) = candidates.first() {
-                reps.push(*rep);
-                let members: Vec<_> = candidates
-                    .iter()
-                    .skip(1)
-                    .map(|candidate| ArchiveFoldedArticle {
-                        url: candidate.url.clone(),
-                        signal_key: Some(candidate.result.signal_key.clone()),
-                        reason: ArchiveFoldReason::SameEvent,
+            let representative = survivors_by_group
+                .get(group_id.as_str())
+                .map(|survivors| survivors[0].url.clone())
+                .or_else(|| {
+                    candidates.iter().find_map(|candidate| {
+                        final_rep_for_url
+                            .get(candidate.url.as_str())
+                            .map(|rep| rep.url.clone())
                     })
-                    .collect();
-                if !members.is_empty() {
-                    folds.insert(archive_url_key(&rep.url), members);
-                }
-            }
+                });
             groups.insert(
                 group_id.clone(),
                 SignalCandidateGroupMembership {
@@ -439,6 +501,43 @@ impl SignalCandidateSelection {
                     representative,
                 },
             );
+        }
+        let mut export_groups: HashMap<String, SignalCandidateGroupMembership> = HashMap::new();
+        let mut group_for_url = HashMap::new();
+        let group_for_rep: HashMap<_, _> = reps
+            .iter()
+            .map(|rep| {
+                (
+                    rep.url.as_str(),
+                    key_groups
+                        .group_id(&rep.result.signal_key)
+                        .expect("grouped representative"),
+                )
+            })
+            .collect();
+        for candidate in above_threshold {
+            let original_group = key_groups
+                .group_id(&candidate.result.signal_key)
+                .expect("grouped key");
+            let representative = final_rep_for_url
+                .get(candidate.url.as_str())
+                .map(|rep| rep.url.as_str())
+                .or(groups[original_group].representative.as_deref());
+            let Some(rep) = representative else {
+                group_for_url.insert(candidate.url.clone(), original_group.to_string());
+                continue;
+            };
+            let group_id = group_for_rep[rep];
+            group_for_url.insert(candidate.url.clone(), group_id.to_string());
+            export_groups
+                .entry(group_id.to_string())
+                .or_insert_with(|| SignalCandidateGroupMembership {
+                    group_id: group_id.to_string(),
+                    urls: Vec::new(),
+                    representative: Some(rep.to_string()),
+                })
+                .urls
+                .push(candidate.url.clone());
         }
         reps.sort_by(|a, b| {
             b.result
@@ -452,14 +551,17 @@ impl SignalCandidateSelection {
             folds,
             key_groups,
             groups,
+            export_groups,
             group_for_url,
         }
     }
 
     pub fn membership_for_url(&self, url: &str) -> Option<&SignalCandidateGroupMembership> {
-        self.group_for_url
-            .get(url)
-            .and_then(|group| self.groups.get(group))
+        self.group_for_url.get(url).and_then(|group| {
+            self.export_groups
+                .get(group)
+                .or_else(|| self.groups.get(group))
+        })
     }
 
     /// Raw keys and canonical aliases share the same above-threshold membership.
@@ -660,6 +762,7 @@ mod tests {
     fn cand(url: &str, score: u8, key: &str, tier: SourceTier) -> ScoredCandidate {
         ScoredCandidate {
             url: url.into(),
+            content_hash: None,
             result: sample_result(score, key, tier),
         }
     }
@@ -669,6 +772,188 @@ mod tests {
             threshold,
             active_prompt_version: 1,
             excluded,
+        }
+    }
+
+    fn hashed(mut candidate: ScoredCandidate, hash: &str) -> ScoredCandidate {
+        candidate.content_hash = Some(hash.into());
+        candidate
+    }
+
+    #[test]
+    fn identical_content_elects_by_tier_score_url_before_same_event_grouping() {
+        let input = vec![
+            hashed(cand("tier2", 99, "other-slug", SourceTier::Tier2), "shared"),
+            hashed(cand("z", 90, "unrelated-slug", SourceTier::Tier1), "shared"),
+            hashed(cand("a", 90, "chosen-slug", SourceTier::Tier1), "shared"),
+            hashed(
+                cand("lower", 80, "fourth-slug", SourceTier::Tier1),
+                "shared",
+            ),
+            hashed(cand("below", 40, "fifth-slug", SourceTier::Tier1), "shared"),
+        ];
+        let selection = SignalCandidateSelection::compute(&input, policy(60, Default::default()));
+        assert_eq!(selection.selected_urls, vec!["a"]);
+        let members = &selection.folds[&archive_url_key("a")];
+        assert_eq!(
+            members.iter().map(|m| m.url.as_str()).collect::<Vec<_>>(),
+            vec!["z", "lower", "tier2"]
+        );
+        assert!(members
+            .iter()
+            .all(|m| m.reason == ArchiveFoldReason::IdenticalContent));
+        assert_eq!(members[0].signal_key.as_deref(), Some("unrelated-slug"));
+        for url in ["a", "z", "lower", "tier2"] {
+            let membership = selection.membership_for_url(url).unwrap();
+            assert_eq!(membership.representative.as_deref(), Some("a"));
+            assert_eq!(membership.urls.len(), 4);
+        }
+        assert!(selection.membership_for_url("below").is_none());
+        for shift in 0..input.len() {
+            let mut permuted = input.clone();
+            permuted.rotate_left(shift);
+            assert_eq!(
+                selection,
+                SignalCandidateSelection::compute(&permuted, policy(60, Default::default()))
+            );
+            permuted.reverse();
+            assert_eq!(
+                selection,
+                SignalCandidateSelection::compute(&permuted, policy(60, Default::default()))
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_content_hashes_never_fold() {
+        let input = vec![
+            cand("a", 90, "first", SourceTier::Tier1),
+            cand("b", 80, "second", SourceTier::Tier1),
+            hashed(cand("c", 70, "third", SourceTier::Tier1), ""),
+            hashed(cand("d", 60, "fourth", SourceTier::Tier1), ""),
+        ];
+        let selection = SignalCandidateSelection::compute(&input, policy(60, Default::default()));
+        assert_eq!(selection.selected_urls, vec!["a", "b", "c", "d"]);
+        assert!(selection.folds.is_empty());
+    }
+
+    #[test]
+    fn content_fold_does_not_pull_the_twins_other_same_event_members_into_its_group() {
+        let input = vec![
+            hashed(cand("a", 90, "first", SourceTier::Tier1), "shared"),
+            hashed(cand("b", 85, "second", SourceTier::Tier2), "shared"),
+            hashed(cand("c", 80, "second", SourceTier::Tier2), "unique"),
+        ];
+        let selection = SignalCandidateSelection::compute(&input, policy(60, Default::default()));
+        assert_eq!(selection.selected_urls, vec!["a", "c"]);
+        assert_eq!(selection.folds.len(), 1);
+        assert_eq!(selection.folds[&archive_url_key("a")][0].url, "b");
+        assert_eq!(
+            selection.folds[&archive_url_key("a")][0].reason,
+            ArchiveFoldReason::IdenticalContent
+        );
+        assert_eq!(
+            selection
+                .membership_for_url("b")
+                .unwrap()
+                .representative
+                .as_deref(),
+            Some("a")
+        );
+        assert_eq!(selection.membership_for_url("c").unwrap().urls, vec!["c"]);
+        let key_membership = selection.membership_for_signal_key("second").unwrap();
+        assert_eq!(key_membership.urls, vec!["b", "c"]);
+        assert_eq!(key_membership.representative.as_deref(), Some("c"));
+        let mut permuted = input.clone();
+        permuted.reverse();
+        assert_eq!(
+            selection,
+            SignalCandidateSelection::compute(&permuted, policy(60, Default::default()))
+        );
+    }
+
+    #[test]
+    fn empty_clean_text_hash_never_folds() {
+        let empty_hash = harvester_engine::llm::replay::content_hash("");
+        let input = vec![
+            hashed(cand("a", 90, "first", SourceTier::Tier1), &empty_hash),
+            hashed(cand("b", 80, "second", SourceTier::Tier1), &empty_hash),
+        ];
+        let selection = SignalCandidateSelection::compute(&input, policy(60, Default::default()));
+        assert_eq!(selection.selected_urls, vec!["a", "b"]);
+        assert!(selection.folds.is_empty());
+    }
+
+    #[test]
+    fn excluded_identical_twin_does_not_remove_surviving_copy() {
+        let input = vec![
+            hashed(cand("a", 90, "excluded", SourceTier::Tier1), "shared"),
+            hashed(cand("b", 80, "survivor", SourceTier::Tier2), "shared"),
+        ];
+        let excluded = HashSet::from([OverrideKey {
+            signal_key: "excluded".into(),
+            prompt_id: ACTIVE_PROMPT_ID.into(),
+            prompt_version: 1,
+        }]);
+        let selection = SignalCandidateSelection::compute(&input, policy(60, excluded));
+        assert_eq!(selection.selected_urls, vec!["b"]);
+        assert!(selection.folds.is_empty());
+    }
+
+    #[test]
+    fn identical_followers_follow_same_event_member_with_original_reason_and_election_order() {
+        let input = vec![
+            cand("rep", 80, "vistra-loan-nuclear-uprates", SourceTier::Tier1),
+            hashed(
+                cand(
+                    "member",
+                    95,
+                    "doe-loan-vistra-nuclear-fleet-uprates",
+                    SourceTier::Tier2,
+                ),
+                "shared",
+            ),
+            hashed(
+                cand("twin", 90, "completely-different-slug", SourceTier::Tier2),
+                "shared",
+            ),
+            cand(
+                "event",
+                85,
+                "vistra-financing-nuclear-uprates",
+                SourceTier::Tier2,
+            ),
+        ];
+        let selection = SignalCandidateSelection::compute(&input, policy(60, Default::default()));
+        assert_eq!(selection.selected_urls, vec!["rep"]);
+        let members = &selection.folds[&archive_url_key("rep")];
+        assert_eq!(
+            members
+                .iter()
+                .map(|m| (m.url.as_str(), m.reason))
+                .collect::<Vec<_>>(),
+            vec![
+                ("member", ArchiveFoldReason::SameEvent),
+                ("twin", ArchiveFoldReason::IdenticalContent),
+                ("event", ArchiveFoldReason::SameEvent),
+            ]
+        );
+        assert_eq!(
+            selection
+                .membership_for_url("twin")
+                .unwrap()
+                .representative
+                .as_deref(),
+            Some("rep")
+        );
+        for shift in 0..input.len() {
+            let mut permuted = input.clone();
+            permuted.rotate_left(shift);
+            permuted.reverse();
+            assert_eq!(
+                selection,
+                SignalCandidateSelection::compute(&permuted, policy(60, Default::default()))
+            );
         }
     }
 
