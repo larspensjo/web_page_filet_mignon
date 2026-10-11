@@ -17,6 +17,7 @@ mod preview;
 mod run_progress;
 pub mod signal_candidate;
 pub mod signal_candidate_cache;
+pub mod signal_key_merge;
 mod source_state;
 mod state;
 mod summary_cache;

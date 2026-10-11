@@ -37,9 +37,9 @@ pub use archive_url::archive_url_key;
 pub use brave_poll::{parse_brave_news_response, BraveNewsItem, BravePollError};
 pub use brave_seen_set::{normalize_url_for_dedupe, BraveSeenSet};
 pub use briefing::{
-    scan_archive_article_metadata, summary_preparation_budget, ArchiveArticleMeta,
-    ArticleScanProgress, CorpusScanIndex, CorpusScanStats, HeldArticle, LoadedArticle,
-    TriageArticleDelta, WindowArticle,
+    scan_archive_article_metadata, scan_archive_window_metadata, summary_preparation_budget,
+    ArchiveArticleMeta, ArticleScanProgress, CorpusScanIndex, CorpusScanStats, HeldArticle,
+    LoadedArticle, TriageArticleDelta, WindowArticle,
 };
 pub use convert::{Converter, Html2MdConverter};
 pub use corpus_manifest::{

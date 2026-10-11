@@ -3,8 +3,8 @@
 Written 2026-10-07 from the design brief relayed by the AI_portfolio repository (the consumer
 of `archive.md`). Revised 2026-10-07 after a Codex review: every issue and recommendation was
 applied, with the user's and the orchestrator's answers folded in (see "Decisions carried
-in"). Status: not started. Implementation runs phase by phase; nothing is committed unless the
-user asks.
+in"). Status: Phase 1 complete and committed (2026-10-11); Phase 2 next, see "Handoff".
+Implementation runs phase by phase; nothing is committed unless the user asks.
 
 Durable documents (design docs, the decision log, code comments) must describe behaviours,
 never "phase N" of this plan.
@@ -289,6 +289,7 @@ unknown hash never folds. The fold runs after exclusions, so an excluded copy ne
 twin out, and before key grouping, so twins with different slugs count once. If the surviving
 twin is later folded as `same_event`, its identical-content followers are listed under the
 same exported document with reason `identical_content`.
+An empty clean text counts as an unknown hash and never folds.
 
 **Full-corpus mode folds identical content too** (the brief's "exported once" has no mode
 exception, and the dialog's full-mode count must still match the export). At dialog open the
@@ -487,7 +488,7 @@ cargo test -p harvester_core --test signal_key_merge_golden
 cargo test -p harvester_core
 cargo test -p harvester_engine
 cargo run -p harvester_core --example archive_redundancy_report -- --archive output/archive.md
-cargo run -p harvester_core --example archive_redundancy_report -- --corpus output --since 2026-10-02T00:00:00Z --until 2026-10-07T04:57:36Z --archive output/archive.md
+cargo run -p harvester_core --example archive_redundancy_report -- --corpus output --since 2026-10-02T13:00:00Z --until 2026-10-07T04:57:36Z --archive output/archive.md
 cargo clippy --all-targets -- -D warnings
 cargo fmt
 ```
@@ -668,8 +669,9 @@ Changes:
 
 Tests:
 
-- selection: identical hashes fold to the representative; unknown hashes never fold; an excluded twin
-  does not remove the other; a twin of a same-event member is listed under the final exported
+- selection: identical hashes fold to the representative; unknown hashes never fold;
+  empty-text candidates never fold; an excluded twin does not remove the other; a twin of
+  a same-event member is listed under the final exported
   document as `identical_content`; twins with different slugs count once in the meter.
 - reducer: full mode `article_count == ordered_urls.len()` with a fold; the token estimate drops by
   the folded copy; the report carries `identical_content`; signal mode meter, dialog and export
@@ -801,9 +803,53 @@ Filled in during implementation.
 | Fixture rows / groups before | 197 / 197 |
 | Groups after the merge rule | |
 | Vistra, Foxconn, Reflection, Amazon, FTC: keys before to groups after | |
-| Window articles (confirms `window_count` 584) and the `--since` used | |
-| Identical-content groups in the window / among the 197 exported | |
-| Must-stay-separate cases (real / synthetic / veto), all passing | |
+| Window articles (confirms `window_count` 584) and the `--since` used | 584; `--since 2026-10-02T13:00:00Z`, `--until 2026-10-07T04:57:36Z`; all 197 exported documents present. Midnight since gives 686. |
+| Shared-content-hash groups in the window / among the 197 exported | 3 / 0; all 3 window groups are extraction failures (empty text x16, interstitial x3, YouTube boilerplate x2); 0 are syndicated copies. Empty text is not an identical-content candidate. |
+| Must-stay-separate cases (real / synthetic / veto), all passing | 14 real cases (50 cross-set pairs) / 11 synthetic cases, including 5 marker-veto pairs; all passing. |
+
+## Handoff
+
+Updated 2026-10-11, after Phase 1.
+
+**Phase 1 done.** Implemented by Codex, reviewed (no blocking findings; all findings applied),
+verified on the main thread after the fixes: `cargo build`, clippy and fmt clean; tests pass with
+`harvester_core` 581 (575 before), `harvester_engine` 416 (413 before), `harvester_io` 154; no test
+removed. Committed on `feature/archive-redundancy-fold`.
+
+What exists now:
+
+- `crates/harvester_core/src/signal_key_merge.rs`: `group_signal_keys` as the identity grouping
+  (each canonical key its own group); report builder in `signal_key_merge/report.rs`. Not used by
+  the selection yet.
+- Fixture, expectations and report snapshot under
+  `crates/harvester_core/tests/fixtures/signal_key_merge/`; golden test
+  `crates/harvester_core/tests/signal_key_merge_golden.rs`. The fixture reader accepts LF and CRLF.
+  Family labels cover all 77 known retellings; `one_group`, floor and `synthetic_merge` targets are
+  written but inactive until Phase 3. A synthetic `fy2031`/`2031` pair was added.
+- `harvester_engine::scan_archive_window_metadata` (in `briefing.rs`) returns window article
+  metadata; the example and the exporter share the window path-ordering code, and existing export
+  bytes are unchanged (`crates/harvester_engine/tests/archive_window_metadata.rs`).
+- `crates/harvester_core/examples/archive_redundancy_report.rs`; the confirmed window is
+  `--since 2026-10-02T13:00:00Z --until 2026-10-07T04:57:36Z` (584 articles).
+- One `docs/EngineeringDiary.md` entry from the review fixes (a shared content hash can mark a
+  failed extraction rather than a copy); the user chose to keep it. Phase 5's diary entry is still
+  due.
+
+Decisions from this run:
+
+- User, 2026-10-11: the optional label review was skipped; the plan's labels stand (doc 62 is a
+  Vistra member; docs 144/145 are report-only).
+- Settled by the orchestrator, open to challenge: Phase 4 never treats empty clean text as an
+  identical-content candidate (see Measurements: all three shared-hash groups in the window are
+  extraction failures).
+
+Notes for Phase 2:
+
+- Run it with `/implement-with-codex` on Phase 2. Pin the baseline counts above and audit any test
+  removal.
+- Disk is tight (about 9 GB free on C: at handoff); a full workspace test run failed once for lack
+  of space. Check free space before dispatching.
+- Codex logs from Phase 1 in `.local/archive-redundancy-*` are no longer needed and can be deleted.
 
 ## Open questions
 

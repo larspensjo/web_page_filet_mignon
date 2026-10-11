@@ -79,9 +79,7 @@ pub fn build_triage_archive(
 ) -> Result<ExportSummary, ExportError> {
     ensure_output_dir(output_dir)?;
     write_corpus_manifest(output_dir)?;
-    let mut entries = collect_archive_md_files(output_dir)?;
-    exclude_export_artifacts(&mut entries, output_dir, basename);
-    entries.sort_by_key(|path| path.file_name().map(|name| name.to_os_string()));
+    let entries = ordered_archive_window_paths(output_dir, basename)?;
 
     let mut docs_by_url: HashMap<String, DocMeta> = HashMap::new();
     for path in entries {
@@ -178,6 +176,17 @@ pub fn build_triage_archive(
         window_count: since_utc.is_some().then_some(window_count),
         unexported_by_priority: since_utc.is_some().then_some(unexported_by_priority),
     })
+}
+
+/// Shared artifact exclusions and stable filename precedence for archive readers.
+pub(crate) fn ordered_archive_window_paths(
+    output_dir: &Path,
+    output_filename: &str,
+) -> Result<Vec<PathBuf>, ExportError> {
+    let mut entries = collect_archive_md_files(output_dir)?;
+    exclude_export_artifacts(&mut entries, output_dir, output_filename);
+    entries.sort_by_key(|path| path.file_name().map(|name| name.to_os_string()));
+    Ok(entries)
 }
 
 fn collect_archive_md_files(output_dir: &Path) -> Result<Vec<PathBuf>, ExportError> {

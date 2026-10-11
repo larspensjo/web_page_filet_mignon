@@ -1,0 +1,609 @@
+{
+  "families": [
+    {
+      "name": "Vistra DOE loan",
+      "docs": [
+        2,
+        5,
+        16,
+        21,
+        24,
+        33,
+        34,
+        53,
+        62,
+        85,
+        146,
+        184,
+        192
+      ],
+      "target": "one_group"
+    },
+    {
+      "name": "Foxconn Q3",
+      "docs": [
+        4,
+        13,
+        40,
+        56,
+        72,
+        73,
+        97,
+        107,
+        181
+      ],
+      "target": "one_group"
+    },
+    {
+      "name": "Reflection Beam",
+      "docs": [
+        7,
+        14,
+        51,
+        91,
+        106,
+        112,
+        118,
+        131,
+        170
+      ],
+      "target": "report",
+      "floor": [
+        7,
+        14,
+        106,
+        112,
+        131
+      ]
+    },
+    {
+      "name": "Amazon community pledge",
+      "docs": [
+        35,
+        52,
+        63,
+        87,
+        92,
+        119,
+        124,
+        135,
+        159,
+        171
+      ],
+      "target": "report",
+      "floor": [
+        87,
+        119,
+        124
+      ]
+    },
+    {
+      "name": "FTC OpenAI and Anthropic probe",
+      "docs": [
+        48,
+        93,
+        99,
+        161,
+        174
+      ],
+      "target": "one_group"
+    },
+    {
+      "name": "Tencent-Oracle lease",
+      "docs": [
+        3,
+        15,
+        67,
+        190
+      ],
+      "target": "report"
+    },
+    {
+      "name": "Northrop YFQ-48A first flight",
+      "docs": [
+        54,
+        79,
+        94,
+        136
+      ],
+      "target": "report"
+    },
+    {
+      "name": "Rocket Lab-Synspective",
+      "docs": [
+        30,
+        44,
+        50,
+        105,
+        129,
+        150
+      ],
+      "target": "report"
+    },
+    {
+      "name": "Tesla AI5/AI6 memory",
+      "docs": [
+        140,
+        154,
+        163
+      ],
+      "target": "report"
+    },
+    {
+      "name": "Tesla night-time limit",
+      "docs": [
+        109,
+        196
+      ],
+      "target": "report"
+    },
+    {
+      "name": "Tesla cautious expansion / extended hours",
+      "docs": [
+        144,
+        145
+      ],
+      "target": "report"
+    },
+    {
+      "name": "Tesla (all ten selected keys)",
+      "docs": [
+        86,
+        109,
+        140,
+        144,
+        145,
+        154,
+        162,
+        163,
+        191,
+        196
+      ],
+      "target": "report"
+    },
+    {
+      "name": "Marvell 2031 revenue target",
+      "docs": [
+        18,
+        19,
+        66
+      ],
+      "target": "report",
+      "floor": [
+        18,
+        19
+      ]
+    },
+    {
+      "name": "AMD demand outrunning supply",
+      "docs": [
+        83,
+        104
+      ],
+      "target": "report"
+    },
+    {
+      "name": "DeepSeek-Huawei software stack",
+      "docs": [
+        45,
+        197
+      ],
+      "target": "report"
+    },
+    {
+      "name": "Nebius-Inferize acquisition",
+      "docs": [
+        80,
+        169
+      ],
+      "target": "report"
+    },
+    {
+      "name": "Broadcom chip financing",
+      "docs": [
+        37,
+        164
+      ],
+      "target": "report"
+    },
+    {
+      "name": "Gemini argon / argron (known under-merge)",
+      "docs": [
+        22,
+        189
+      ],
+      "target": "report"
+    },
+    {
+      "name": "California SB1246 (known under-merge)",
+      "docs": [
+        49,
+        89,
+        96
+      ],
+      "target": "report"
+    },
+    {
+      "name": "Nebius-Meta (known under-merge)",
+      "docs": [
+        82,
+        122,
+        183
+      ],
+      "target": "report"
+    },
+    {
+      "name": "Warren tax breaks (known under-merge)",
+      "docs": [
+        108,
+        114
+      ],
+      "target": "report"
+    },
+    {
+      "name": "Australia incident reporting (known under-merge)",
+      "docs": [
+        23,
+        116,
+        185
+      ],
+      "target": "report"
+    },
+    {
+      "name": "Anthropic IPO (known under-merge)",
+      "docs": [
+        103,
+        113
+      ],
+      "target": "report"
+    },
+    {
+      "name": "Jay Clayton AI czar",
+      "docs": [
+        133,
+        143
+      ],
+      "target": "report"
+    },
+    {
+      "name": "Trump equity stake in OpenAI/Anthropic",
+      "docs": [
+        81,
+        176
+      ],
+      "target": "report"
+    },
+    {
+      "name": "Alibaba AI chip push",
+      "docs": [
+        8,
+        25
+      ],
+      "target": "report"
+    },
+    {
+      "name": "CoreWeave Vera Rubin",
+      "docs": [
+        26,
+        70
+      ],
+      "target": "report"
+    },
+    {
+      "name": "Nebius GPU price rise",
+      "docs": [
+        9,
+        10
+      ],
+      "target": "report"
+    },
+    {
+      "name": "Micron earnings",
+      "docs": [
+        17,
+        177
+      ],
+      "target": "report"
+    }
+  ],
+  "separate": [
+    {
+      "name": "Vistra power-purchase agreement versus DOE loan",
+      "sets": [
+        [
+          41
+        ],
+        [
+          2,
+          5,
+          16,
+          21,
+          24,
+          33,
+          34,
+          53,
+          62,
+          85,
+          146,
+          184,
+          192
+        ]
+      ]
+    },
+    {
+      "name": "Broadcom HBM pricing versus financing",
+      "sets": [
+        [
+          166
+        ],
+        [
+          37,
+          164
+        ]
+      ]
+    },
+    {
+      "name": "Tesla night-time limit versus extended hours",
+      "sets": [
+        [
+          196
+        ],
+        [
+          145
+        ]
+      ]
+    },
+    {
+      "name": "Tesla Cybercab launch versus NHTSA audit",
+      "sets": [
+        [
+          191
+        ],
+        [
+          86
+        ]
+      ]
+    },
+    {
+      "name": "Amazon Copilot CTO hire versus community pledge",
+      "sets": [
+        [
+          123
+        ],
+        [
+          35,
+          52,
+          63,
+          87,
+          92,
+          119,
+          124,
+          135,
+          159,
+          171
+        ]
+      ]
+    },
+    {
+      "name": "California SB947 versus SB951 versus SB1246",
+      "sets": [
+        [
+          59
+        ],
+        [
+          180
+        ],
+        [
+          49,
+          89,
+          96
+        ]
+      ]
+    },
+    {
+      "name": "Nvidia N1X PC processor versus DGX Spark",
+      "sets": [
+        [
+          76
+        ],
+        [
+          148
+        ]
+      ]
+    },
+    {
+      "name": "IREN pipeline funding versus cloud agreement",
+      "sets": [
+        [
+          43
+        ],
+        [
+          142
+        ]
+      ]
+    },
+    {
+      "name": "OpenAI ChatGPT shopping versus DevDay agents",
+      "sets": [
+        [
+          141
+        ],
+        [
+          151
+        ]
+      ]
+    },
+    {
+      "name": "DeepSeek funding versus Huawei stack",
+      "sets": [
+        [
+          68
+        ],
+        [
+          45,
+          197
+        ]
+      ]
+    },
+    {
+      "name": "SpaceX Starmind versus Crew-13 versus Starship",
+      "sets": [
+        [
+          6
+        ],
+        [
+          58
+        ],
+        [
+          74
+        ]
+      ]
+    },
+    {
+      "name": "Northrop F-35 production versus YFQ-48A flight",
+      "sets": [
+        [
+          153
+        ],
+        [
+          54,
+          79,
+          94,
+          136
+        ]
+      ]
+    },
+    {
+      "name": "Hyperscaler capacity versus capex growth peak",
+      "sets": [
+        [
+          47
+        ],
+        [
+          102
+        ]
+      ]
+    },
+    {
+      "name": "GPU-backed debt across Lambda / Asian banks / Sharon AI",
+      "sets": [
+        [
+          20
+        ],
+        [
+          42
+        ],
+        [
+          71
+        ]
+      ]
+    }
+  ],
+  "synthetic": [
+    {
+      "name": "Amazon Pennsylvania versus community investment",
+      "keys": [
+        "amazon-pennsylvania-20b-data-center-investment",
+        "amazon-1b-data-center-community-investment"
+      ]
+    },
+    {
+      "name": "Rocket Lab Neutron versus Synspective Electron",
+      "keys": [
+        "rocket-lab-neutron-maiden-launch",
+        "rocket-lab-synspective-electron-launch-deal"
+      ]
+    },
+    {
+      "name": "Google Gemini generation versus Live translation",
+      "keys": [
+        "google-gemini-4-launch",
+        "google-gemini-live-translation-launch"
+      ]
+    },
+    {
+      "name": "OpenAI GPT versus Sora",
+      "keys": [
+        "openai-gpt-6-launch",
+        "openai-sora-3-launch"
+      ]
+    },
+    {
+      "name": "FTC OpenAI chatbot versus Meta Instagram safety",
+      "keys": [
+        "ftc-probes-openai-chatbot-safety",
+        "ftc-probes-meta-instagram-teen-safety"
+      ]
+    },
+    {
+      "name": "Nvidia Blackwell Ultra versus Rubin CPX",
+      "keys": [
+        "nvidia-blackwell-ultra-launch",
+        "nvidia-rubin-cpx-launch"
+      ]
+    },
+    {
+      "name": "Quarter veto",
+      "keys": [
+        "foxconn-q2-2026-revenue-ai-servers",
+        "foxconn-q3-2026-revenue-ai-servers"
+      ],
+      "veto": true
+    },
+    {
+      "name": "Year veto",
+      "keys": [
+        "foxconn-q3-2025-revenue-ai-demand",
+        "foxconn-q3-2026-revenue-ai-demand"
+      ],
+      "veto": true
+    },
+    {
+      "name": "GPT version veto",
+      "keys": [
+        "openai-gpt-5-model-launch-pricing",
+        "openai-gpt-6-model-launch-pricing"
+      ],
+      "veto": true
+    },
+    {
+      "name": "Gemini version veto",
+      "keys": [
+        "google-gemini-3-launch-pricing-tiers",
+        "google-gemini-4-launch-pricing-tiers"
+      ],
+      "veto": true
+    },
+    {
+      "name": "Crew version veto",
+      "keys": [
+        "spacex-crew-12-iss-launch-docking",
+        "spacex-crew-13-iss-launch-docking"
+      ],
+      "veto": true
+    }
+  ],
+  "synthetic_merge": [
+    {
+      "name": "Unspecified quarter is compatible",
+      "keys": [
+        "foxconn-q3-revenue-ai-demand",
+        "foxconn-quarterly-revenue-beat-ai-demand"
+      ]
+    },
+    {
+      "name": "Rounded amounts never veto",
+      "keys": [
+        "vistra-4b-loan-nuclear-plant-upgrades",
+        "vistra-4-2b-doe-loan-nuclear-uprates"
+      ]
+    },
+    {
+      "name": "Fiscal and calendar year agree",
+      "keys": [
+        "marvell-fy2031-revenue-target-90b",
+        "marvell-long-range-revenue-target-2031"
+      ]
+    }
+  ]
+}

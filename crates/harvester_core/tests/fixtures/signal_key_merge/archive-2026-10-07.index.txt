@@ -1,0 +1,198 @@
+doc | line | fetched_utc | priority | signal_key | title
+1 | 1 | 2026-10-03T11:49:06.364962500+00:00 | 5 | california-man-ai-hardware-smuggling-china-indictment | California man's smuggling scheme sent $300 million in AI hardware to China, feds say
+2 | 29 | 2026-10-04T20:11:55.709263+00:00 | 5 | vistra-4-2b-doe-loan-nuclear-uprates | US to Loan Vistra $4.2 Billion to Expand Nuclear Output at Three Plants — BigGo Finance
+3 | 57 | 2026-10-03T05:11:39.267772200+00:00 | 5 | tencent-oracle-100000-ai-chips-lease | Tencent leases 100,000 Oracle AI chips abroad in a $7bn deal
+4 | 85 | 2026-10-07T03:37:27.843945200+00:00 | 4 | foxconn-q3-2026-revenue-jumps-on-ai-servers | Foxconn Q3 2026 revenue jumps 47% on AI servers
+5 | 112 | 2026-10-07T03:36:48.787573300+00:00 | 5 | doe-loan-vistra-nuclear-fleet-uprates | DOE intends to loan Vistra $4.2B for nuclear fleet improvements
+6 | 140 | 2026-10-07T03:37:37.321589400+00:00 | 5 | spacex-starmind-ai-satellites-fcc-filing | SpaceX Reveals Starmind: 1 Million AI Satellites and a Space Safety Push
+7 | 167 | 2026-10-07T04:56:19.977334100+00:00 | 4 | reflection-ai-beam-open-weight-release | Reflection AI Launches Open-Weight Model 'Beam,' Pushing the Western Open Frontier - WOWTALE
+8 | 194 | 2026-10-07T03:37:33.514010500+00:00 | 4 | alibaba-ai-chip-data-center-expansion | Alibaba unveils AI chip and data center plans for Alibaba Group stock
+9 | 222 | 2026-10-03T05:09:30.058533500+00:00 | 5 | nebius-50mw-data-center-gpu-prices-raised | Nebius Stock: 50 Megawatts Secured, GPU Rates Raised, and a $399 Bull Case
+10 | 250 | 2026-10-02T13:39:10.240112400+00:00 | 5 | nebius-coreweave-nvidia-gpu-price-increase | Nebius and CoreWeave Lift Nvidia GPU Prices by Up to 21%
+11 | 280 | 2026-10-06T03:59:54.154952100+00:00 | 4 | duos-sells-gpuaas-unit-to-axe-compute | Duos Technologies Sells Its GPU-as-a-Service Entity to Axe Compute, Accelerating Its Shift to a Pure-Play AI Colocation Platform
+12 | 310 | 2026-10-03T05:10:29.487146400+00:00 | 5 | micron-fy2026-hbm4-supply-agreements | Micron’s Numbers Show Why HBM4 Memory Is Worth 15X Its Weight In Gold
+13 | 338 | 2026-10-06T04:01:38.278435300+00:00 | 4 | foxconn-q3-revenue-surge-ai-server-demand | Foxconn Reports 47% Year-on-Year Revenue Surge in Q3
+14 | 366 | 2026-10-07T03:36:27.786062500+00:00 | 5 | reflection-ai-beam-open-weight-launch | What Beam Is and Why Nvidia Is Betting Big on Reflection AI - Startup Fortune
+15 | 393 | 2026-10-06T04:01:38.508566900+00:00 | 5 | tencent-oracle-offshore-ai-chip-lease | Tencent scores 100,000 offshore AI chip deal with Oracle for $7 billion despite climbing prices
+16 | 421 | 2026-10-03T05:09:33.247306600+00:00 | 5 | vistra-4b-loan-nuclear-plant-upgrades | TheValueist (@TheValueist) on X
+17 | 449 | 2026-10-02T13:39:24.844184600+00:00 | 4 | micron-blowout-earnings-capex-order-book | Semiconductor stocks surge across the board on Micron's blowout earnings and South Korea's export boom — BigGo Finance
+18 | 477 | 2026-10-07T03:36:34.102269600+00:00 | 4 | marvell-long-range-revenue-target-2031 | Marvell Technology Targets Up to $90B Revenue by 2031 as AI Demand Accelerates
+19 | 505 | 2026-10-07T04:56:20.985299600+00:00 | 4 | marvell-fy2031-revenue-target-90b | Marvell Technology Stock Jumps as 2031 Target Hits $90B
+20 | 533 | 2026-10-06T03:59:52.326897300+00:00 | 4 | lambda-30k-nvidia-gpu-term-loan | AI Data Center Debt Is Showing Up Everywhere
+21 | 560 | 2026-10-04T05:13:38.302252500+00:00 | 5 | us-lend-vistra-4-2b-nuclear-uprates | U.S. to lend $4.2 billion to Vistra to boost nuclear power output, source says
+22 | 587 | 2026-10-05T04:58:38.119922200+00:00 | 3 | google-gemini-4-argon-launch | El nuevo modelo de IA de Google pretende alcanzar a OpenAI y Anthropic.
+23 | 614 | 2026-10-07T03:37:24.029833200+00:00 | 4 | openai-anthropic-ai-breach-disclosure-support | OpenAI and Anthropic back mandatory AI breach disclosure laws
+24 | 641 | 2026-10-05T04:58:26.567287700+00:00 | 5 | doe-4b-loan-vistra-nuclear-upgrades | Did a US$4 Billion Federal Nuclear Loan Just Shift Vistra's (VST) Investment Narrative?
+25 | 668 | 2026-10-04T05:13:52.811593600+00:00 | 5 | alibaba-qwen-full-stack-ai-push | Alibaba unveils full-stack AI push with new Qwen chips
+26 | 696 | 2026-10-03T05:09:30.563200200+00:00 | 4 | coreweave-vera-rubin-nvl72-live | NVIDIA's Ian Buck Says CoreWeave's V100 GPUs Still Run Nearly A Decade Later, Even As Vera Rubin NVL72 Goes Live With a 4.8x Token Generation Speedup
+27 | 726 | 2026-10-04T20:11:49.298558100+00:00 | 4 | nasa-blue-origin-mars-telecommunications-network-award | SpaceX Isn't Rocket Lab's Biggest Threat Now -- Blue Origin Is / The Motley Fool
+28 | 753 | 2026-10-03T11:49:11.250524100+00:00 | 5 | nscale-loughton-data-center-grid-delay | Nvidia-backed Neocloud Nscale faces years of delay because UK's 'largest AI supercomputer' can't get enough power from the grid to feed its data centers
+29 | 780 | 2026-10-07T03:36:34.994141500+00:00 | 5 | marvell-google-custom-silicon-warrant | Marvell Targets $90B Revenue by 2031; Google Warrant Ties $120B Chip Buys to Marvell Equity
+30 | 808 | 2026-10-02T13:39:05.895596400+00:00 | 3 | rocket-lab-synspective-20-mission-electron-deal | Rocket Lab Climbs 5% as Largest-Ever Electron Deal Lifts Backlog Past 100 Missions; AST SpaceMobile Ticks Up, SpaceX Holds Flat - AOL
+31 | 835 | 2026-10-06T04:01:12.224046500+00:00 | 5 | south-korea-ai-industrial-strategy-fabs-data-centers | South Korea AI Investment Plan Puts $900 Billion Behind a Survival Strategy
+32 | 863 | 2026-10-06T04:00:48.866048700+00:00 | 3 | cloudflare-birthday-week-2026-product-launches | Everything we launched during Birthday Week 2026
+33 | 890 | 2026-10-04T05:13:39.350180400+00:00 | 5 | vistra-nuclear-loan-upgrade | Acciones de Vistra rebotan tras reporte de préstamo nuclear de $4B
+34 | 918 | 2026-10-07T03:36:49.876693500+00:00 | 5 | doe-4-2b-loan-vistra-nuclear-plant-life-extensions | Department of Energy Announces a New Multibillion-Dollar Nuclear Energy Deal / The Motley Fool
+35 | 946 | 2026-10-03T05:11:22.759366700+00:00 | 4 | aws-1b-community-spend-data-center-backlash | Amazon pledges $1 billion to blunt backlash over AI data center boom
+36 | 973 | 2026-10-06T04:01:11.406030300+00:00 | 4 | samsung-vietnam-dram-nand-back-end-hub | Samsung to Build DRAM, NAND Back-End Hub in Vietnam
+37 | 1001 | 2026-10-04T05:13:31.217470200+00:00 | 4 | broadcom-60b-ai-chip-financing-anthropic | Broadcom amassing US$60 billion to fund chips for Anthropic: sources
+38 | 1029 | 2026-10-02T13:39:35.773430900+00:00 | 5 | china-tech-giants-ai-infrastructure-buildout | China’s tech giants speed AI push as US debates slowdown
+39 | 1057 | 2026-10-04T05:13:37.456969200+00:00 | 4 | palebluedot-ai-series-c-raise | Neocloud PaleBlueDot AI Raises $200M Series C at $3.2B Valuation - WOWTALE
+40 | 1085 | 2026-10-06T04:01:33.500601+00:00 | 5 | foxconn-q3-revenue-ai-server-demand | AI Server Orders Power Foxconn to a $95 Billion Quarter as Nvidia Shares Set a Record - SSBCrack News
+41 | 1112 | 2026-10-03T05:09:32.829375900+00:00 | 4 | vistra-meta-nuclear-power-purchase-agreements | Vistra Stock And 2 U.S. Power Plays for AI Data Center Demand
+42 | 1140 | 2026-10-07T03:36:25.966937300+00:00 | 5 | gpu-backed-loans-asia-ai-infrastructure | Banks Push Deeper Into Risky GPU-Backed Loans Across Asia's AI Boom - Startup Fortune
+43 | 1168 | 2026-10-02T13:39:11.080536300+00:00 | 5 | iren-5gw-ai-pipeline-funding-gap | IREN's AI pipeline tops 5 gigawatts, but Wall Street still argues the math - Startup Fortune
+44 | 1196 | 2026-10-06T03:59:56.987447300+00:00 | 4 | rocket-lab-synspective-20-launch-contract | Rocket Lab (NASDAQ: RKLB) Secures Record 20-Launch Synspective Contract, Pushing Backlog Past 100 Missions
+45 | 1224 | 2026-10-04T20:12:17.948571600+00:00 | 4 | deepseek-huawei-ascend-cuda-stack | 🗞️DeepSeek and Huawei Target Nvidia's CUDA Moat, and Manus Relaunches as the Agent Wars Heat Up
+46 | 1252 | 2026-10-07T03:49:19.125748700+00:00 | 5 | nyc-ai-bills-validation-shutdown | OpenAI, Anthropic, Google and Meta face 10 proposed NYC AI bills
+47 | 1280 | 2026-10-03T05:11:23.416983+00:00 | 5 | hyperscaler-data-center-capacity-buildout | Google Goes Global. AWS Has the Most GW under Construction
+48 | 1307 | 2026-10-03T05:11:34.806981500+00:00 | 5 | ftc-probes-openai-anthropic-product-safety | FTC Probing OpenAI, Anthropic Over Product Safety Concerns
+49 | 1335 | 2026-10-05T04:58:42.218070600+00:00 | 5 | california-sb1246-robotaxi-operations-requirements | California obliga a los robotaxis a tener técnicos en tierra y multará a Waymo y Tesla si bloquean a los servicios de emergencia
+50 | 1363 | 2026-10-06T03:59:56.407918700+00:00 | 3 | rocket-lab-synspective-20-launch-electron-contract | How Investors May Respond To Rocket Lab (RKLB) Winning Synspective’s Record 20-Launch Electron Contract
+51 | 1390 | 2026-10-07T03:36:31.373053600+00:00 | 4 | reflection-ai-beam-model-launch | Reflection AI debuts open-source Beam model with 501B parameters - SiliconANGLE
+52 | 1417 | 2026-10-03T05:11:26.250026800+00:00 | 4 | amazon-data-center-community-investment | Amazon to invest $1B into data center communities amid backlash against data center rollouts
+53 | 1445 | 2026-10-03T11:49:21.187857900+00:00 | 5 | doe-prepares-4b-loan-for-vistra-nuclear-upgrade | Trump Administration Reportedly Prepares $4B Federal Loan to Expand Vistra’s Nuclear Capacity
+54 | 1472 | 2026-10-07T03:37:34.212145800+00:00 | 4 | northrop-grumman-yfq-48a-first-autonomous-flight | Northrop Grumman flies self-funded YFQ-48A Talon Blue drone
+55 | 1500 | 2026-10-03T07:33:45.004397+00:00 | 4 | anthropic-claude-frontier-academy-100m | Anthropic funds $100M academy to train deployed AI engineers
+56 | 1528 | 2026-10-06T04:01:35.564509800+00:00 | 4 | foxconn-q3-revenue-ai-hardware-demand | Foxconn Third-Quarter Revenue Soars 47% on Surge in AI Hardware Demand
+57 | 1555 | 2026-10-04T05:13:50.414611200+00:00 | 5 | openai-training-freeze-security-incidents | Anthropic y OpenAi investigan decenas de incidentes de seguridad provocados por sus modelos
+58 | 1583 | 2026-10-02T13:39:42.489679400+00:00 | 3 | spacex-crew-13-iss-launch | SpaceX nails “Lucky 13” astronaut launch, leaning into Tesla tradition and superstition
+59 | 1612 | 2026-10-03T05:09:05.544580500+00:00 | 5 | california-sb947-no-robo-bosses-act | Newsom Sticks It to Trump, Signs ‘No Robo Bosses Act’ and Several Other AI Bills
+60 | 1642 | 2026-10-07T03:37:09.295143800+00:00 | 4 | memory-shortage-worsen-through-2028 | Samsung Says the Memory Chip Shortage Will Worsen Through 2028 - Startup Fortune
+61 | 1670 | 2026-10-03T07:34:40.968276300+00:00 | 4 | bloom-energy-scandium-class-action-oracle-project-jupiter | Bloom Energy Aktie: Wertpapiersammelklage wegen Scandium-Aussagen
+62 | 1697 | 2026-10-07T03:36:49.286525700+00:00 | 4 | doe-loan-vistra-nuclear-plant-upgrade | Why Centrus Stock Popped on Tuesday / The Motley Fool
+63 | 1724 | 2026-10-03T07:34:43.415600600+00:00 | 5 | amazon-community-benefits-data-center-buildout | Amazon Urges Communities to Stop Opposing Data Centers
+64 | 1751 | 2026-10-06T04:00:52.404547+00:00 | 3 | kratos-100m-contracts-space-cyber-capabilities | More than $100 million in contracts will support tools to help military teams prioritize targets.
+65 | 1777 | 2026-10-06T04:01:44.159334600+00:00 | 5 | pwsa-21-satellite-orbit-launch | Pentagon's Laser-Mesh Satellite Network Gains 21 Northrop Grumman Nodes
+66 | 1805 | 2026-10-07T04:56:23.159550300+00:00 | 5 | marvell-raises-long-term-ai-revenue-outlook | Marvell Technology Targets Up to $90B Revenue by 2031 as AI Demand Accelerates
+67 | 1833 | 2026-10-03T05:11:41.307795+00:00 | 5 | tencent-oracle-ai-chip-lease | [News] Tencent Reportedly Signs $7B Deal to Lease 100,000 AI Chips From Oracle in Southeast Asia
+68 | 1861 | 2026-10-07T03:37:31.891005400+00:00 | 4 | deepseek-80b-yuan-funding-round | A $12B DeepSeek Raise Is Reportedly Close, With Tencent And CATL Among Backers / Yellow
+69 | 1888 | 2026-10-07T03:37:14.586659200+00:00 | 4 | samsung-lg-ai-infrastructure-components-cooling-deals | AI boom spreads beyond Korean chipmakers to components and cooling / Aju Press
+70 | 1917 | 2026-10-02T13:39:10.840354600+00:00 | 4 | coreweave-vera-rubin-cloud-support | CoreWeave brings Nvidia Vera Rubin, AI tools to its cloud services
+71 | 1945 | 2026-10-03T07:34:37.858091+00:00 | 4 | sharon-ai-gpu-backed-debt-facility | Sharon AI Enters Into GPU-Backed Debt Facility, Expanding Funding Flexibility for AI Factory Deployments - Sharon AI
+72 | 1973 | 2026-10-06T04:01:29.635034900+00:00 | 4 | foxconn-q3-revenue-jumps-ai-server-demand | Foxconn Revenue Jumps 47% As AI Server Demand Surges
+73 | 2001 | 2026-10-06T04:01:32.858450900+00:00 | 4 | foxconn-q3-revenue-ai-demand | Foxconn Q3 Revenue Up 47% to T$3.03 Trillion on AI Demand - FourWeekMBA
+74 | 2029 | 2026-10-03T05:09:21.783643300+00:00 | 4 | spacex-starship-orbit-starlink-v3-deployment | Rocket Report: SpaceX completes launch triple-header; Rocket Lab nets big contract
+75 | 2057 | 2026-10-06T04:00:08.904497+00:00 | 4 | cerebras-2026-revenue-guidance-openai-backlog | Cerebras Systems’ Tough 2026 Continues: It’ll Double Soon According to One of The Biggest Global Banks
+76 | 2085 | 2026-10-04T20:12:13.481326800+00:00 | 4 | nvidia-unveils-n1x-pc-processor | Intel, AMD Slide 4.2% as Nvidia Unveils N1X PC Chip [2026]
+77 | 2112 | 2026-10-07T03:36:20.405547400+00:00 | 4 | personal-agent-protocol-launch | Meta joins with group of companies to tame ‘chaos’ of doing business with AI bots
+78 | 2139 | 2026-10-07T03:37:31.519384800+00:00 | 5 | ai-chip-to-grid-power-design-shift | AI Power Spikes Demand Chip-to-Grid Design Changes
+79 | 2167 | 2026-10-07T03:37:36.134095200+00:00 | 4 | northrop-talon-blue-first-autonomous-flight | Northrop Talon Blue: primer vuelo del wingman del F-35 – El Ecosistema Startup
+80 | 2198 | 2026-10-04T05:13:34.139340900+00:00 | 4 | nebius-acquires-inferize | Neocloud Nebius Acquires Cold-Start Fixer Inferize to Strengthen Inference Stack - WOWTALE
+81 | 2226 | 2026-10-03T05:11:31.072503300+00:00 | 4 | us-government-equity-stake-openai-anthropic | Trump Signals US Could Take Equity Stakes in OpenAI and Anthropic — BigGo Finance
+82 | 2254 | 2026-10-07T03:36:24.811820+00:00 | 3 | nebius-meta-neocloud-backlog-capacity | Nebius Has Been One of 2026's Best-Performing AI Cloud Stocks. Here's What $1,000 Invested Could Be Worth by 2030.
+83 | 2282 | 2026-10-07T03:50:09.867527200+00:00 | 4 | amd-ai-chip-demand-outstripping-supply-2027-ramp | AMD Reportedly Sees AI Chip Demand Outrunning Supply — Lisa Su Plans ‘Substantial’ 2027 Ramp
+84 | 2309 | 2026-10-04T20:11:45.515923600+00:00 | 5 | ai-infrastructure-debt-trap-warning | The Enron short-seller warning of AI’s debt trap
+85 | 2337 | 2026-10-04T20:11:56.397141900+00:00 | 5 | us-loan-vistra-nuclear-output-uprate | US to reportedly lend $4.2 billion to Vistra to boost nuclear power output - VST News
+86 | 2364 | 2026-10-04T20:12:23.617202100+00:00 | 4 | tesla-cybercab-nhtsa-audit-query | Tesla's Cybercab Hits an NHTSA Probe Just Hours Into Its Austin Launch - Startup Fortune
+87 | 2392 | 2026-10-03T05:11:38.972295600+00:00 | 5 | amazon-data-center-commitment | Amazon writes scary blog warning communities not to block data centers
+88 | 2419 | 2026-10-02T13:39:43.086496500+00:00 | 4 | alphabet-suncatcher-orbital-ai-chip-test | Watch Live: SpaceX To Launch Google AI Chips Into Orbit In Push For Space-Based Data Centers<!-- --> / ZeroHedge
+89 | 2446 | 2026-10-04T20:12:23.840477400+00:00 | 4 | california-sb1246-robotaxi-emergency-response-fines | California law sets fines for robotaxis that impede 911 response
+90 | 2473 | 2026-10-07T03:49:20.763826600+00:00 | 4 | nyc-council-ai-catastrophic-risk-hearing | NYC Council Speaker Julie Menin Presses Anthropic, OpenAI, Google, Meta on AI Catastrophic Risks: 13 outlets compared / NewsCord
+91 | 2501 | 2026-10-07T03:36:27.527810500+00:00 | 4 | reflection-ai-beam-open-weight-model | Reflection AI Beam: America's Answer to DeepSeek and Kimi / Trending Topics
+92 | 2529 | 2026-10-03T07:34:44.379418300+00:00 | 3 | amazon-data-center-commitment-built-together | The race our nation can’t afford to lose, plus a new commitment from us and a fresh set of community investments
+93 | 2556 | 2026-10-03T11:49:29.859716500+00:00 | 4 | ftc-investigation-openai-anthropic-ai-safety | The Federal Trade Commission Is Investigating Anthropic And OpenAI — Here’s Why
+94 | 2583 | 2026-10-06T04:01:44.343770500+00:00 | 4 | northrop-yfq-48a-talon-blue-first-flight | Northrop Grumman's YFQ-48A Talon Blue flies for the first time
+95 | 2611 | 2026-10-02T13:39:06.684491300+00:00 | 4 | coherent-photonlink-ai-data-center-optics-push | Coherent Jumps 10% on PhotonLink Push and Bernstein’s Outperform Start; Lumentum Rises 9%, Corning Advances 3%
+96 | 2639 | 2026-10-04T20:12:21.349010400+00:00 | 4 | california-sb1246-autonomous-vehicle-safety-law | TechCrunch Mobility: Reining in robotaxis / TechCrunch
+97 | 2667 | 2026-10-07T03:37:28.760079100+00:00 | 4 | hon-hai-quarterly-revenue-beats-estimates-ai-demand | Dunia Masih Demam AI, Vendor Nvidia & Apple Semakin Diuntungkan - Teknologi
+98 | 2694 | 2026-10-03T05:09:04.419744300+00:00 | 4 | fieldai-700m-round-10b-valuation | Robotics startup FieldAI set to raise new funding round at $10 billion valuation
+99 | 2721 | 2026-10-03T05:11:29.750540400+00:00 | 5 | ftc-investigation-anthropic-openai | US FTC will investigate Anthropic and OpenAI
+100 | 2747 | 2026-10-02T13:39:16.183786200+00:00 | 4 | coreweave-partner-network-and-ennoble-care-deployment | Can CoreWeave's Partner Network and AI Deals Expand Its Reach?
+101 | 2774 | 2026-10-03T11:49:22.642708800+00:00 | 4 | ge-vernova-raised-fcf-guidance-ai-data-center-orders | GE Vernova's Consolidation Looks Promising For One Simple Reason
+102 | 2803 | 2026-10-04T20:12:07.730138700+00:00 | 5 | hyperscaler-capex-growth-peaks | Hyperscaler Capex Growth Expectations Peak; AI Boom Shows First Structural Divergence at the Funding Layer — BigGo Finance
+103 | 2831 | 2026-10-07T04:56:33.061757100+00:00 | 3 | anthropic-ipo-marketing-2026 | Anthropic Could Beat OpenAI to Wall Street by Over a Year
+104 | 2859 | 2026-10-07T03:49:21.254459300+00:00 | 4 | amd-ai-demand-outrunning-chip-supply | AMD Says AI Demand Is Outrunning Chip Supply
+105 | 2887 | 2026-10-03T05:09:23.977800400+00:00 | 3 | rocket-lab-synspective-electron-launch-deal | Largest Electron Launch Deal At Rocket Lab (RKLB) Has Changed Its Investment Story
+106 | 2914 | 2026-10-06T04:00:03.337920900+00:00 | 5 | reflection-ai-beam-open-weight-model-release | Reflection AI unveils Beam, a 501-billion-parameter open model to rival China - Startup Fortune
+107 | 2943 | 2026-10-07T03:37:28.451616700+00:00 | 4 | foxconn-q3-sales-up-47-percent-ai-demand | Penjualan Foxconn Kuartal III Naik 47% ke NT$3,03 Triliun, Ditopang AI
+108 | 2970 | 2026-10-03T07:34:41.892587800+00:00 | 5 | warren-ai-tax-break-probe-big-tech | Warren Probes $96B AI Tax Breaks at Big Tech [2026]
+109 | 2999 | 2026-10-06T04:01:52.052464800+00:00 | 3 | tesla-robotaxi-nighttime-animal-detection-limit | Robotaxis Tesla : Elon Musk avoue ce qui les empêche de rouler plus tard le soir
+110 | 3027 | 2026-10-03T05:09:32.426086700+00:00 | 2 | kongsberg-belgium-nasams-order | Belgium orders NASAMS air defence system from KONGSBERG - EDR Magazine
+111 | 3054 | 2026-10-02T13:39:37.964051800+00:00 | 4 | palantir-nhs-data-objections | More than 44,000 file legal objections to Palantir NHS platform handling their data
+112 | 3081 | 2026-10-07T03:49:06.687324100+00:00 | 4 | reflection-ai-launches-beam-open-weight-model | Nvidia-backed Reflection unveils first AI model to take on Chinese open models
+113 | 3107 | 2026-10-02T13:39:29.795906500+00:00 | 3 | anthropic-ipo-prospectus | Anthropic Could Beat OpenAI to Wall Street by Over a Year
+114 | 3135 | 2026-10-03T05:11:23.092322600+00:00 | 4 | warren-senate-ai-tax-breaks-hyperscalers | Warren Probes AI Tax Breaks at Amazon, Meta, Google
+115 | 3162 | 2026-10-07T03:36:19.021126+00:00 | 4 | hubspot-cuts-660-jobs-ai-strategy-shift | HubSpot cuts nearly 660 jobs as AI reshapes its business / CTech
+116 | 3191 | 2026-10-07T03:49:20.384668200+00:00 | 4 | australia-mandatory-ai-incident-reporting | OpenAI, Anthropic back mandatory AI incident reporting in Australia / MLex / Specialist news and analysis on legal risk and regulation
+117 | 3218 | 2026-10-02T13:39:17.177635+00:00 | 3 | cloudflare-clef-open-source-decision-models | Cloudflare Open-Sources Clef, Beats Jev Latency on Edge GPUs / AI Weekly
+118 | 3246 | 2026-10-06T04:01:23.606621100+00:00 | 4 | reflection-ai-open-weight-model-launch | OpenAI and Anthropic Have a New Threat to Worry About—and It Isn't China
+119 | 3274 | 2026-10-03T05:11:27.967908500+00:00 | 4 | amazon-data-center-transparency-pledge | Amazon pledges greater transparency on data centers
+120 | 3302 | 2026-10-07T03:37:45.657071900+00:00 | 3 | equinix-ny2-diesel-spill-hackensack | Equinix data center spills thousands of gallons of diesel in Hackensack River; New Jersey Mayor attributes it to a 'computer glitch', department claims no observed impacts on local wildlife - The Times of India
+121 | 3329 | 2026-10-04T20:12:02.552447600+00:00 | 4 | tsmc-2026-capex-arizona-2nm-ramp | The AI Chip Revolution Wouldn’t Be Possible Without This Company - AOL
+122 | 3357 | 2026-10-06T03:59:53.860939900+00:00 | 3 | nebius-meta-five-year-ai-cloud-contract | Nebius Has Been One of 2026's Best-Performing AI Cloud Stocks. Here's What $1,000 Invested Could Be Worth by 2030. - AOL
+123 | 3385 | 2026-10-06T03:59:40.624072800+00:00 | 3 | amazon-hires-copilot-cto-for-agentic-ai | Amazon hires Microsoft's former Copilot CTO
+124 | 3412 | 2026-10-03T11:49:28.320311600+00:00 | 4 | amazon-data-center-community-commitment | Amazon promete millonaria inversión para ciudades con centros de datos de IA
+125 | 3439 | 2026-10-06T03:59:58.445423500+00:00 | 3 | redwire-axiom-station-rosa-second-module-contract | A commercial space station’s second module is set to get two solar wings
+126 | 3466 | 2026-10-05T04:57:28.702825700+00:00 | 4 | taiwan-national-development-fund-ai-offshore-eligibility | Development fund expands coverage - Taipei Times
+127 | 3494 | 2026-10-03T07:34:39.148992600+00:00 | 3 | marvell-2nm-optical-interconnects-at-ecoc | Marvell Technology (MRVL) Showcases 2nm Optical Links And Locks In AI Capacity
+128 | 3521 | 2026-10-07T03:37:06.189859700+00:00 | 4 | tsmc-2nm-capacity-reservations | [News] Qualcomm, Apple, MediaTek Battle It Out on TSMC 2nm: Inside Their Flagship AI Strategies
+129 | 3549 | 2026-10-07T03:36:26.619961700+00:00 | 3 | rocket-lab-synspective-launch-backlog | RKLB Stock Rises Overnight: Cathie Wood’s ARK Sees ‘Enormous Opportunity’ As SpaceX Eyes Falcon 9 Retirement
+130 | 3577 | 2026-10-07T03:36:24.138127200+00:00 | 4 | google-project-suncatcher-prototype-operating-in-orbit | Google’s AI Chips Are Live in Orbit. Now Comes the Hard Part.
+131 | 3604 | 2026-10-06T04:00:03.100551100+00:00 | 3 | reflection-ai-beam-open-weight-model-launch | Nvidia-Backed Reflection Unveils Open AI Model, Taking on China
+132 | 3630 | 2026-10-04T20:11:46.024668200+00:00 | 3 | agentic-commerce-retail-brands-ai-shopping | How do you sell to an AI shopper? US brands rethink their pitch with logic and data
+133 | 3659 | 2026-10-04T05:12:37.273012500+00:00 | 4 | trump-appoints-jay-clayton-ai-czar | Trump taps Director of National Intelligence Jay Clayton as AI czar: WSJ reports
+134 | 3686 | 2026-10-07T03:37:00.592439600+00:00 | 3 | crowdstrike-amazon-nvidia-agentic-security-accelerator | CrowdStrike Advances 3% on Agentic Security Accelerator With Amazon and NVIDIA; Palo Alto and Zscaler Gain 4%
+135 | 3713 | 2026-10-03T07:34:45.689256100+00:00 | 4 | amazon-data-center-community-fund-and-nda-policy | Amazon’s $1B plan to combat data center backlash draws more backlash
+136 | 3741 | 2026-10-04T05:13:55.482491400+00:00 | 3 | northrop-yfq-48a-talon-blue-autonomous-flight | Northrop Grumman’s YFQ-48A Talon Blue completes first fully autonomous flight in company-funded aircraft development program
+137 | 3768 | 2026-10-04T05:13:46.103273800+00:00 | 4 | micron-1billion-added-costs-bonus-ramp-up | Semiconductor Bonuses Emerge as Earnings Wildcard as Micron Flags $1 Billion in Added Costs — BigGo Finance
+138 | 3797 | 2026-10-02T13:39:04.824056100+00:00 | 4 | coreweave-forge-launch | Neocloud demand shifts as AI startups prioritize burst capacity - SiliconANGLE
+139 | 3825 | 2026-10-03T05:09:30.891268700+00:00 | 3 | kongsberg-air-defense-orders-backlog | How New Air Defense Orders At Kongsberg Gruppen (OB:KOG) Have Changed Its Investment Story
+140 | 3852 | 2026-10-02T13:39:40.536591500+00:00 | 4 | tesla-ai5-ai6-memory-cut-optimus-volume | Tesla Slashed AI5 Chip Memory to Hit Optimus Volume, Musk Says
+141 | 3879 | 2026-10-04T20:11:46.756458600+00:00 | 2 | openai-chatgpt-shopping-features-launch | ChatGPT wants to replace the fitting room. I put it through a wardrobe stress test.
+142 | 3906 | 2026-10-06T03:59:54.683511+00:00 | 4 | iren-multi-year-ai-cloud-agreement | What Caused the Surge in Iren's AI Neocloud Stock in September? / The Motley Fool
+143 | 3934 | 2026-10-05T04:57:30.347550100+00:00 | 4 | white-house-ai-task-force-jay-clayton | Trump confirms national intelligence chief as new AI czar
+144 | 3961 | 2026-10-04T20:12:21.159943400+00:00 | 3 | tesla-austin-robotaxi-cautious-expansion | Musk frena el entusiasmo por el robotaxi: «Máxima cautela» con Tesla
+145 | 3989 | 2026-10-04T20:12:20.603304200+00:00 | 4 | tesla-austin-robotaxi-hours-cybercab-fleet-expansion | Tesla Extends Robotaxi Hours in Austin, Adds 111 Cybercabs - Not a Tesla App
+146 | 4016 | 2026-10-06T04:00:52.895200700+00:00 | 4 | vistra-federal-nuclear-financing-plant-upgrades | Vistra rises as reported federal nuclear financing lifts outlook for plant upgrades / VST Stock News
+147 | 4043 | 2026-10-03T05:09:12.407475600+00:00 | 3 | dell-ai-server-orders-backlog-and-japan-project | Dell Technologies Inc. $DELL Shares Newly Bought by Polaris Financial Partners
+148 | 4071 | 2026-10-03T05:09:11.767178800+00:00 | 3 | nvidia-dgx-spark-64gb-launch | NVIDIA DGX Spark 64GB Gives Developers More Ways to Build and Scale Local AI
+149 | 4098 | 2026-10-04T20:10:53.786172100+00:00 | 2 | suno-launches-speech-spoken-word-music-tool | AI startup Suno’s new tool puts music to spoken word
+150 | 4126 | 2026-10-07T03:49:06.004084400+00:00 | 2 | rocket-lab-record-electron-commercial-deal | Why Is Rocket Lab (NASDAQ:RKLB) Climbing After Its Record Electron Deal?
+151 | 4153 | 2026-10-03T07:34:46.460079600+00:00 | 3 | openai-devday-gpt-61-sol-chatgpt-space-dots | OpenAI's Undeniable Resurgence and the Coming Liftoff of Personal AI Agents
+152 | 4180 | 2026-10-04T20:11:58.562993700+00:00 | 4 | cloudflare-basin-general-availability | Cloudflare Basin vs Snowflake: $0.06/GB Analytics [2026]
+153 | 4208 | 2026-10-07T03:37:34.450415500+00:00 | 2 | northrop-f35-ai-production-automation | AI Takes Hours Out of F-35 Production at Northrop Grumman
+154 | 4235 | 2026-10-06T04:01:45.973523+00:00 | 4 | tesla-optimus-ai5-ai6-memory-reduction | « C'était la seule façon »: Elon Musk fait une confidence sur le robot Tesla Optimus
+155 | 4262 | 2026-10-04T20:11:46.379616300+00:00 | 4 | salesforce-agentforce-agentic-enterprise-expansion | “Every employee is a manager of AI agents” / CTech
+156 | 4290 | 2026-10-07T03:37:31.289265700+00:00 | 4 | dell-ai-data-platform-knowledge-graph-nvidia-processing | Dell's AI Data Platform gets a knowledge graph for agents and faster Nvidia processing - SiliconANGLE
+157 | 4318 | 2026-10-07T03:36:11.629663800+00:00 | 2 | arthur-hayes-launches-flop-compute-market | Trillions are being ‘wasted’ on the AI boom, Arthur Hayes says. He’s betting on what comes next
+158 | 4346 | 2026-10-07T03:37:23.484539300+00:00 | 4 | openai-australia-parliament-inquiry-training-access | OpenAI has ‘work to do to rebuild trust’ in Australia, executive tells AI inquiry
+159 | 4374 | 2026-10-02T13:39:27.333408700+00:00 | 4 | amazon-built-together-data-center-community-program | Amazon Will Pay for Your Community College. Not Its Full Property Tax
+160 | 4402 | 2026-10-04T20:12:08.100238300+00:00 | 3 | alphabet-white-house-ai-safety-pact-antitrust-wins | What Do Alphabet (GOOGL) AI Safety Pact And Antitrust Wins Mean Now?
+161 | 4429 | 2026-10-04T20:12:13.036595200+00:00 | 5 | ftc-investigation-openai-anthropic-consumer-risk | FTC is investigating OpenAI and Anthropic over possible risks to consumers / Texarkana Gazette
+162 | 4456 | 2026-10-03T05:11:45.087758200+00:00 | 4 | tesla-driverless-robotaxi-scaleup-texas | Tesla is finally scaling up driverless robotaxi service
+163 | 4484 | 2026-10-03T11:49:33.792200200+00:00 | 4 | tesla-ai5-ai6-memory-cut-optimus | Tesla cuts AI5 memory for Optimus, but not as much as originally planned
+164 | 4512 | 2026-10-07T03:37:04.157922+00:00 | 4 | broadcom-ai-chip-financing-deal | Why Is Broadcom (NASDAQ:AVGO) Lining Up a Large AI Chip Financing Deal?
+165 | 4539 | 2026-10-03T05:09:29.804710600+00:00 | 3 | crowdstrike-coreweave-ai-cybersecurity-partnership | CoreWeave and CrowdStrike rethink AI-native cybersecurity - SiliconANGLE
+166 | 4566 | 2026-10-06T04:01:05.601950900+00:00 | 5 | broadcom-samsung-hbm-pricing-deal | Broadcom-Samsung Chip Deal Matches Nvidia Pricing [2026]
+167 | 4594 | 2026-10-07T03:36:20.766131400+00:00 | 3 | nvidia-telco-open-model-strategy | Why Telecom Operators Are Building Their AI Strategy on Open Models
+168 | 4622 | 2026-10-04T05:13:36.536376200+00:00 | 5 | clustermax-3-gpu-cloud-ranking | 77 GPU Clouds. Only 19 Medals. / ClusterMAX 3.0｜Latent Space — BigGo Finance
+169 | 4652 | 2026-10-07T03:36:42.854890500+00:00 | 4 | nebius-inferize-acquisition | Nebius Rallies 9% on an Inference Deal While Its Earnings Multiple Sits Near 197x; CoreWeave Gains 4%, Oracle Advances 3%
+170 | 4680 | 2026-10-06T03:59:58.847998100+00:00 | 4 | reflection-ai-beam-open-model-launch | Reflection AI unveils its first open model, Beam. Could it be America’s best chance to compete with China? / Fortune
+171 | 4707 | 2026-10-03T05:11:29.472751400+00:00 | 5 | amazon-1b-data-center-community-investment | Amazon to invest US$1 billion over five years in U.S. data centre communities
+172 | 4735 | 2026-10-07T03:36:14.920534600+00:00 | 3 | rbc-ai-maturity-ranking | RBC ranks top 3 globally for AI maturity in financial services / RBCCM
+173 | 4764 | 2026-10-02T13:38:12.782431500+00:00 | 4 | draftkings-ai-problem-gambler-lawsuit | New lawsuit claims DraftKings uses AI to target problem gamblers
+174 | 4790 | 2026-10-03T05:11:31.704317500+00:00 | 5 | ftc-investigates-anthropic-openai-ai-safety-probe | The Federal Trade Commission Is Investigating Anthropic And OpenAI — Here's Why - AfroTech
+175 | 4818 | 2026-10-03T07:34:46.215666400+00:00 | 4 | openai-anthropic-delay-model-public-access | Why OpenAI and Anthropic are delaying public access to new AI
+176 | 4844 | 2026-10-03T05:11:37.513930100+00:00 | 5 | trump-10-percent-equity-openai-anthropic | Trump descarta nacionalizar OpenAI y Anthropic, pero evalúa tomar 10% – El Ecosistema Startup
+177 | 4873 | 2026-10-04T05:13:46.698119+00:00 | 4 | micron-earnings-hbm-memory-upcycle | After Micron's Earnings Beat, Eyes Turn to Samsung and SK hynix
+178 | 4901 | 2026-10-05T04:58:26.004967600+00:00 | 4 | axelera-ai-ipo-horizon | Axelera AI mikt op beursgang over drie tot vijf jaar
+179 | 4929 | 2026-10-02T13:39:12.661482700+00:00 | 4 | coreweave-nvidia-stake-backlog-growth | CoreWeave (CRWV) Stock Rallies As Nvidia Ties Deepen And AI Cloud Backlog Soars
+180 | 4958 | 2026-10-06T03:59:44.849888+00:00 | 4 | california-sb951-ai-layoff-disclosure | When Robots Replace Staff: California’s New AI Layoff Disclosures / CDF Labor Law LLP
+181 | 4986 | 2026-10-06T04:01:36.632191400+00:00 | 4 | foxconn-quarterly-revenue-beat-ai-hardware-demand | Foxconn's revenue surged by 47%, and the spen...
+182 | 5012 | 2026-10-07T03:37:30.184667+00:00 | 4 | qualcomm-dragonfly-data-center-cpu-expansion | Qualcomm busca disputar el mercado de CPU para centros de datos de IA - DiarioBitcoin
+183 | 5040 | 2026-10-06T03:59:52.853789400+00:00 | 4 | nebius-meta-12b-ai-infrastructure-deal | Nebius Has Been One of 2026's Best-Performing AI Cloud Stocks. Here's What $1,000 Invested Could Be Worth by 2030. / The Motley Fool
+184 | 5067 | 2026-10-07T03:36:50.644422700+00:00 | 5 | doe-4-2b-loan-vistra-nuclear-upgrades | Why Vistra Stock Popped on Tuesday / The Motley Fool
+185 | 5094 | 2026-10-07T03:37:24.272777+00:00 | 4 | australia-ai-incident-reporting-inquiry | Anthropic takes a sly dig at OpenAI before parliamentary inquiry
+186 | 5121 | 2026-10-07T03:37:21.616052100+00:00 | 3 | amd-anthropic-2gw-mi450-deployment | Nvidia vs. AMD: Which AI Chip Leader Is the Better Long-Term Investment?
+187 | 5149 | 2026-10-03T05:11:43.025102900+00:00 | 3 | boeing-wins-fax-xx-program | Northrop Grumman Downgraded To ‘Sector Perform’ – RBC Says 6% Sales Growth From 2026 Through 2028 Could Be Best-Case Scenario
+188 | 5176 | 2026-10-06T04:01:20.565373700+00:00 | 4 | google-primary-ai-platform-enterprise-survey | Google leads AI platform use with 48% share / VentureBeat
+189 | 5205 | 2026-10-02T13:38:08.710456+00:00 | 4 | google-gemini-4-argron-launch | Google unveils latest AI model, but Wall Street wants a breakout personal agent
+190 | 5233 | 2026-10-02T13:39:33.546561500+00:00 | 5 | tencent-oracle-sea-compute-lease | Tencent Signs $7 Billion Deal with Oracle—China's AI Takes a Detour Through Southeast Asian Data Centers — BigGo Finance
+191 | 5262 | 2026-10-05T04:58:41.838312500+00:00 | 5 | tesla-cybercab-austin-launch | Tesla's Cybercab stumbles out of the gate in Austin: 45 vehicles at launch underscore Robotaxi expansion anxiety — BigGo Finance
+192 | 5291 | 2026-10-06T04:00:54.437169200+00:00 | 4 | vistra-nuclear-plant-upgrade-financing-package | Why this Nancy Pelosi and Peter Thiel stock is rocketing today
+193 | 5318 | 2026-10-03T05:09:10.799787+00:00 | 3 | totvs-lynn-ai-foundation-launch | TOTVS grounds enterprise AI foundation in business data- SiliconANGLE
+194 | 5345 | 2026-10-06T04:00:49.905047200+00:00 | 4 | nvidia-coreweave-vera-cpu-offerings | Nvidia and CoreWeave rethink agentic AI infrastructure - SiliconANGLE
+195 | 5372 | 2026-10-03T05:09:18.711311300+00:00 | 2 | seagate-earnings-q1-guidance-ai-hdd-demand | 889 Shares of Seagate Technology Holdings PLC $STX Purchased by Silverleafe Capital Partners LLC
+196 | 5399 | 2026-10-07T03:37:36.500901300+00:00 | 3 | tesla-austin-robotaxi-nighttime-limit | Elon Musk Says Gray Kittens Are Grounding Tesla Robotaxis At Night
+197 | 5426 | 2026-10-03T11:49:31.583085800+00:00 | 3 | deepseek-huawei-tilelang-ascend-software-stack | DeepSeek, Huawei Challenge the Software Powering Nvidia’s AI Dominance

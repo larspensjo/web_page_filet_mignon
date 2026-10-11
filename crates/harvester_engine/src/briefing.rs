@@ -206,6 +206,56 @@ fn scan_article_path(
     })
 }
 
+/// Read-only archive-window metadata, including harvested `linked/` pages.
+/// Uses the exporter's artifact exclusions and filename precedence, and filters before
+/// canonical-URL deduplication. Malformed fetch dates are included by both readers;
+/// missing dates are included here, but the exporter rejects such a corpus (as it
+/// does articles with missing titles).
+/// Valid dates are bounded inclusively; no corpus lock or output writes are used.
+pub fn scan_archive_window_metadata(
+    output_dir: &Path,
+    since_utc: chrono::DateTime<chrono::Utc>,
+    until_utc: chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<WindowArticle>, String> {
+    if since_utc > until_utc {
+        return Err("archive window since must be no later than until".into());
+    }
+    let paths = crate::export::ordered_archive_window_paths(output_dir, "archive.md")
+        .map_err(|err| format!("{}: {err}", output_dir.display()))?;
+    let config = build_content_prep_config();
+    let mut seen = HashSet::new();
+    let mut articles = Vec::new();
+    for (index, path) in paths.into_iter().enumerate() {
+        let outcome = scan_article_path(index, path.clone(), Some(since_utc), &config)?;
+        if outcome.missing_fetched_utc || outcome.malformed_fetched_utc {
+            engine_warn!(
+                "[archive-window] {}: missing or malformed fetched_utc — included",
+                path.display()
+            );
+        }
+        let Some(package) = outcome.package else {
+            continue;
+        };
+        if package
+            .fetched_utc
+            .as_deref()
+            .and_then(|raw| chrono::DateTime::parse_from_rfc3339(raw).ok())
+            .is_some_and(|date| date.with_timezone(&chrono::Utc) > until_utc)
+        {
+            continue;
+        }
+        if seen.insert(crate::archive_url_key(&package.url)) {
+            articles.push(WindowArticle {
+                url: package.url,
+                source_title: package.source_title,
+                fetched_utc: package.fetched_utc,
+                content_hash: package.clean_text.content_hash().to_string(),
+            });
+        }
+    }
+    Ok(articles)
+}
+
 /// Scan `output_dir` for markdown files, parse frontmatter, and derive clean text.
 /// Packages are ordered by filename so callers can rely on deterministic order.
 /// If `since_utc` is `Some`, articles with a `fetched_utc` older than the threshold are excluded.

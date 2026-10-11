@@ -1,0 +1,48 @@
+Archive signal-key grouping (selected-index benchmark)
+Rows: 197
+Groups before: 197
+Groups after: 197
+
+Families (merge targets inactive):
+- Vistra DOE loan: 13 keys -> 13 groups; one_group (inactive); docs [2, 5, 16, 21, 24, 33, 34, 53, 62, 85, 146, 184, 192]
+- Foxconn Q3: 9 keys -> 9 groups; one_group (inactive); docs [4, 13, 40, 56, 72, 73, 97, 107, 181]
+- Reflection Beam: 9 keys -> 9 groups; report; docs [7, 14, 51, 91, 106, 112, 118, 131, 170]
+  floor [7, 14, 106, 112, 131]: 5 groups; one_group (inactive)
+- Amazon community pledge: 10 keys -> 10 groups; report; docs [35, 52, 63, 87, 92, 119, 124, 135, 159, 171]
+  floor [87, 119, 124]: 3 groups; one_group (inactive)
+- FTC OpenAI and Anthropic probe: 5 keys -> 5 groups; one_group (inactive); docs [48, 93, 99, 161, 174]
+- Tencent-Oracle lease: 4 keys -> 4 groups; report; docs [3, 15, 67, 190]
+- Northrop YFQ-48A first flight: 4 keys -> 4 groups; report; docs [54, 79, 94, 136]
+- Rocket Lab-Synspective: 6 keys -> 6 groups; report; docs [30, 44, 50, 105, 129, 150]
+- Tesla AI5/AI6 memory: 3 keys -> 3 groups; report; docs [140, 154, 163]
+- Tesla night-time limit: 2 keys -> 2 groups; report; docs [109, 196]
+- Tesla cautious expansion / extended hours: 2 keys -> 2 groups; report; docs [144, 145]
+- Tesla (all ten selected keys): 10 keys -> 10 groups; report; docs [86, 109, 140, 144, 145, 154, 162, 163, 191, 196]
+- Marvell 2031 revenue target: 3 keys -> 3 groups; report; docs [18, 19, 66]
+  floor [18, 19]: 2 groups; one_group (inactive)
+- AMD demand outrunning supply: 2 keys -> 2 groups; report; docs [83, 104]
+- DeepSeek-Huawei software stack: 2 keys -> 2 groups; report; docs [45, 197]
+- Nebius-Inferize acquisition: 2 keys -> 2 groups; report; docs [80, 169]
+- Broadcom chip financing: 2 keys -> 2 groups; report; docs [37, 164]
+- Gemini argon / argron (known under-merge): 2 keys -> 2 groups; report; docs [22, 189]
+- California SB1246 (known under-merge): 3 keys -> 3 groups; report; docs [49, 89, 96]
+- Nebius-Meta (known under-merge): 3 keys -> 3 groups; report; docs [82, 122, 183]
+- Warren tax breaks (known under-merge): 2 keys -> 2 groups; report; docs [108, 114]
+- Australia incident reporting (known under-merge): 3 keys -> 3 groups; report; docs [23, 116, 185]
+- Anthropic IPO (known under-merge): 2 keys -> 2 groups; report; docs [103, 113]
+- Jay Clayton AI czar: 2 keys -> 2 groups; report; docs [133, 143]
+- Trump equity stake in OpenAI/Anthropic: 2 keys -> 2 groups; report; docs [81, 176]
+- Alibaba AI chip push: 2 keys -> 2 groups; report; docs [8, 25]
+- CoreWeave Vera Rubin: 2 keys -> 2 groups; report; docs [26, 70]
+- Nebius GPU price rise: 2 keys -> 2 groups; report; docs [9, 10]
+- Micron earnings: 2 keys -> 2 groups; report; docs [17, 177]
+
+Separation guards: 14 real cases / 11 synthetic cases (5 marker vetoes)
+
+Synthetic merge targets (inactive):
+- Unspecified quarter is compatible: 2 keys -> 2 groups; ["foxconn-q3-revenue-ai-demand", "foxconn-quarterly-revenue-beat-ai-demand"]
+- Rounded amounts never veto: 2 keys -> 2 groups; ["vistra-4b-loan-nuclear-plant-upgrades", "vistra-4-2b-doe-loan-nuclear-uprates"]
+- Fiscal and calendar year agree: 2 keys -> 2 groups; ["marvell-fy2031-revenue-target-90b", "marvell-long-range-revenue-target-2031"]
+
+Multi-member groups:
+(none)
