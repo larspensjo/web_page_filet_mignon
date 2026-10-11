@@ -5,8 +5,7 @@ use crate::briefing::ArticleSummaryResult;
 use crate::pre_triage_filter::PreTriagePhase;
 use crate::preview::format_summary_for_preview;
 use crate::signal_candidate::{
-    canonical_signal_key, is_signal_key_excluded, ScoredCandidate, SelectionPolicy,
-    SignalCandidateSelection,
+    is_signal_key_excluded, ScoredCandidate, SelectionPolicy, SignalCandidateSelection,
 };
 use crate::tabs::JobListMode;
 use crate::triage::TriagePhase;
@@ -401,20 +400,16 @@ impl AppState {
 
         let selected_urls: HashSet<&str> =
             selection.selected_urls.iter().map(String::as_str).collect();
-        // signal_key -> representative gist (the kept article shown on deduped rows).
-        let mut kept_gist_by_key: HashMap<String, String> = HashMap::new();
-        let states_by_url: HashMap<_, _> =
-            states.iter().map(|(url, state)| (*url, state)).collect();
-        for url in &selection.selected_urls {
-            if let Some(SignalCandidateState::Completed { result }) =
-                states_by_url.get(url.as_str())
-            {
-                let cluster_key = canonical_signal_key(&result.signal_key);
-                kept_gist_by_key
-                    .entry(cluster_key)
-                    .or_insert_with(|| truncate_signal_candidate_gist(&result.draft_gist));
-            }
-        }
+        let gist_by_url: HashMap<_, _> = states
+            .iter()
+            .filter(|(url, _)| selected_urls.contains(url))
+            .filter_map(|(url, state)| match state {
+                SignalCandidateState::Completed { result } => {
+                    Some((*url, truncate_signal_candidate_gist(&result.draft_gist)))
+                }
+                _ => None,
+            })
+            .collect();
         let job_id_by_url: HashMap<&str, crate::JobId> = self
             .jobs
             .iter()
@@ -466,7 +461,8 @@ impl AppState {
                         _ => ScoreBand::Low,
                     };
                     let dupes_count = selection
-                        .cluster_size_for_signal_key(&result.signal_key)
+                        .membership_for_signal_key(&result.signal_key)
+                        .map_or(0, |membership| membership.urls.len())
                         .saturating_sub(1);
                     let is_excluded = is_signal_key_excluded(
                         self.signal_exclusions().excluded(),
@@ -481,8 +477,10 @@ impl AppState {
                         SignalCandidateOutcome::Selected
                     } else {
                         SignalCandidateOutcome::Deduplicated {
-                            kept_gist: kept_gist_by_key
-                                .get(&canonical_signal_key(&result.signal_key))
+                            kept_gist: selection
+                                .membership_for_url(url)
+                                .and_then(|membership| membership.representative.as_deref())
+                                .and_then(|kept| gist_by_url.get(kept))
                                 .cloned()
                                 .unwrap_or_default(),
                         }

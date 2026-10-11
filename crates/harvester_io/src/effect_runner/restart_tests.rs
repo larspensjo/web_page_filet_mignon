@@ -217,6 +217,7 @@ fn write_archive(paths: &RuntimePaths, effect: &Effect) -> Vec<u8> {
         summaries,
         annotations,
         priority_snapshot,
+        folds,
         ..
     } = effect
     else {
@@ -231,6 +232,7 @@ fn write_archive(paths: &RuntimePaths, effect: &Effect) -> Vec<u8> {
         summaries,
         annotations,
         priority_snapshot,
+        Some(folds),
     )
     .unwrap();
     std::fs::read(paths.output_dir.join(basename)).unwrap()

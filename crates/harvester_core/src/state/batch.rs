@@ -217,12 +217,23 @@ impl AppState {
     /// Called when the archive dialog is opened so that both the open and submit
     /// handlers operate on the identical corpus the user saw when confirming.
     pub fn pin_archive_corpus(&mut self, corpus: crate::working_corpus::CurrentWorkingCorpus) {
+        self.pinned_full_archive_selection = Some(crate::signal_candidate::FullArchiveSelection {
+            ordered_urls: corpus.ordered_urls().to_vec(),
+            folds: Default::default(),
+        });
         self.pinned_archive_corpus = Some(corpus);
     }
 
     /// Returns the corpus pinned at archive-open time, or `None` if no dialog is active.
     pub fn pinned_archive_corpus(&self) -> Option<&crate::working_corpus::CurrentWorkingCorpus> {
         self.pinned_archive_corpus.as_ref()
+    }
+
+    /// The full-mode URL list and membership pinned beside the policy corpus.
+    pub fn pinned_full_archive_selection(
+        &self,
+    ) -> Option<&crate::signal_candidate::FullArchiveSelection> {
+        self.pinned_full_archive_selection.as_ref()
     }
 
     /// Clears the pinned corpus after the archive dialog session ends (submit, export
@@ -233,6 +244,7 @@ impl AppState {
     /// A subsequent `ArchiveClicked` will naturally overwrite the pin.
     pub fn clear_pinned_archive_corpus(&mut self) {
         self.pinned_archive_corpus = None;
+        self.pinned_full_archive_selection = None;
     }
 }
 

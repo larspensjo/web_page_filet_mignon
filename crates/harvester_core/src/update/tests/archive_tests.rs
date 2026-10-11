@@ -1,6 +1,162 @@
 use super::*;
 
 #[test]
+fn signal_export_keeps_pinned_membership_and_submit_time_member_annotations_and_summaries() {
+    use harvester_engine::{archive_url_key, ArchiveFoldReason};
+    init_logging();
+    let mut state =
+        with_signal_candidate_metadata(with_summary_metadata(complete_triage_state_for_test(3)));
+    seed_summaries_for_triage_hashes(&mut state, 3);
+    let own_keys = [
+        "anthropic-model-access-suspension-foreign-national-order",
+        "anthropic-disable-advanced-models-foreign-access",
+        "solo-event",
+    ];
+    for (i, key) in own_keys.iter().enumerate() {
+        complete_signal_candidate(&mut state, i, 90 - i as u8, key);
+    }
+    crate::fixture_support::save_session_results(&mut state);
+    let state = crate::fixture_support::complete_archive_meter_startup(state);
+    let selected_count = state.view().archive_meter.selected_count;
+    let final_selection = state.archive_final_selection();
+    let (mut state, effects) = update(state, Msg::ArchiveClicked);
+    let dialog_count = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::OpenArchiveDialog {
+                signal_candidate_count,
+                ..
+            } => Some(*signal_candidate_count),
+            _ => None,
+        })
+        .unwrap();
+    let pin = state.pinned_signal_candidate_selection().unwrap().clone();
+    assert_eq!(pin.folds, final_selection.folds);
+    assert_eq!(pin.selected_urls, final_selection.ordered_urls);
+    assert_eq!(selected_count, 2);
+    assert_eq!(selected_count, dialog_count);
+    let rep = "https://triage-complete.com/0";
+    let member = "https://triage-complete.com/1";
+    assert_eq!(pin.folds[&archive_url_key(rep)][0].url, member);
+    assert_eq!(
+        pin.folds[&archive_url_key(rep)][0].signal_key.as_deref(),
+        Some(own_keys[1])
+    );
+    assert_eq!(
+        pin.folds[&archive_url_key(rep)][0].reason,
+        ArchiveFoldReason::SameEvent
+    );
+    // A new exclusion changes the live membership; the dialog pin stays fixed.
+    state.signal_exclusions_mut().add_exclusion(OverrideKey {
+        signal_key: own_keys[0].into(),
+        prompt_id: "ArticleSignalCandidate".into(),
+        prompt_version: 1,
+    });
+    assert!(state.signal_candidate_selection().folds.is_empty());
+    assert_eq!(state.signal_candidate_selection().selected_urls.len(), 1);
+    let request_id = state.archive_request_id();
+    let (state, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".into(),
+            set_checkpoint: false,
+            submitted_at: chrono::Utc::now(),
+            use_summaries: true,
+            use_signal_candidates: true,
+        },
+    );
+    let effect = effects
+        .iter()
+        .find(|effect| matches!(effect, Effect::ArchiveRequested { .. }))
+        .unwrap();
+    if let Effect::ArchiveRequested {
+        ordered_urls,
+        folds,
+        annotations,
+        summaries,
+        ..
+    } = effect
+    {
+        assert_eq!(*ordered_urls, pin.selected_urls);
+        assert_eq!(*folds, pin.folds);
+        assert_eq!(ordered_urls.len(), selected_count);
+        for (i, key) in own_keys.iter().enumerate() {
+            let url = archive_url_key(&format!("https://triage-complete.com/{i}"));
+            assert_eq!(annotations[&url].signal_key.as_deref(), Some(*key));
+            assert!(annotations[&url].priority.is_some());
+            assert!(summaries[&url].contains("## Summary"));
+        }
+    }
+    assert!(state.pinned_full_archive_selection().is_none());
+    assert!(state.pinned_signal_candidate_selection().is_none());
+}
+
+#[test]
+fn full_mode_and_missing_signal_snapshot_export_full_pin_with_empty_membership() {
+    init_logging();
+    for use_signal_candidates in [false, true] {
+        let mut state = with_signal_candidate_metadata(complete_triage_state_for_test(2));
+        complete_signal_candidate(&mut state, 0, 90, "shared-event");
+        complete_signal_candidate(&mut state, 1, 80, "shared-event");
+        crate::fixture_support::save_session_results(&mut state);
+        let (mut state, effects) = update(state, Msg::ArchiveClicked);
+        let article_count = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::OpenArchiveDialog { article_count, .. } => Some(*article_count),
+                _ => None,
+            })
+            .unwrap();
+        let full_pin = state.pinned_full_archive_selection().unwrap().clone();
+        assert_eq!(
+            full_pin.ordered_urls,
+            state.pinned_archive_corpus().unwrap().ordered_urls()
+        );
+        assert_eq!(article_count, full_pin.ordered_urls.len());
+        assert_eq!(article_count, 2);
+        assert!(!state
+            .pinned_signal_candidate_selection()
+            .unwrap()
+            .folds
+            .is_empty());
+        assert!(full_pin.folds.is_empty());
+        if use_signal_candidates {
+            state.clear_pinned_signal_candidate_selection();
+        }
+        // A refreshed corpus must not replace the full-mode pin in either submit path.
+        state.set_triage(crate::triage::TriageSession::new_loading(None));
+        let request_id = state.archive_request_id();
+        let (state, effects) = update(
+            state,
+            Msg::ArchiveDialogSubmitted {
+                request_id,
+                basename: "archive.md".into(),
+                set_checkpoint: false,
+                submitted_at: chrono::Utc::now(),
+                use_summaries: false,
+                use_signal_candidates,
+            },
+        );
+        let effect = effects
+            .iter()
+            .find(|effect| matches!(effect, Effect::ArchiveRequested { .. }))
+            .unwrap();
+        if let Effect::ArchiveRequested {
+            ordered_urls,
+            folds,
+            ..
+        } = effect
+        {
+            assert_eq!(*ordered_urls, full_pin.ordered_urls);
+            assert_eq!(*folds, full_pin.folds);
+            assert_eq!(article_count, ordered_urls.len());
+        }
+        assert!(state.pinned_full_archive_selection().is_none());
+    }
+}
+
+#[test]
 fn pre_triage_refresh_dispatch_includes_briefing_checkpoint_since_utc() {
     init_logging();
     let since = chrono::DateTime::parse_from_rfc3339("2026-03-21T18:17:00Z")
@@ -1081,6 +1237,7 @@ fn archive_dialog_submitted_validates_basename_and_checkpoint_flag() {
             summaries,
             annotations: _,
             priority_snapshot: _,
+            folds: _,
         } => {
             assert_eq!(request_id, 1);
             assert_eq!(basename, "custom-archive.md");

@@ -208,6 +208,7 @@ impl AppState {
         if completed == 0 && failed == 0 {
             return ArchiveFinalSelection {
                 ordered_urls: base.ordered_urls().to_vec(),
+                folds: Default::default(),
                 source: ArchiveSelectionSource::FullCorpusSignalUnavailable,
             };
         }
@@ -216,12 +217,14 @@ impl AppState {
         if selection.selected_urls.is_empty() {
             return ArchiveFinalSelection {
                 ordered_urls: base.ordered_urls().to_vec(),
+                folds: Default::default(),
                 source: ArchiveSelectionSource::FullCorpusNoCandidates,
             };
         }
 
         ArchiveFinalSelection {
             ordered_urls: selection.selected_urls,
+            folds: selection.folds,
             source: ArchiveSelectionSource::SignalFiltered,
         }
     }

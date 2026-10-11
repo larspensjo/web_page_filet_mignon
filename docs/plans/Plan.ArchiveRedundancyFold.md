@@ -3,7 +3,7 @@
 Written 2026-10-07 from the design brief relayed by the AI_portfolio repository (the consumer
 of `archive.md`). Revised 2026-10-07 after a Codex review: every issue and recommendation was
 applied, with the user's and the orchestrator's answers folded in (see "Decisions carried
-in"). Status: Phase 1 complete and committed (2026-10-11); Phase 2 next, see "Handoff".
+in"). Status: Phase 2 complete and committed (2026-10-11); Phase 3 next, see "Handoff".
 Implementation runs phase by phase; nothing is committed unless the user asks.
 
 Durable documents (design docs, the decision log, code comments) must describe behaviours,
@@ -767,6 +767,16 @@ scripts; prompts and scoring cache keys.
 - Tracking-parameter stripping (FutureIdeas).
 - `event_cluster` labelling (Plan.ArchiveExportContract step 3b), cross-window "already exported event"
   memory, source-group pruning, English-representative preference: out of scope per the brief.
+  Evidence for cross-window memory (reported by the AI_portfolio intake, 2026-10-11): in the
+  2026-10-11 export (129 documents, `window_count` 418; copy at `output/archive-2026-10-11.md`), about
+  a third of the documents retell events already exported in the 2026-10-07 window, for example 7
+  Vistra and 7 Marvell retellings. A within-window fold cannot catch these. The owner decides after
+  Phase 5 whether this deserves its own plan. AI_portfolio's verdict on that export: 74 retained,
+  55 dropped (38 reiteration, 8 recirculation, 3 out of scope, 6 noise); by priority P5 18 kept / 7
+  reiteration / 2 noise / 1 out of scope, P4 51 / 16 / 6 recirculation / 2 out of scope, P3 5 / 12 /
+  1 recirculation / 4 noise, P2 0 / 3 / 1 recirculation. The main waste is cross-window retellings
+  (7 Vistra, 6 Marvell). The report on its index found no within-window same-key groups (129 groups),
+  so it is a second benchmark for the same-event merge rule.
 - A desktop hint such as "N folded" in the archive dialog, if the user wants the fold visible before
   export as well as in it.
 
@@ -809,7 +819,32 @@ Filled in during implementation.
 
 ## Handoff
 
-Updated 2026-10-11, after Phase 1.
+Updated 2026-10-11, after Phase 2.
+
+**Phase 2 done.** Exact-key membership reaches both dialog pins and the
+export, including member annotations/summaries, promotion, additive headers/counts and
+logging. Both new fixtures pass; all seven existing fixtures remain byte-identical.
+Original implementation validation passed offline build, output tests, core tests,
+I/O tests, full suite, clippy and fmt:
+`harvester_core` 581 -> 585, `harvester_engine` 416 -> 423, `harvester_io` 154 -> 154;
+no existing test removed. Identity grouping remains active; no identical-content fold.
+External portfolio
+reader validation remains an optional follow-up. Phase 3 is next.
+
+**Phase 2 review fixes applied (2026-10-11).** Export and read-only
+window metadata now share unconditional parse-and-log exclusions; malformed
+present dates remain included. Submit logs recover representatives' raw URLs.
+The existing metadata test was migrated, a bounded public-path regression was
+added for both fold-report paths, the sanitising unit test explains its LF-only
+coverage gap, four files use LF, and the illustrative index offset includes the
+folded header. All seven existing fixtures are still byte-identical; no test was
+removed. Offline build, crate tests, all-target clippy and fmt pass:
+`harvester_core` 585 -> 585, `harvester_engine` 423 -> 424 (one existing ignored),
+`harvester_io` 154 -> 154. Verified on the main thread: full workspace `cargo test` passed
+(1,326 tests), clippy and fmt clean, fixture folder shows only the two additions. The desktop
+`host_drain_cost` checks are flaky against their 40 ms budget on this machine independent of
+this change (previous commit: 2 of 3 runs failed; this change: 1 of 3). Committed on
+`feature/archive-redundancy-fold`.
 
 **Phase 1 done.** Implemented by Codex, reviewed (no blocking findings; all findings applied),
 verified on the main thread after the fixes: `cargo build`, clippy and fmt clean; tests pass with
@@ -819,8 +854,8 @@ removed. Committed on `feature/archive-redundancy-fold`.
 What exists now:
 
 - `crates/harvester_core/src/signal_key_merge.rs`: `group_signal_keys` as the identity grouping
-  (each canonical key its own group); report builder in `signal_key_merge/report.rs`. Not used by
-  the selection yet.
+  (each canonical key its own group); report builder in `signal_key_merge/report.rs`.
+  The selection now uses the identity grouping and records its membership.
 - Fixture, expectations and report snapshot under
   `crates/harvester_core/tests/fixtures/signal_key_merge/`; golden test
   `crates/harvester_core/tests/signal_key_merge_golden.rs`. The fixture reader accepts LF and CRLF.
@@ -837,13 +872,21 @@ What exists now:
 
 Decisions from this run:
 
+- Lars (delegated via orchestrator), 2026-10-11: an article file the exporter cannot parse is skipped and logged, outside window_count, never fails the export; Phase 5 records this as a refinement of DecisionLog 2026-10-03.
 - User, 2026-10-11: the optional label review was skipped; the plan's labels stand (doc 62 is a
   Vistra member; docs 144/145 are report-only).
 - Settled by the orchestrator, open to challenge: Phase 4 never treats empty clean text as an
   identical-content candidate (see Measurements: all three shared-hash groups in the window are
   extraction failures).
 
-Notes for Phase 2:
+Notes for Phase 3:
+
+- Second benchmark: `output/archive-2026-10-11.md` (129 documents, git-ignored copy); run the
+  example's `--archive` report on it alongside the committed 2026-10-07 fixture.
+- The `host_drain_cost` desktop timing checks are flaky on this machine; rerun before blaming a
+  change, and compare against the previous commit if a failure persists.
+
+Historical setup notes from the Phase 1 handoff:
 
 - Run it with `/implement-with-codex` on Phase 2. Pin the baseline counts above and audit any test
   removal.

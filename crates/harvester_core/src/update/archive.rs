@@ -41,6 +41,35 @@ pub(super) fn handle_archive_clicked(state: &mut AppState) -> Vec<Effect> {
         )
     };
     let signal_candidate_count = signal_candidate_snapshot.selected_urls.len();
+    let (mode, selected, folds) = if signal_candidate_default
+        == crate::signal_candidate::SignalCandidateDialogDefault::OnAllSettled
+    {
+        (
+            "signal",
+            signal_candidate_count,
+            &signal_candidate_snapshot.folds,
+        )
+    } else {
+        (
+            "full",
+            article_count,
+            &state
+                .pinned_full_archive_selection()
+                .expect("full-mode pin")
+                .folds,
+        )
+    };
+    let same_event = folds
+        .values()
+        .flatten()
+        .filter(|member| member.reason == harvester_engine::ArchiveFoldReason::SameEvent)
+        .count();
+    let identical_content = folds
+        .values()
+        .flatten()
+        .filter(|member| member.reason == harvester_engine::ArchiveFoldReason::IdenticalContent)
+        .count();
+    engine_info!("[signal-archive] open request_id={} mode={} selected={} same_event={} identical_content={}", request_id, mode, selected, same_event, identical_content);
     let signal_candidate_scoring_done =
         state.saved_signal_count() + state.signal_candidate().failed_count();
     let signal_candidate_scoring_total = state
@@ -133,8 +162,8 @@ pub(super) fn handle_dialog_submitted(
         return Vec::new();
     }
     let pinned = state.pinned_archive_corpus();
-    let (full_urls, fingerprint) = match pinned {
-        Some(corpus) => (corpus.ordered_urls().to_vec(), corpus.fingerprint()),
+    let (full_count, fingerprint) = match pinned {
+        Some(corpus) => (corpus.count(), corpus.fingerprint()),
         None => {
             // Unreachable in normal operation: ArchiveClicked always precedes
             // ArchiveDialogSubmitted. Guard defensively rather than emit an empty
@@ -146,14 +175,18 @@ pub(super) fn handle_dialog_submitted(
             return Vec::new();
         }
     };
+    let full_selection = state
+        .pinned_full_archive_selection()
+        .cloned()
+        .expect("corpus and full-mode selection are pinned together");
     state.clear_pinned_archive_corpus();
     engine_info!(
         "[working-corpus] source=pinned count={} fingerprint={:#010x} caller=archive-submit request_id={}",
-        full_urls.len(),
+        full_count,
         fingerprint,
         request_id,
     );
-    let ordered_urls = if use_signal_candidates {
+    let (ordered_urls, folds) = if use_signal_candidates {
         match state.pinned_signal_candidate_selection().cloned() {
             Some(snapshot) => {
                 engine_info!(
@@ -164,31 +197,48 @@ pub(super) fn handle_dialog_submitted(
                     snapshot.cache_fingerprint,
                     snapshot.scoring_in_progress
                 );
-                snapshot.selected_urls
+                (snapshot.selected_urls, snapshot.folds)
             }
             None => {
                 engine_warn!(
                     "[signal-archive] use_signal_candidates=true but snapshot was missing; falling back to full corpus"
                 );
-                full_urls
+                (full_selection.ordered_urls, full_selection.folds)
             }
         }
     } else {
         engine_info!(
             "[signal-archive] submit decision=use_full_corpus url_count={}",
-            full_urls.len()
+            full_count
         );
-        full_urls
+        (full_selection.ordered_urls, full_selection.folds)
     };
     state.clear_pinned_signal_candidate_selection();
     let since_utc = state.briefing_since_utc();
     let requested_checkpoint = set_checkpoint.then_some(submitted_at);
+    let mut annotated_urls = ordered_urls.clone();
+    let raw_urls_by_key: std::collections::HashMap<_, _> = ordered_urls
+        .iter()
+        .map(|url| (archive_url_key(url), url.as_str()))
+        .collect();
+    for (kept, members) in &folds {
+        let kept_url = raw_urls_by_key.get(kept).copied().unwrap_or(kept);
+        let kept_key = state
+            .saved_results_for_url(kept_url)
+            .and_then(|entry| entry.signal.as_ref())
+            .map(|result| result.signal_key.as_str())
+            .unwrap_or("-");
+        for member in members {
+            engine_info!("[signal-archive] fold request_id={} reason={} kept_url={} kept_signal_key={} folded_url={} folded_signal_key={}", request_id, member.reason.as_str(), kept, kept_key, member.url, member.signal_key.as_deref().unwrap_or("-"));
+            annotated_urls.push(member.url.clone());
+        }
+    }
     let summaries = if use_summaries {
-        build_summary_map(state, &ordered_urls)
+        build_summary_map(state, &annotated_urls)
     } else {
         std::collections::HashMap::new()
     };
-    let annotations = build_annotation_map(state, &ordered_urls);
+    let annotations = build_annotation_map(state, &annotated_urls);
     let priority_snapshot = build_priority_snapshot(state);
     let mut effects = vec![Effect::ArchiveRequested {
         request_id,
@@ -200,6 +250,7 @@ pub(super) fn handle_dialog_submitted(
         summaries,
         annotations,
         priority_snapshot,
+        folds,
     }];
     let had_signal_candidate_overrides = !state.signal_exclusions().excluded().is_empty();
     if set_checkpoint && had_signal_candidate_overrides {
@@ -357,6 +408,7 @@ fn build_signal_candidate_snapshot(
 
     crate::signal_candidate::SignalCandidateArchiveSelection::new(
         selection.selected_urls,
+        selection.folds,
         state.signal_candidate_threshold(),
         state.signal_exclusions().override_fingerprint(),
         cache_fingerprint,

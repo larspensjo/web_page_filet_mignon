@@ -1,3 +1,7 @@
+use crate::signal_key_merge::{group_signal_keys, SignalKeyGroups};
+use harvester_engine::{
+    archive_url_key, ArchiveFoldReason, ArchiveFoldReport, ArchiveFoldedArticle,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -311,6 +315,7 @@ impl Default for SelectionPolicy {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignalCandidateArchiveSelection {
     pub selected_urls: Vec<String>,
+    pub folds: ArchiveFoldReport,
     pub threshold: u8,
     pub override_fingerprint: String,
     pub cache_fingerprint: String,
@@ -321,6 +326,7 @@ pub struct SignalCandidateArchiveSelection {
 impl SignalCandidateArchiveSelection {
     pub fn new(
         selected_urls: Vec<String>,
+        folds: ArchiveFoldReport,
         threshold: u8,
         override_fingerprint: String,
         cache_fingerprint: String,
@@ -329,6 +335,7 @@ impl SignalCandidateArchiveSelection {
     ) -> Self {
         Self {
             selected_urls,
+            folds,
             threshold,
             override_fingerprint,
             cache_fingerprint,
@@ -338,54 +345,101 @@ impl SignalCandidateArchiveSelection {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+/// Membership for a group of above-threshold articles, including excluded articles.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignalCandidateGroupMembership {
+    pub group_id: String,
+    pub urls: Vec<String>,
+    pub representative: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignalCandidateSelection {
     pub selected_urls: Vec<String>,
-    cluster_sizes: HashMap<String, usize>,
-    selected_signal_key_for: HashMap<String, String>,
+    pub folds: ArchiveFoldReport,
+    key_groups: SignalKeyGroups,
+    groups: HashMap<String, SignalCandidateGroupMembership>,
+    group_for_url: HashMap<String, String>,
+}
+
+impl Default for SignalCandidateSelection {
+    fn default() -> Self {
+        Self::compute(&[], SelectionPolicy::default())
+    }
 }
 
 impl SignalCandidateSelection {
     pub fn compute(input: &[ScoredCandidate], policy: SelectionPolicy) -> Self {
-        let mut clusters: HashMap<String, Vec<&ScoredCandidate>> = HashMap::new();
-        for candidate in input
+        let above_threshold: Vec<_> = input
             .iter()
-            .filter(|c| c.result.signal_score >= policy.threshold)
-        {
-            let cluster_key = canonical_signal_key(&candidate.result.signal_key);
-            clusters.entry(cluster_key).or_default().push(candidate);
-        }
-        let excluded_cluster_keys: HashSet<String> = policy
+            .filter(|candidate| candidate.result.signal_score >= policy.threshold)
+            .collect();
+        let key_groups = group_signal_keys(above_threshold.iter().map(|c| &c.result.signal_key));
+        let excluded_keys: HashSet<_> = policy
             .excluded
             .iter()
-            .filter(|override_key| {
-                override_key.prompt_id == ACTIVE_PROMPT_ID
-                    && override_key.prompt_version == policy.active_prompt_version
+            .filter(|key| {
+                key.prompt_id == ACTIVE_PROMPT_ID
+                    && key.prompt_version == policy.active_prompt_version
             })
-            .map(|override_key| canonical_signal_key(&override_key.signal_key))
+            .map(|key| canonical_signal_key(&key.signal_key))
             .collect();
-
-        let mut reps: Vec<&ScoredCandidate> = Vec::with_capacity(clusters.len());
-        let mut cluster_sizes: HashMap<String, usize> = HashMap::with_capacity(clusters.len());
-        for (key, members) in clusters {
-            cluster_sizes.insert(key, members.len());
-            let rep = members
-                .into_iter()
-                .min_by(|a, b| {
-                    a.result
-                        .source_tier
-                        .cmp(&b.result.source_tier)
-                        .then(b.result.signal_score.cmp(&a.result.signal_score))
-                        .then(a.url.cmp(&b.url))
-                })
-                .expect("at least one member per cluster");
-            reps.push(rep);
+        let mut candidates_by_group: HashMap<String, Vec<&ScoredCandidate>> = HashMap::new();
+        let mut group_for_url = HashMap::new();
+        for candidate in above_threshold {
+            let group_id = key_groups
+                .group_id(&candidate.result.signal_key)
+                .expect("grouped candidate key")
+                .to_string();
+            group_for_url.insert(candidate.url.clone(), group_id.clone());
+            candidates_by_group
+                .entry(group_id)
+                .or_default()
+                .push(candidate);
         }
-
-        reps.retain(|candidate| {
-            !excluded_cluster_keys.contains(&canonical_signal_key(&candidate.result.signal_key))
-        });
-
+        let mut groups = HashMap::new();
+        let mut folds = ArchiveFoldReport::new();
+        let mut reps = Vec::new();
+        for (group_id, mut candidates) in candidates_by_group {
+            candidates.sort_by(|a, b| {
+                a.result
+                    .source_tier
+                    .cmp(&b.result.source_tier)
+                    .then(b.result.signal_score.cmp(&a.result.signal_score))
+                    .then(a.url.cmp(&b.url))
+            });
+            let urls = candidates
+                .iter()
+                .map(|candidate| candidate.url.clone())
+                .collect();
+            candidates.retain(|candidate| {
+                !excluded_keys.contains(&canonical_signal_key(&candidate.result.signal_key))
+            });
+            let representative = candidates.first().map(|candidate| candidate.url.clone());
+            if let Some(rep) = candidates.first() {
+                reps.push(*rep);
+                let members: Vec<_> = candidates
+                    .iter()
+                    .skip(1)
+                    .map(|candidate| ArchiveFoldedArticle {
+                        url: candidate.url.clone(),
+                        signal_key: Some(candidate.result.signal_key.clone()),
+                        reason: ArchiveFoldReason::SameEvent,
+                    })
+                    .collect();
+                if !members.is_empty() {
+                    folds.insert(archive_url_key(&rep.url), members);
+                }
+            }
+            groups.insert(
+                group_id.clone(),
+                SignalCandidateGroupMembership {
+                    group_id,
+                    urls,
+                    representative,
+                },
+            );
+        }
         reps.sort_by(|a, b| {
             b.result
                 .signal_score
@@ -393,42 +447,26 @@ impl SignalCandidateSelection {
                 .then(a.result.source_tier.cmp(&b.result.source_tier))
                 .then(a.url.cmp(&b.url))
         });
-
-        let mut selected_signal_key_for = HashMap::with_capacity(reps.len());
-        let selected_urls = reps
-            .iter()
-            .map(|candidate| {
-                selected_signal_key_for.insert(
-                    candidate.url.clone(),
-                    canonical_signal_key(&candidate.result.signal_key),
-                );
-                candidate.url.clone()
-            })
-            .collect();
-
         Self {
-            selected_urls,
-            cluster_sizes,
-            selected_signal_key_for,
+            selected_urls: reps.iter().map(|candidate| candidate.url.clone()).collect(),
+            folds,
+            key_groups,
+            groups,
+            group_for_url,
         }
     }
 
-    pub fn cluster_size_for(&self, url: &str) -> usize {
-        self.selected_signal_key_for
+    pub fn membership_for_url(&self, url: &str) -> Option<&SignalCandidateGroupMembership> {
+        self.group_for_url
             .get(url)
-            .and_then(|key| self.cluster_sizes.get(key).copied())
-            .unwrap_or(0)
+            .and_then(|group| self.groups.get(group))
     }
 
-    pub fn cluster_size_for_signal_key(&self, signal_key: &str) -> usize {
-        self.cluster_sizes
-            .get(&canonical_signal_key(signal_key))
-            .copied()
-            .unwrap_or(0)
-    }
-
-    pub fn signal_key_for(&self, url: &str) -> Option<&str> {
-        self.selected_signal_key_for.get(url).map(String::as_str)
+    /// Raw keys and canonical aliases share the same above-threshold membership.
+    pub fn membership_for_signal_key(&self, key: &str) -> Option<&SignalCandidateGroupMembership> {
+        self.key_groups
+            .group_id(key)
+            .and_then(|group| self.groups.get(group))
     }
 }
 
@@ -602,7 +640,15 @@ pub enum ArchiveSelectionSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArchiveFinalSelection {
     pub ordered_urls: Vec<String>,
+    pub folds: ArchiveFoldReport,
     pub source: ArchiveSelectionSource,
+}
+
+/// Full-mode export membership pinned independently of signal availability.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FullArchiveSelection {
+    pub ordered_urls: Vec<String>,
+    pub folds: ArchiveFoldReport,
 }
 
 pub fn compute_dialog_default(
@@ -877,7 +923,10 @@ mod tests {
 
         assert_eq!(sel.selected_urls, vec!["c"]);
         assert_eq!(
-            sel.cluster_size_for_signal_key("anthropic-export-controls-mythos-fable"),
+            sel.membership_for_signal_key("anthropic-export-controls-mythos-fable")
+                .unwrap()
+                .urls
+                .len(),
             4
         );
     }
@@ -999,8 +1048,105 @@ mod tests {
             cand("d", 60, "solo", SourceTier::Tier1),
         ];
         let sel = SignalCandidateSelection::compute(&input, policy(60, Default::default()));
-        assert_eq!(sel.cluster_size_for("a"), 3);
-        assert_eq!(sel.cluster_size_for("d"), 1);
+        assert_eq!(sel.membership_for_url("a").unwrap().urls.len(), 3);
+        assert_eq!(sel.membership_for_url("d").unwrap().urls.len(), 1);
+        assert_eq!(
+            sel.membership_for_url("b")
+                .unwrap()
+                .representative
+                .as_deref(),
+            Some("a")
+        );
+        assert_eq!(
+            sel.membership_for_signal_key("shared"),
+            sel.membership_for_url("c")
+        );
+        assert_eq!(sel.membership_for_url("a").unwrap().group_id, "shared");
+        assert!(sel.membership_for_signal_key("unknown").is_none());
+        assert!(sel.membership_for_url("unknown").is_none());
+    }
+
+    #[test]
+    fn fold_membership_keeps_raw_keys_in_election_order_under_input_permutation() {
+        let input = vec![
+            cand(
+                "z",
+                90,
+                "anthropic-model-access-suspension-foreign-national-order",
+                SourceTier::Tier2,
+            ),
+            cand(
+                "b",
+                80,
+                "anthropic-disables-fable-mythos-export-controls",
+                SourceTier::Tier1,
+            ),
+            cand(
+                "a",
+                80,
+                "anthropic-disables-fable-mythos-export-controls",
+                SourceTier::Tier1,
+            ),
+            cand(
+                "c",
+                70,
+                "anthropic-disable-advanced-models-foreign-access",
+                SourceTier::Tier1,
+            ),
+            cand("below", 30, "another-key", SourceTier::Tier1),
+        ];
+        let expected = SignalCandidateSelection::compute(&input, policy(60, Default::default()));
+        assert_eq!(expected.selected_urls, vec!["a"]);
+        let members = &expected.folds[&archive_url_key("a")];
+        assert_eq!(
+            members
+                .iter()
+                .map(|member| member.url.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b", "c", "z"]
+        );
+        assert_eq!(
+            members[1].signal_key.as_deref(),
+            Some("anthropic-disable-advanced-models-foreign-access")
+        );
+        assert!(members
+            .iter()
+            .all(|member| member.reason == ArchiveFoldReason::SameEvent));
+        assert!(expected.membership_for_url("below").is_none());
+        for shift in 0..input.len() {
+            let mut permuted = input.clone();
+            permuted.rotate_left(shift);
+            assert_eq!(
+                expected,
+                SignalCandidateSelection::compute(&permuted, policy(60, Default::default()))
+            );
+            permuted.reverse();
+            assert_eq!(
+                expected,
+                SignalCandidateSelection::compute(&permuted, policy(60, Default::default()))
+            );
+        }
+    }
+
+    #[test]
+    fn excluded_exact_key_group_has_membership_but_no_representative_or_folds() {
+        let input = vec![
+            cand("a", 90, "shared", SourceTier::Tier1),
+            cand("b", 80, "shared", SourceTier::Tier2),
+        ];
+        let excluded = [OverrideKey {
+            signal_key: "shared".into(),
+            prompt_id: ACTIVE_PROMPT_ID.into(),
+            prompt_version: 1,
+        }]
+        .into_iter()
+        .collect();
+        let selection = SignalCandidateSelection::compute(&input, policy(60, excluded));
+        assert!(selection.selected_urls.is_empty());
+        assert!(selection.folds.is_empty());
+        let membership = selection.membership_for_signal_key("shared").unwrap();
+        assert_eq!(membership.urls, vec!["a", "b"]);
+        assert_eq!(membership.representative, None);
     }
 
     #[test]

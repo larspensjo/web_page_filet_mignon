@@ -54,10 +54,10 @@ pub use run_progress::{
     StageStatus, ACTIVITY_FEED_CAPACITY,
 };
 pub use signal_candidate::{
-    compute_dialog_default, ArchiveFinalSelection, ArchiveSelectionSource, OverrideKey,
-    ScoredCandidate, SelectionPolicy, SignalCandidateArchiveSelection,
-    SignalCandidateDialogDefault, SignalCandidateSelection, SignalCandidateSession,
-    SignalCandidateState,
+    compute_dialog_default, ArchiveFinalSelection, ArchiveSelectionSource, FullArchiveSelection,
+    OverrideKey, ScoredCandidate, SelectionPolicy, SignalCandidateArchiveSelection,
+    SignalCandidateDialogDefault, SignalCandidateGroupMembership, SignalCandidateSelection,
+    SignalCandidateSession, SignalCandidateState,
 };
 pub use signal_candidate_cache::{
     SignalCandidateCache, SignalCandidateCacheEntry, SignalCandidateCacheKey,

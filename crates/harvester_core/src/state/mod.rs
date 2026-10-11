@@ -297,6 +297,7 @@ pub struct AppState {
     archive_request_id: u64,
     next_briefing_checkpoint_save_id: u64,
     pinned_archive_corpus: Option<crate::working_corpus::CurrentWorkingCorpus>,
+    pinned_full_archive_selection: Option<crate::signal_candidate::FullArchiveSelection>,
     pinned_signal_candidate_selection:
         Option<crate::signal_candidate::SignalCandidateArchiveSelection>,
     llm_requests: LlmResultIndex,
@@ -416,6 +417,7 @@ impl Default for AppState {
             archive_request_id: 0,
             next_briefing_checkpoint_save_id: 1,
             pinned_archive_corpus: None,
+            pinned_full_archive_selection: None,
             pinned_signal_candidate_selection: None,
             llm_requests: LlmResultIndex::new(),
             briefing: BriefingSession::default(),

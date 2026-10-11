@@ -87,6 +87,7 @@ pub enum Effect {
         summaries: HashMap<String, String>,
         annotations: HashMap<String, ArchiveDocAnnotations>,
         priority_snapshot: HashMap<String, u8>,
+        folds: harvester_engine::ArchiveFoldReport,
     },
     OpenArchiveDialog {
         request_id: u64,

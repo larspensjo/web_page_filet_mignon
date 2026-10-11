@@ -208,9 +208,8 @@ fn scan_article_path(
 
 /// Read-only archive-window metadata, including harvested `linked/` pages.
 /// Uses the exporter's artifact exclusions and filename precedence, and filters before
-/// canonical-URL deduplication. Malformed fetch dates are included by both readers;
-/// missing dates are included here, but the exporter rejects such a corpus (as it
-/// does articles with missing titles).
+/// canonical-URL deduplication. Both readers skip and log unparseable articles;
+/// present but malformed fetch dates remain included.
 /// Valid dates are bounded inclusively; no corpus lock or output writes are used.
 pub fn scan_archive_window_metadata(
     output_dir: &Path,
@@ -225,31 +224,31 @@ pub fn scan_archive_window_metadata(
     let config = build_content_prep_config();
     let mut seen = HashSet::new();
     let mut articles = Vec::new();
-    for (index, path) in paths.into_iter().enumerate() {
-        let outcome = scan_article_path(index, path.clone(), Some(since_utc), &config)?;
-        if outcome.missing_fetched_utc || outcome.malformed_fetched_utc {
-            engine_warn!(
-                "[archive-window] {}: missing or malformed fetched_utc — included",
-                path.display()
-            );
-        }
-        let Some(package) = outcome.package else {
+    for path in paths {
+        let Some((markdown, doc)) = crate::export::read_archive_window_doc(output_dir, &path)
+            .map_err(|err| format!("{}: {err}", path.display()))?
+        else {
             continue;
         };
-        if package
-            .fetched_utc
-            .as_deref()
-            .and_then(|raw| chrono::DateTime::parse_from_rfc3339(raw).ok())
-            .is_some_and(|date| date.with_timezone(&chrono::Utc) > until_utc)
-        {
-            continue;
+        match chrono::DateTime::parse_from_rfc3339(&doc.fetched_utc) {
+            Ok(date) => {
+                let date = date.with_timezone(&chrono::Utc);
+                if date < since_utc || date > until_utc {
+                    continue;
+                }
+            }
+            Err(_) => engine_warn!(
+                "[archive-window] {}: malformed fetched_utc — included",
+                path.display()
+            ),
         }
-        if seen.insert(crate::archive_url_key(&package.url)) {
+        if seen.insert(crate::archive_url_key(&doc.url)) {
+            let clean_text = derive_clean_text(&markdown, &doc.url, Some(&doc.title), &config);
             articles.push(WindowArticle {
-                url: package.url,
-                source_title: package.source_title,
-                fetched_utc: package.fetched_utc,
-                content_hash: package.clean_text.content_hash().to_string(),
+                url: doc.url,
+                source_title: Some(doc.title),
+                fetched_utc: Some(doc.fetched_utc),
+                content_hash: clean_text.content_hash().to_string(),
             });
         }
     }

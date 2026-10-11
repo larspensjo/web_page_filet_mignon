@@ -891,6 +891,16 @@ fn archive_requested_writes_archive_markdown_for_selected_urls() {
         summaries: HashMap::new(),
         annotations: HashMap::new(),
         priority_snapshot: HashMap::new(),
+        folds: [(
+            harvester_engine::archive_url_key("https://example.com/b"),
+            vec![harvester_engine::ArchiveFoldedArticle {
+                url: "https://example.com/a".into(),
+                reason: harvester_engine::ArchiveFoldReason::SameEvent,
+                signal_key: None,
+            }],
+        )]
+        .into_iter()
+        .collect(),
     }]);
 
     let msg = rx
@@ -918,6 +928,9 @@ fn archive_requested_writes_archive_markdown_for_selected_urls() {
     assert!(archive.starts_with("===== DOC START ====="));
     assert!(archive.contains("https://example.com/b"));
     assert!(archive.contains("B body"));
-    assert!(!archive.contains("https://example.com/a"));
+    assert!(archive.contains(
+        r#"folded: [{"reason":"same_event","url":"https://example.com/a","title":"A"}]"#
+    ));
+    assert_eq!(archive.matches("===== DOC START =====").count(), 1);
     assert!(!archive.contains("A body"));
 }

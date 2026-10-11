@@ -3,7 +3,346 @@ use harvester_engine::{
     ArchiveDocAnnotations, Converter, Extractor, Html2MdConverter, ReadabilityLikeExtractor,
     TokenCounter, WhitespaceTokenCounter, MAX_FALLBACK_BODY_CHARS,
 };
+use harvester_engine::{ArchiveFoldReason, ArchiveFoldReport, ArchiveFoldedArticle};
 use pretty_assertions::assert_eq;
+
+fn fold_member(url: &str, reason: ArchiveFoldReason, key: Option<&str>) -> ArchiveFoldedArticle {
+    ArchiveFoldedArticle {
+        url: url.into(),
+        reason,
+        signal_key: key.map(str::to_string),
+    }
+}
+
+fn folded_fixture_export(bounded: bool) -> (harvester_engine::ExportSummary, Vec<u8>) {
+    use ArchiveFoldReason::{IdenticalContent, SameEvent};
+    let temp = tempfile::TempDir::new().unwrap();
+    for (name, title) in [
+        ("a", "Kept event"),
+        ("b", "Same slug"),
+        ("c", "Other slug"),
+        ("d", "Kept copy"),
+        ("e", "Same text elsewhere"),
+        ("f", "Solo"),
+    ] {
+        write_article(
+            temp.path(),
+            &format!("{name}.md"),
+            &format!("https://example.com/{name}"),
+            title,
+            "2026-10-01T00:00:00Z",
+            &format!("Body {name}."),
+        );
+    }
+    let folds = [
+        (
+            archive_url_key("https://example.com/a"),
+            vec![
+                fold_member("https://example.com/c", SameEvent, Some("other-slug")),
+                fold_member("https://example.com/b", SameEvent, Some("event")),
+                fold_member("https://example.com/missing", SameEvent, None),
+            ],
+        ),
+        (
+            archive_url_key("https://example.com/d"),
+            vec![fold_member("https://example.com/e", IdenticalContent, None)],
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let annotations = [(
+        archive_url_key("https://example.com/a"),
+        ArchiveDocAnnotations {
+            signal_key: Some("event".into()),
+            signal_score: Some(80),
+            themes: Some(vec!["AI".into()]),
+            ..Default::default()
+        },
+    )]
+    .into_iter()
+    .collect();
+    let priorities = [
+        (archive_url_key("https://example.com/b"), 5),
+        (archive_url_key("https://example.com/c"), 4),
+    ]
+    .into_iter()
+    .collect();
+    let since = bounded.then(|| {
+        chrono::DateTime::parse_from_rfc3339("2026-09-30T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+    });
+    let summary = build_triage_archive(
+        temp.path(),
+        "archive.md",
+        &[
+            "https://example.com/a".into(),
+            "https://example.com/d".into(),
+            "https://example.com/f".into(),
+        ],
+        since,
+        false,
+        &Default::default(),
+        &annotations,
+        &priorities,
+        Some(&folds),
+    )
+    .unwrap();
+    let bytes = std::fs::read(&summary.output_path).unwrap();
+    (summary, bytes)
+}
+
+fn assert_fold_coverage(summary: &harvester_engine::ExportSummary, expected: [usize; 2]) {
+    let remainder: usize = summary.unexported_by_priority.unwrap().iter().sum();
+    assert_eq!(summary.window_count.unwrap(), summary.doc_count + remainder);
+    assert_eq!(summary.unexported_folded, Some(expected));
+    assert!(expected.iter().sum::<usize>() <= remainder);
+}
+
+#[test]
+fn triage_archive_folded_since_matches_shared_golden_fixture() {
+    let (summary, bytes) = folded_fixture_export(true);
+    assert_eq!(
+        bytes,
+        include_bytes!("fixtures/archive_export/schema2_folded_since.md")
+    );
+    assert!(!bytes.contains(&b'\r'));
+    assert_fold_coverage(&summary, [2, 1]);
+    assert_eq!(summary.doc_count, 3);
+}
+
+#[test]
+fn triage_archive_folded_raw_matches_shared_golden_fixture() {
+    let (summary, bytes) = folded_fixture_export(false);
+    assert_eq!(
+        bytes,
+        include_bytes!("fixtures/archive_export/schema2_folded_raw.md")
+    );
+    assert!(!bytes.contains(&b'\r'));
+    assert_eq!(summary.unexported_folded, None);
+    assert!(!String::from_utf8(bytes)
+        .unwrap()
+        .contains("unexported_folded:"));
+}
+
+#[test]
+fn triage_archive_promotes_first_surviving_member_with_own_annotations_and_summary() {
+    use ArchiveFoldReason::{IdenticalContent, SameEvent};
+    let temp = tempfile::TempDir::new().unwrap();
+    for name in ["before", "second", "third", "after"] {
+        write_article(
+            temp.path(),
+            &format!("{name}.md"),
+            &format!("https://example.com/{name}"),
+            name,
+            "2026-10-01T00:00:00Z",
+            name,
+        );
+    }
+    let folds = [(
+        archive_url_key("https://example.com/lost"),
+        vec![
+            fold_member("https://example.com/first", SameEvent, Some("first-own")),
+            fold_member("https://example.com/second", SameEvent, Some("second-own")),
+            fold_member("https://example.com/third", IdenticalContent, None),
+        ],
+    )]
+    .into_iter()
+    .collect();
+    let annotations = [(
+        archive_url_key("https://example.com/second"),
+        ArchiveDocAnnotations {
+            priority: Some(4),
+            signal_key: Some("second-own".into()),
+            signal_score: Some(79),
+            themes: Some(vec![]),
+            ..Default::default()
+        },
+    )]
+    .into_iter()
+    .collect();
+    let summaries = [(
+        archive_url_key("https://example.com/second"),
+        "Promoted summary".into(),
+    )]
+    .into_iter()
+    .collect();
+    let since = Some(
+        chrono::DateTime::parse_from_rfc3339("2026-09-30T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc),
+    );
+    let summary = build_triage_archive(
+        temp.path(),
+        "archive.md",
+        &[
+            "https://example.com/before".into(),
+            "https://example.com/lost".into(),
+            "https://example.com/after".into(),
+        ],
+        since,
+        true,
+        &summaries,
+        &annotations,
+        &Default::default(),
+        Some(&folds),
+    )
+    .unwrap();
+    let archive = std::fs::read_to_string(&summary.output_path).unwrap();
+    assert_eq!(summary.doc_count, 3);
+    assert_fold_coverage(&summary, [0, 1]);
+    assert!(!archive.contains("https://example.com/lost"));
+    assert!(
+        archive.find("url: https://example.com/before").unwrap()
+            < archive.find("url: https://example.com/second").unwrap()
+    );
+    assert!(
+        archive.find("url: https://example.com/second").unwrap()
+            < archive.find("url: https://example.com/after").unwrap()
+    );
+    let promoted = archive
+        .split("url: https://example.com/second\n")
+        .nth(1)
+        .unwrap()
+        .split("===== DOC END =====")
+        .next()
+        .unwrap();
+    assert!(promoted.contains("content: summary\n"));
+    assert!(promoted
+        .contains("doc: 2\npriority: 4\nsignal_key: second-own\nsignal_score: 79\nthemes: []\n"));
+    assert!(promoted.contains("Promoted summary"));
+    assert!(promoted.contains(r#"folded: [{"reason":"identical_content","url":"https://example.com/third","title":"third"},{"reason":"same_event","url":"https://example.com/first","signal_key":"first-own"}]"#));
+}
+
+#[test]
+fn triage_archive_missing_group_with_no_survivors_writes_and_counts_nothing() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let folds: ArchiveFoldReport = [(
+        archive_url_key("https://example.com/lost"),
+        ["first", "second", "third"]
+            .map(|name| {
+                fold_member(
+                    &format!("https://example.com/{name}"),
+                    ArchiveFoldReason::SameEvent,
+                    None,
+                )
+            })
+            .to_vec(),
+    )]
+    .into_iter()
+    .collect();
+    let since = Some(
+        chrono::DateTime::parse_from_rfc3339("2026-09-30T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc),
+    );
+    let summary = build_triage_archive(
+        temp.path(),
+        "archive.md",
+        &["https://example.com/lost".into()],
+        since,
+        false,
+        &Default::default(),
+        &Default::default(),
+        &Default::default(),
+        Some(&folds),
+    )
+    .unwrap();
+    assert_eq!(summary.doc_count, 0);
+    assert_fold_coverage(&summary, [0, 0]);
+    let archive = std::fs::read_to_string(summary.output_path).unwrap();
+    assert!(!archive.contains("===== DOC START ====="));
+    assert!(!archive.contains("https://example.com/"));
+    assert!(archive.contains("unexported_folded: {\"same_event\":0,\"identical_content\":0}\n"));
+}
+
+#[test]
+fn triage_archive_promotes_when_representative_frontmatter_is_unreadable() {
+    let temp = tempfile::TempDir::new().unwrap();
+    std::fs::write(temp.path().join("lost.md"), "frontmatter removed").unwrap();
+    write_article(
+        temp.path(),
+        "member.md",
+        "https://example.com/member",
+        "Member",
+        "2026-10-01T00:00:00Z",
+        "Member body",
+    );
+    let folds = [(
+        archive_url_key("https://example.com/lost"),
+        vec![fold_member(
+            "https://example.com/member",
+            ArchiveFoldReason::SameEvent,
+            Some("own-slug"),
+        )],
+    )]
+    .into_iter()
+    .collect();
+    let summary = build_triage_archive(
+        temp.path(),
+        "archive.md",
+        &["https://example.com/lost".into()],
+        None,
+        false,
+        &Default::default(),
+        &Default::default(),
+        &Default::default(),
+        Some(&folds),
+    )
+    .unwrap();
+    assert_eq!(summary.doc_count, 1);
+    let archive = std::fs::read_to_string(summary.output_path).unwrap();
+    assert!(archive.contains("url: https://example.com/member\n"));
+    assert!(archive.contains("folded: []\n"));
+    assert!(!archive.contains("https://example.com/lost"));
+}
+
+#[test]
+fn triage_archive_folded_titles_use_scalar_sanitizing_before_json_encoding() {
+    let temp = tempfile::TempDir::new().unwrap();
+    write_article(
+        temp.path(),
+        "kept.md",
+        "https://example.com/kept",
+        "Kept",
+        "2026-10-01T00:00:00Z",
+        "body",
+    );
+    // CR/LF ends a frontmatter value; Unicode separators remain in the parsed title.
+    std::fs::write(temp.path().join("folded.md"), "---\nurl: \"https://example.com/folded\"\ntitle: =====startcomma, quote\"\u{0085}nel\u{2028}ls\u{2029}ps\r\nignored continuation\nfetched_utc: \"2026-10-01T00:00:00Z\"\n---\n\nbody\n").unwrap();
+    let folds = [(
+        archive_url_key("https://example.com/kept"),
+        vec![fold_member(
+            "https://example.com/folded",
+            ArchiveFoldReason::SameEvent,
+            None,
+        )],
+    )]
+    .into_iter()
+    .collect();
+    let summary = build_triage_archive(
+        temp.path(),
+        "archive.md",
+        &["https://example.com/kept".into()],
+        None,
+        false,
+        &Default::default(),
+        &Default::default(),
+        &Default::default(),
+        Some(&folds),
+    )
+    .unwrap();
+    let archive = std::fs::read_to_string(summary.output_path).unwrap();
+    let line = archive
+        .lines()
+        .find(|line| line.starts_with("folded:"))
+        .unwrap();
+    let entries: serde_json::Value =
+        serde_json::from_str(line.strip_prefix("folded: ").unwrap()).unwrap();
+    assert_eq!(entries[0]["title"], " =====startcomma, quote\"nellsps");
+    assert!(!line.contains(['\r', '\n', '\u{0085}', '\u{2028}', '\u{2029}']));
+    assert!(entries[0].get("signal_key").is_none());
+}
 
 struct CountingTokens;
 impl TokenCounter for CountingTokens {
@@ -78,6 +417,7 @@ fn triage_archive_writes_and_refreshes_corpus_manifest() {
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
+            None,
         )
         .unwrap();
         let manifest: serde_json::Value =
@@ -112,6 +452,7 @@ fn triage_archive_uses_ordered_urls_and_preserves_full_markdown() {
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
+        None,
     )
     .unwrap();
     assert_eq!(
@@ -156,6 +497,7 @@ fn triage_archive_since_filter_excludes_old_docs_but_keeps_malformed_timestamps(
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
+        None,
     )
     .unwrap();
     assert_eq!(
@@ -196,6 +538,7 @@ fn triage_archive_ignores_existing_archive_md_artifact() {
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
+        None,
     )
     .unwrap();
     assert_eq!(
@@ -233,6 +576,7 @@ fn triage_archive_uses_summary_body_when_provided() {
         &summaries,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
+        None,
     )
     .unwrap();
 
@@ -264,6 +608,7 @@ fn triage_archive_falls_back_to_full_body_when_no_summary() {
         &summaries,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
+        None,
     )
     .unwrap();
 
@@ -289,6 +634,7 @@ fn triage_archive_summary_mode_with_empty_map_uses_fallback_format() {
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
+        None,
     )
     .unwrap();
 
@@ -320,6 +666,7 @@ fn triage_archive_truncates_large_fallback_body_safely() {
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
+        None,
     )
     .unwrap();
 
@@ -431,6 +778,7 @@ fn export_mixed_fixture(
         summaries,
         &mixed_annotations(),
         &std::collections::HashMap::new(),
+        None,
     )
     .unwrap();
     let actual = std::fs::read(temp.path().join("archive.md")).unwrap();
@@ -499,6 +847,7 @@ fn triage_archive_schema2_since_matches_shared_golden_fixture() {
         &Default::default(),
         &mixed_annotations(),
         &priority_snapshot,
+        None,
     )
     .unwrap();
     assert_eq!(
@@ -607,6 +956,7 @@ fn triage_archive_since_coverage_counts_window_remainders_and_zero_export() {
         &Default::default(),
         &Default::default(),
         &priority_snapshot,
+        None,
     )
     .unwrap();
     let archive = std::fs::read_to_string(dir.join("coverage.md")).unwrap();
@@ -630,6 +980,7 @@ fn triage_archive_since_coverage_counts_window_remainders_and_zero_export() {
         &Default::default(),
         &Default::default(),
         &priority_snapshot,
+        None,
     )
     .unwrap();
     let zero = std::fs::read_to_string(dir.join("zero.md")).unwrap();
@@ -755,6 +1106,7 @@ fn triage_archive_boundary_forgery_matches_shared_multi_document_fixture() {
         &summaries,
         &Default::default(),
         &Default::default(),
+        None,
     )
     .unwrap();
     let actual = std::fs::read(temp.path().join("forgery.md")).unwrap();
@@ -793,6 +1145,7 @@ fn triage_archive_sanitizes_header_injection_and_json_escapes_tags() {
         &Default::default(),
         &annotations,
         &Default::default(),
+        None,
     )
     .unwrap();
     let archive = std::fs::read_to_string(temp.path().join("archive.md")).unwrap();
@@ -826,6 +1179,7 @@ fn triage_archive_sanitizes_header_injection_and_json_escapes_tags() {
         &Default::default(),
         &Default::default(),
         &Default::default(),
+        None,
     )
     .unwrap();
     let archive = std::fs::read_to_string(next.path().join("archive.md")).unwrap();
@@ -872,6 +1226,7 @@ fn triage_archive_index_offsets_follow_escaped_lines_and_skip_bad_timestamp_boun
         &Default::default(),
         &Default::default(),
         &Default::default(),
+        None,
     )
     .unwrap();
     let archive = std::fs::read_to_string(temp.path().join("archive.md")).unwrap();
@@ -910,6 +1265,7 @@ fn triage_archive_unparseable_only_timestamp_has_dash_bounds() {
         &Default::default(),
         &Default::default(),
         &Default::default(),
+        None,
     )
     .unwrap();
     let archive = std::fs::read_to_string(temp.path().join("archive.md")).unwrap();
@@ -929,6 +1285,7 @@ fn triage_archive_zero_documents_matches_fixture_and_is_excluded_from_next_expor
         &Default::default(),
         &Default::default(),
         &Default::default(),
+        None,
     )
     .unwrap();
     assert_eq!(
@@ -953,6 +1310,7 @@ fn triage_archive_zero_documents_matches_fixture_and_is_excluded_from_next_expor
         &Default::default(),
         &Default::default(),
         &Default::default(),
+        None,
     )
     .unwrap();
     assert_eq!(next.doc_count, 1);

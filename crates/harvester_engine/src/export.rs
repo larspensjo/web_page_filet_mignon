@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -37,6 +37,44 @@ pub struct ArchiveDocAnnotations {
     pub themes: Option<Vec<String>>,
 }
 
+/// Why an article is represented by another document in the archive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArchiveFoldReason {
+    IdenticalContent,
+    SameEvent,
+}
+
+impl ArchiveFoldReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SameEvent => "same_event",
+            Self::IdenticalContent => "identical_content",
+        }
+    }
+}
+
+/// Members are supplied in representative election order, not header display order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArchiveFoldedArticle {
+    pub url: String,
+    pub reason: ArchiveFoldReason,
+    pub signal_key: Option<String>,
+}
+
+/// Canonical representative URL keys mapped to their folded articles.
+pub type ArchiveFoldReport = BTreeMap<String, Vec<ArchiveFoldedArticle>>;
+
+#[derive(serde::Serialize)]
+struct FoldedHeader<'a> {
+    reason: ArchiveFoldReason,
+    url: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signal_key: Option<&'a str>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportSummary {
     pub doc_count: usize,
@@ -44,6 +82,8 @@ pub struct ExportSummary {
     pub output_path: PathBuf,
     pub window_count: Option<usize>,
     pub unexported_by_priority: Option<[usize; 6]>,
+    /// Bounded withheld URL counts in same_event, identical_content order.
+    pub unexported_folded: Option<[usize; 2]>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -57,10 +97,10 @@ pub enum ExportError {
 }
 
 #[derive(Debug, Default)]
-struct DocMeta {
-    url: String,
-    title: String,
-    fetched_utc: String,
+pub(crate) struct DocMeta {
+    pub(crate) url: String,
+    pub(crate) title: String,
+    pub(crate) fetched_utc: String,
     token_count: Option<u32>,
     body: String,
     filename: String,
@@ -76,6 +116,7 @@ pub fn build_triage_archive(
     summaries: &HashMap<String, String>,
     annotations: &HashMap<String, ArchiveDocAnnotations>,
     priority_snapshot: &HashMap<String, u8>,
+    folds: Option<&ArchiveFoldReport>,
 ) -> Result<ExportSummary, ExportError> {
     ensure_output_dir(output_dir)?;
     write_corpus_manifest(output_dir)?;
@@ -83,13 +124,9 @@ pub fn build_triage_archive(
 
     let mut docs_by_url: HashMap<String, DocMeta> = HashMap::new();
     for path in entries {
-        let relative = path
-            .strip_prefix(output_dir)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .to_string();
-        let content = fs::read_to_string(&path)?;
-        let meta = parse_doc(&content, &relative)?;
+        let Some((_, meta)) = read_archive_window_doc(output_dir, &path)? else {
+            continue;
+        };
         if !passes_since_filter(&meta, since_utc) {
             continue;
         }
@@ -98,15 +135,78 @@ pub fn build_triage_archive(
     }
 
     let window_count = docs_by_url.len();
+    let window_titles: HashMap<_, _> = docs_by_url
+        .iter()
+        .map(|(url, doc)| (url.clone(), doc.title.clone()))
+        .collect();
     let mut docs = Vec::new();
+    let mut document_folds = Vec::new();
     let mut selected = HashSet::new();
+    let mut requested = HashSet::new();
     for url in ordered_urls {
         let normalized = archive_url_key(url);
-        if !selected.insert(normalized.clone()) {
+        if !requested.insert(normalized.clone()) || selected.contains(&normalized) {
             continue;
         }
-        if let Some(meta) = docs_by_url.remove(&normalized) {
-            docs.push(meta);
+        let members = folds.and_then(|report| report.get(&normalized));
+        for member in members.into_iter().flatten() {
+            if !window_titles.contains_key(&archive_url_key(&member.url)) {
+                engine_warn!(
+                    "[archive-export] folded article missing from window kept_url={} folded_url={}",
+                    normalized,
+                    member.url
+                );
+            }
+        }
+        let surviving_url = if docs_by_url.contains_key(&normalized) {
+            Some(normalized.clone())
+        } else {
+            let promoted = members.and_then(|members| {
+                members
+                    .iter()
+                    .map(|member| archive_url_key(&member.url))
+                    .find(|key| docs_by_url.contains_key(key) && !selected.contains(key))
+            });
+            if let Some(promoted) = &promoted {
+                engine_warn!(
+                    "[archive-export] promoting folded article lost_url={} promoted_url={}",
+                    normalized,
+                    promoted
+                );
+            } else if folds.is_some() {
+                engine_warn!(
+                    "[archive-export] no surviving article for selected url={}",
+                    normalized
+                );
+            }
+            promoted
+        };
+        if let Some(key) = surviving_url {
+            selected.insert(key.clone());
+            docs.push(
+                docs_by_url
+                    .remove(&key)
+                    .expect("surviving document is in window"),
+            );
+            document_folds.push(
+                members
+                    .into_iter()
+                    .flatten()
+                    .filter(|member| archive_url_key(&member.url) != key)
+                    .collect::<Vec<_>>(),
+            );
+        }
+    }
+    // Count only listed URLs still withheld after every selected document is removed.
+    let mut counted_folded = HashSet::new();
+    let mut unexported_folded = [0; 2];
+    for member in document_folds.iter().flatten() {
+        let key = archive_url_key(&member.url);
+        if docs_by_url.contains_key(&key) && counted_folded.insert(key) {
+            unexported_folded[match member.reason {
+                ArchiveFoldReason::SameEvent => 0,
+                ArchiveFoldReason::IdenticalContent => 1,
+            }] += 1;
         }
     }
     let unexported_by_priority = if since_utc.is_some() {
@@ -145,6 +245,10 @@ pub fn build_triage_archive(
             (content_label, truncated.to_string())
         };
         write_archive_header(&mut buffer, doc, position + 1, content_label, annotation);
+        if folds.is_some() {
+            write_folded_header(&mut buffer, &document_folds[position], &window_titles);
+        }
+        buffer.push('\n');
         buffer.push_str(&escape_archive_body(&body));
         buffer.push('\n');
         buffer.push_str(DOC_END_MARKER);
@@ -165,6 +269,7 @@ pub fn build_triage_archive(
         since_utc.is_some(),
         window_count,
         unexported_by_priority,
+        folds.map(|_| unexported_folded),
     );
 
     let output_path = write_export_file(output_dir, basename, &buffer)?;
@@ -175,6 +280,7 @@ pub fn build_triage_archive(
         output_path,
         window_count: since_utc.is_some().then_some(window_count),
         unexported_by_priority: since_utc.is_some().then_some(unexported_by_priority),
+        unexported_folded: (since_utc.is_some() && folds.is_some()).then_some(unexported_folded),
     })
 }
 
@@ -267,6 +373,29 @@ fn passes_since_filter(meta: &DocMeta, since_utc: Option<DateTime<Utc>>) -> bool
     }
 }
 
+/// Shared archive population: unreadable article metadata is logged and excluded.
+pub(crate) fn read_archive_window_doc(
+    output_dir: &Path,
+    path: &Path,
+) -> Result<Option<(String, DocMeta)>, ExportError> {
+    let relative = path
+        .strip_prefix(output_dir)
+        .unwrap_or(path)
+        .to_string_lossy();
+    let content = fs::read_to_string(path)?;
+    match parse_doc(&content, &relative) {
+        Ok(meta) => Ok(Some((content, meta))),
+        Err(error) => {
+            engine_warn!(
+                "[archive-window] skipping article path={} reason={}",
+                path.display(),
+                error
+            );
+            Ok(None)
+        }
+    }
+}
+
 fn parse_doc(content: &str, filename: &str) -> Result<DocMeta, ExportError> {
     let fields = parse_frontmatter(content)
         .ok_or_else(|| ExportError::MissingFrontmatter(filename.to_string()))?;
@@ -323,7 +452,31 @@ fn write_archive_header(
             let _ = writeln!(buffer, "themes: {}", json_list(themes));
         }
     }
-    buffer.push('\n');
+}
+
+fn write_folded_header(
+    buffer: &mut String,
+    members: &[&ArchiveFoldedArticle],
+    titles: &HashMap<String, String>,
+) {
+    use std::fmt::Write;
+    let mut entries: Vec<_> = members
+        .iter()
+        .map(|member| {
+            let title = titles
+                .get(&archive_url_key(&member.url))
+                .map(|title| sanitize_scalar(title));
+            FoldedHeader {
+                reason: member.reason,
+                url: &member.url,
+                title,
+                signal_key: member.signal_key.as_deref(),
+            }
+        })
+        .collect();
+    entries.sort_by(|a, b| a.reason.cmp(&b.reason).then(a.url.cmp(b.url)));
+    let json = serde_json::to_string(&entries).expect("folded header strings serialize as JSON");
+    let _ = writeln!(buffer, "folded: {json}");
 }
 
 fn json_list(values: &[String]) -> String {
@@ -356,6 +509,7 @@ fn escape_archive_body(body: &str) -> String {
         .join("\n")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_archive_index(
     buffer: &mut String,
     rows: &[(usize, usize, &DocMeta, Option<&ArchiveDocAnnotations>)],
@@ -363,6 +517,7 @@ fn write_archive_index(
     include_coverage: bool,
     window_count: usize,
     unexported_by_priority: [usize; 6],
+    unexported_folded: Option<[usize; 2]>,
 ) {
     use std::fmt::Write;
     let fetched_from = parsed_fetched
@@ -388,6 +543,9 @@ fn write_archive_index(
             buffer,
             "unexported_by_priority: {{\"5\":{priority_5},\"4\":{priority_4},\"3\":{priority_3},\"2\":{priority_2},\"1\":{priority_1},\"unavailable\":{unavailable}}}"
         );
+        if let Some([same_event, identical_content]) = unexported_folded {
+            let _ = writeln!(buffer, "unexported_folded: {{\"same_event\":{same_event},\"identical_content\":{identical_content}}}");
+        }
     }
     buffer.push_str("doc | line | fetched_utc | priority | signal_key | title\n");
     for (doc, line, meta, annotation) in rows {
@@ -434,4 +592,31 @@ fn unexported_priority_counts(
         }
     }
     counts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn folded_title_sanitizes_every_scalar_separator_before_json_encoding() {
+        // LF cannot reach a parsed title through the line-based frontmatter reader.
+        let member = ArchiveFoldedArticle {
+            url: "https://example.com/member".into(),
+            reason: ArchiveFoldReason::SameEvent,
+            signal_key: None,
+        };
+        let titles = [(
+            archive_url_key(&member.url),
+            "=====start\rcr\nlf\u{0085}nel\u{2028}ls\u{2029}ps,\"".into(),
+        )]
+        .into_iter()
+        .collect();
+        let mut buffer = String::new();
+        write_folded_header(&mut buffer, &[&member], &titles);
+        assert_eq!(buffer.lines().count(), 1);
+        let json: serde_json::Value =
+            serde_json::from_str(buffer.trim_end().strip_prefix("folded: ").unwrap()).unwrap();
+        assert_eq!(json[0]["title"], " =====startcrlfnellsps,\"");
+    }
 }

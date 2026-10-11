@@ -120,6 +120,7 @@ impl EffectRunner {
                 summaries,
                 annotations,
                 priority_snapshot,
+                folds,
             } => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.paths.output_dir.clone();
@@ -133,6 +134,7 @@ impl EffectRunner {
                         &summaries,
                         &annotations,
                         &priority_snapshot,
+                        Some(&folds),
                     ) {
                         Ok(summary) => {
                             if let (Some(window_count), Some(counts)) =
@@ -140,8 +142,10 @@ impl EffectRunner {
                             {
                                 let [priority_5, priority_4, priority_3, priority_2, priority_1, unavailable] =
                                     counts;
+                                let [same_event, identical_content] =
+                                    summary.unexported_folded.unwrap_or_default();
                                 engine_info!(
-                                    "[archive-dialog] export completed request_id={} docs={} window_count={} unexported_by_priority={{\"5\":{},\"4\":{},\"3\":{},\"2\":{},\"1\":{},\"unavailable\":{}}} path={}",
+                                    "[archive-dialog] export completed request_id={} docs={} window_count={} unexported_by_priority={{\"5\":{},\"4\":{},\"3\":{},\"2\":{},\"1\":{},\"unavailable\":{}}} unexported_folded={{\"same_event\":{},\"identical_content\":{}}} path={}",
                                     request_id,
                                     summary.doc_count,
                                     window_count,
@@ -151,6 +155,8 @@ impl EffectRunner {
                                     priority_2,
                                     priority_1,
                                     unavailable,
+                                    same_event,
+                                    identical_content,
                                     summary.output_path.display()
                                 );
                             } else {

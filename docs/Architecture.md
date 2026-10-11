@@ -284,10 +284,16 @@ Rows, priorities, Results, reading-pane summaries and archive readiness read thi
 index without walking result stores during view construction. Stale keys remain
 stored but are invisible to those current-key consumers. Live sessions still drive
 run progress and the running-triage ordering rule.
-Window membership follows corpus frontmatter, including missing or malformed
-fetch dates, as the scan and exporter do. Time-scoped job lists still exclude
-jobs without a valid fetch time. Startup selection restoration is discarded
-once a run is active, so late hydration never navigates during a run. Keyless
+Saved-results window membership follows corpus frontmatter, including missing
+or malformed fetch dates. The exporter and archive-window metadata scan skip
+and log article files with no frontmatter or an empty `url`, `title` or
+`fetched_utc`, excluding them from `window_count` without failing the export.
+An unavailable selected article is replaced by its first surviving folded
+member; without one, the export holds one fewer document. A present but malformed
+(unparseable RFC3339) fetch date remains inside the export window. Time-scoped
+job lists still exclude jobs without a valid fetch time. Startup selection
+restoration is discarded once a run is active, so late hydration never navigates
+during a run. Keyless
 and keyed startup share prompt-model defaults and model resolution.
 Restoration uses the job lists' fetch-time rules, so an undated archive member
 does not become a selected article hidden from the remembered time-scoped tab.
@@ -305,6 +311,18 @@ or failed window.
 Archive selection and processing remain window-bound.
 Manual exclusions are reducer state, persisted through the reducer-emitted
 `PersistSignalCandidateOverrides` effect and cleared by a checkpoint export.
+The pure signal selection groups all above-threshold canonical keys before
+exclusions and carries fold membership in representative election order (tier,
+score, URL). Exact-key duplicates retain their own raw slugs with reason
+`same_event`; excluded clusters contribute no folds. Membership accessors supply
+the candidate rows' duplicate counts and kept representative gist.
+The dialog pins the signal selection and its membership, and a full-mode URL
+list with empty membership beside the triage corpus. Full mode and the
+missing-signal-snapshot fallback use that full-mode pin. Submit sends the chosen
+membership through `ArchiveRequested`, with annotations and summaries covering
+members too. The exporter promotes the first surviving member if its selected
+representative is missing, and writes the additive `folded` headers and bounded
+`unexported_folded` index counts described in `ArchiveExportFormat.md`.
 Annotations use current-key results and the matching stored triage model; the
 priority snapshot includes every window article with current-key triage, including
 excluded and unselected articles.

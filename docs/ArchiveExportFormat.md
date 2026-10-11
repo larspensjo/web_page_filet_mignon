@@ -24,6 +24,7 @@ stripped full article body rather than copied article frontmatter.
 | `signal_key` | Signal-candidate event slug | signal-candidate result | article not scored |
 | `signal_score` | `0`–`100`; zero is retained | signal-candidate result | article not scored |
 | `themes` | Sorted compact JSON array; `[]` is retained | signal-candidate result | article not scored |
+| `folded` | Compact JSON array of folded articles; `[]` is retained | reducer selection, titles from the exporter's window map | export carries no fold report |
 
 Header fields appear in table order. Optional means unavailable, never empty:
 a scalar is omitted only when no value exists, while computed zero and empty
@@ -50,10 +51,16 @@ They work immediately after restart without a processing run. Stale-key results
 remain in their stores but supply neither annotations nor priorities. The priority
 snapshot includes every window article with current-key triage, including manually
 excluded and unselected articles, rather than only the pinned export selection.
-Window membership uses corpus frontmatter, including missing or malformed
-`fetched_utc` dates when a checkpoint is set, matching the scan and exporter.
-Such articles can supply selection, annotations and priorities even though their
-jobs remain hidden from time-scoped lists without a valid job fetch time.
+The exporter's window membership uses parseable corpus frontmatter, matching
+the archive-window metadata scan. An article file the exporter cannot parse
+(no frontmatter, or an empty `url`, `title` or `fetched_utc`) is skipped with a
+log entry and is outside `window_count`; it never fails the export. If it was
+selected, the first surviving folded member replaces it; without a surviving
+member the export holds one fewer document. A present but malformed
+`fetched_utc` (unparseable RFC3339) stays inside the window. Saved results can
+still supply selection, annotations and priorities for undated articles even
+though their jobs remain hidden from time-scoped lists without a valid job
+fetch time.
 
 In summary mode the body is the newest saved summary for the article's content
 hash under any key, including a stale key; otherwise the exporter falls back to
@@ -65,6 +72,25 @@ These source changes preserve all field meanings and `export_schema: 2`.
 
 The export deliberately excludes source tier, rationale, reasoning, draft
 gist, and confidence.
+
+When a fold report is supplied, every document writes `folded` after `themes`
+(or after its last available annotation). Entries are sorted by reason, then URL,
+with keys in the order `reason`, `url`, `title`, `signal_key`:
+
+```text
+folded: [{"reason":"identical_content","url":"https://b.example/x","title":"Same text elsewhere"},{"reason":"same_event","url":"https://c.example/y","title":"Another report","signal_key":"another-event-slug"}]
+```
+
+Reasons are `same_event` and `identical_content`. A member's title comes from
+the exporter's own window map and uses scalar sanitising before JSON encoding;
+when the URL is absent from that map, the title is omitted and the absence is
+logged. An unscored member omits `signal_key`. Each slug is the article's own:
+`same_event` does not imply equal `signal_key` values. A document without members
+writes `folded: []`. An unavailable selected document is replaced, in its selected
+position, by the first available article folded into it in election order.
+The promoted article uses its own annotations and summary and lists the other
+members with their original reasons. The lost selected URL is logged and listed
+nowhere; a group with no surviving member writes and counts nothing.
 
 ## Body escaping and trust boundary
 
@@ -99,15 +125,17 @@ fetched_from: 2026-09-07T04:11:09Z
 fetched_to: 2026-09-11T09:40:51Z
 window_count: 2
 unexported_by_priority: {"5":0,"4":0,"3":0,"2":0,"1":0,"unavailable":0}
+unexported_folded: {"same_event":0,"identical_content":0}
 doc | line | fetched_utc | priority | signal_key | title
 1 | 1 | 2026-09-07T04:11:09Z | 4 | nvda-dmatrix-nvlink-fusion | d-Matrix joins NVLink Fusion
-2 | 38 | 2026-09-11T09:40:51Z | - | - | Example without triage
+2 | 39 | 2026-09-11T09:40:51Z | - | - | Example without triage
 ===== INDEX END =====
 ```
 
 Always present: `export_schema`, `doc_count`, `fetched_from`, `fetched_to`.
 Present only when the export has a `since` bound: `window_count`,
-`unexported_by_priority`. The index header is a sequence of `name: value` lines
+`unexported_by_priority`, and (with a fold report) `unexported_folded`.
+The index header is a sequence of `name: value` lines
 terminated by the column-header line. Readers must locate metadata keys by name
 and skip unknown name-keyed lines; they must never parse the header by line
 position.
@@ -129,13 +157,27 @@ usable priority from 1 through 5 for that URL; it does not mean that the article
 was never triaged. An out-of-range cached priority is logged and counted as
 `unavailable`. The invariant is `window_count = doc_count + sum(values)`.
 
+With a `since` bound and a fold report, `unexported_folded` immediately follows
+`unexported_by_priority`. It is compact JSON with keys in the order `same_event`,
+`identical_content`. Each value counts distinct canonical URLs listed under that
+reason in an exported document's `folded` field that remain in the window map
+after the selection loop. The reasons are disjoint: each URL has one reason.
+These counts overlap the priority buckets, and their sum is a subset of that
+remainder, so `same_event + identical_content <= sum(unexported_by_priority)`.
+The fold counts preserve the window invariant and use the same population.
+Missing folded URLs are listed without titles but are outside the window and
+are not counted.
+Readers can cross-check these counts against the document headers.
+
 Coverage is per export, not a cumulative held-back total. Repeating an export
 without advancing the checkpoint reuses the same `since` bound, so documents
 selected by the first export can be counted as unexported when they are not
 selected by the second.
 
-When there is no `since` bound, both `window_count` and
-`unexported_by_priority` are omitted entirely. The column-header line shown
+When there is no `since` bound, `window_count`, `unexported_by_priority` and
+`unexported_folded` are omitted entirely. Without a fold report, neither `folded`
+nor `unexported_folded` is written, preserving existing export bytes.
+The column-header line shown
 above is part of the format. `line` is the 1-based line of that block's
 unescaped `DOC START`.
 The exporter writes only LF, including after normalising body CR and CRLF, so
@@ -168,3 +210,5 @@ so. Blocks without `export_schema` use the legacy schema-1 recipe.
 Golden and boundary-forgery fixture bytes are maintained at
 `crates/harvester_engine/tests/fixtures/archive_export/` and marked byte-exact
 in `.gitattributes` for downstream reader tests.
+`schema2_folded_since.md` covers both reasons and missing-title accounting;
+`schema2_folded_raw.md` covers fold headers without bounded index counts.
