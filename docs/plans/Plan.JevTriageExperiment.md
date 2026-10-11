@@ -43,6 +43,50 @@ Done means:
 
 ## Settled decisions
 
+### Model-judge panel replaces the user as reference (recorded 2026-10-11)
+
+The development-round probe is reviewed by a panel of three external model
+judges (Claude-Opus-5.5, GPT-6-Astra, Kimi-K3), run by the user in their chat
+UIs, instead of the user scoring the rows himself. The panel median is the
+reference; per-judge figures are reported alongside it.
+
+What this changes, and it is not cosmetic: the original design made the user the
+reference because the triage pipeline exists to approximate *his* reading. The
+question was "which arm matches the analyst". With a model panel the question
+becomes "which arm matches a consensus of frontier models". Those can diverge,
+and only the first settles whether to change the pipeline.
+
+Caveats to carry into any verdict built on this panel:
+
+- **Family bias, wider than one vendor.** GPT-6-Astra shares a vendor with the
+  OpenAI arm. More importantly all three judges are frontier prose-reading LLMs,
+  which is what the OpenAI arm is, whereas the Jev arm is a structured-judgment
+  system returning a distribution. A panel of LLMs may share systematic reading
+  habits with the LLM arm and favour it for reasons unrelated to triage quality.
+  This confound can invert the conclusion, so the panel cannot by itself justify
+  keeping OpenAI.
+- **A third framing.** The judges receive the rubric text bare, without the v4
+  system wrapper the OpenAI arm got and without the `editorial_criteria` plus
+  separate priority question the Jev arm got. No arm's framing is reproduced.
+- **The panel is not ground truth.** It is a cheap proxy for the analyst, useful
+  for deciding whether the full experiment is worth running, not for settling
+  the verdict.
+
+Verified before the panel ran (2026-10-11): the judge prompt's rubric is
+byte-identical to the frozen rubric apart from blank-line padding; it leaks
+neither arm's priorities; it contains exactly 14 row sections; and every one of
+the 14 articles is the untruncated frozen text, `truncated: false` in the
+manifest, so the judges read the same bytes both arms read.
+
+How to read the result, decided in advance so the number cannot be talked into
+significance afterwards. All 14 rows are rows where the arms disagree, so the
+panel median mostly sides with one arm or the other. For the nine gap-1 rows the
+median is always decisive; the five gap-2 rows can tie when the median falls
+exactly between. Treating the decisive rows as coin flips, a split of 11-3 or
+stronger is where the result starts to mean something (two-sided p = 0.057);
+12-2 is p = 0.013; 10-4 is p = 0.18 and means nothing. A 9-5 or 8-6 split is
+noise and is to be reported as "no signal", not as a narrow win.
+
 ### Batch API removal (recorded 2026-10-07)
 
 `Plan.Simplification` phase 4 retired the Batch API, its provider-wait and
@@ -1527,3 +1571,16 @@ new tool. It stays a sketch until the triage verdict is in.
    the experiment runs mainly for the quality verdict, the present dataset is
    adequate as it stands; if the latency comparison carries real weight in the
    decision, re-freezing first is the stronger choice.
+
+7. **Does the model panel track the user's own judgment at all?** Open as of
+   2026-10-11. The panel (see "Model-judge panel replaces the user as
+   reference") is a proxy for the analyst, and nothing yet measures the proxy.
+   Recommended anchor, cheap enough to be worth it: the user scores the five
+   gap-2 rows himself, rows 1 to 5 of the review file, roughly ten minutes, and
+   those five are compared against the panel median. If the panel matches him on
+   four or five, its reading of the remaining nine rows can be trusted as a
+   stand-in. If it matches on two or fewer, the panel is measuring something
+   other than his judgment and the probe should be re-run with him as the
+   reference before any verdict rests on it. Without this anchor the panel result
+   is uncalibrated, and a Jev loss on the panel cannot be told apart from the
+   family bias recorded above.
