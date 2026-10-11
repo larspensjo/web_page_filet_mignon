@@ -87,6 +87,34 @@ stronger is where the result starts to mean something (two-sided p = 0.057);
 12-2 is p = 0.013; 10-4 is p = 0.18 and means nothing. A 9-5 or 8-6 split is
 noise and is to be reported as "no signal", not as a narrow win.
 
+### Model-judge panel result (recorded 2026-10-11)
+
+The panel ran on the 14 decision-carrying rows of development round 2. Full
+figures are in the runbook under "2026-10-11 — model-judge panel probe on
+development round 2"; the load-bearing points:
+
+- **The pre-registered 3-judge result is no signal.** Panel median sided with
+  Jev on 8 of 12 decisive rows, OpenAI on 4, 2 ties: 8-4, two-sided p = 0.39,
+  against the 11-3 bar fixed in advance. Secondary measures lean to Jev
+  consistently (within one level 14/14 against 10/14; mean distance 0.50 against
+  1.00) but the probe did not settle the quality question.
+- **The family-bias caveat was not hypothetical.** The single judge sharing a
+  vendor with the OpenAI arm is the only one preferring OpenAI (3-10); all three
+  outside that family prefer Jev (11-3, 8-4, 13-1). Leave-one-out flips the
+  conclusion: dropping Opus gives 4-6 to OpenAI, dropping Astra gives 9-2 to Jev.
+  The panel's verdict is a function of its composition.
+- Consequently **Open Question 7 is now load-bearing rather than advisory**. A
+  Jev loss or win on this panel cannot be told apart from vendor affinity, so no
+  verdict should rest on the panel alone.
+- Gemini was added after the panel was fixed and is recorded as sensitivity only
+  (13-1 Jev alone; 4-judge median 10-2, p = 0.039). It is deliberately not used
+  to tip the result.
+
+This does not change Open Question 4's answer. The probe was run to decide
+whether the full held-out experiment is worth its cost, and it returns an
+honest "not established": the direction favours Jev on every measure, the
+magnitude is within coin-flip range, and the reference itself is uncalibrated.
+
 ### Batch API removal (recorded 2026-10-07)
 
 `Plan.Simplification` phase 4 retired the Batch API, its provider-wait and

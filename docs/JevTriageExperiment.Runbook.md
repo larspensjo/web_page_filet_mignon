@@ -584,3 +584,68 @@ All 100 succeeded on the first attempt.
 - Near-duplicate Trump "sick conspiracy" articles received 3 and 4 from both
   sides, so OpenAI is not consistent on that story either.
 - Latency: Jev median 3.3 s, p95 5.5 s. Cost: $0.21 per 1,000 articles.
+
+### 2026-10-11 — model-judge panel probe on development round 2
+
+A cheap stand-in for the full held-out review (Open Question 4), run because the
+experiment's two measurable motivations had collapsed: at the user's real volume
+(~10,900 triage calls since July) the cost saving is about $1 per month, and Jev
+is slower, not faster. Only the quality question was left.
+
+Instead of ~160 held-out rows, the 41 disagreement rows from round 2 were ranked
+and the 14 decision-carrying ones taken: the 5 at gap 2 plus every row straddling
+the admission boundary. Four external models scored those 14 from the frozen
+rubric, blind to which arm said what, run by the user in their chat UIs. No live
+API calls and no key were needed; the round-2 results were already on disk.
+
+Verified before scoring: the judge prompt's rubric is byte-identical to the
+frozen rubric apart from blank-line padding, neither arm's priorities leak, there
+are exactly 14 row sections, and all 14 articles are untruncated frozen text
+(`truncated: false`), so the judges read the same bytes both arms read. All four
+replies had 14 rows in order with priorities in range and substantive reasons
+that track their articles; an overlap heuristic flagged a few, all false
+positives (row 11 is an 834-byte paywalled stub, and every judge independently
+called it a stub too thin to act on).
+
+- **Primary result, the pre-registered 3-judge panel median (Opus, Astra,
+  Kimi): no signal.** The median sided with Jev on 8 of the 12 decisive rows and
+  with OpenAI on 4, with 2 ties. An 8-4 split is two-sided p = 0.39 against the
+  bar fixed in advance (11-3, p = 0.057). The probe did not settle the quality
+  question.
+- Secondary measures all lean the same way: exact match Jev 7 of 14 against
+  OpenAI's 4; within one level Jev 14 of 14 against OpenAI's 10; mean absolute
+  distance 0.50 against 1.00. Panel mean 2.50, Jev arm 2.14, OpenAI arm 3.07.
+- **The vendor-family confound materialised.** Astra, the only judge sharing a
+  vendor with the OpenAI arm, is the only judge preferring OpenAI, and strongly:
+  3-10, exact 9 of 14 with OpenAI against 2 with Jev, mean 3.36. The three judges
+  outside that family all prefer Jev: Opus 11-3 (mean 2.14), Kimi 8-4 (2.50),
+  Gemini 13-1 (2.07).
+- **Leave-one-out shows the conclusion is not robust to any single judge.**
+  Median of the remaining two: drop Astra, 9-2 Jev; drop Kimi, 2-1 with 11 ties;
+  drop Opus, 4-6 and it *flips* to OpenAI. The answer is a function of panel
+  composition, not of the articles. This is the risk recorded in advance under
+  "Model-judge panel replaces the user as reference", now measured rather than
+  hypothesised.
+- Three of four judges rank these articles in roughly the *opposite* order to the
+  OpenAI arm (Spearman -0.19 Opus, -0.15 Kimi, -0.46 Gemini) while correlating
+  positively with Jev (+0.52, +0.42, +0.85). Astra inverts both (+0.07 Jev,
+  +0.36 OpenAI). Treat as a lead, not a fact: 14 contested rows with little
+  spread make rank statistics unstable.
+- Not merely a severity offset. On the 11 rows where Jev scored lower the panel
+  went 6-3 to Jev; on the 3 rows where Jev scored *higher* it still went 2-1 to
+  Jev.
+- The panel barely agrees with itself: no row of the 14 where all three panel
+  judges picked the same number. Pairwise exact agreement Opus-Astra 1 of 14,
+  Astra-Kimi 4, Opus-Kimi 5 (within one level 9, 10, 14). On the hardest rows a
+  committee of frontier models is about as divided as the two arms are.
+- **Sensitivity only, not the result:** Gemini was added after the panel was
+  fixed. Alone it is 13-1 for Jev and nearly indistinguishable from the Jev arm
+  (exact 13 of 14, mean distance 0.07). A 4-judge median gives 10-2, which would
+  be p = 0.039. That is a bonus judge tipping a close call, so it is recorded and
+  deliberately not treated as the finding.
+- **Conclusion: the panel cannot substitute for the user.** Not because the
+  judges are poor, but because their verdict turned out to depend on which
+  vendors sit on the panel. Open Question 7's calibration anchor is no longer
+  optional; it is the only thing that makes this probe interpretable. The
+  cheapest decisive step is the user scoring the same 14 rows, roughly 20
+  minutes, or at minimum the 5 gap-2 rows.
