@@ -2,7 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use harvester_core::signal_key_merge::{
     group_signal_keys,
-    report::{build_grouping_report, parse_archive_index, ArchiveIndexRow, ReportExpectations},
+    report::{
+        build_grouping_report, parse_archive_index, ArchiveIndexRow, FamilyTarget,
+        ReportExpectations,
+    },
 };
 
 const INDEX: &str = include_str!("fixtures/signal_key_merge/archive-2026-10-07.index.txt");
@@ -46,7 +49,21 @@ fn golden_grouping_report_and_separation_guards() {
                 family.name
             );
         }
-        // one_group and floor subsets are recorded targets, currently inactive.
+        let merge_docs = if matches!(family.target, FamilyTarget::OneGroup) {
+            &family.docs
+        } else {
+            &family.floor
+        };
+        if let Some(first) = merge_docs.first() {
+            for doc in merge_docs {
+                assert_eq!(
+                    groups.group_id(&by_doc[first].signal_key),
+                    groups.group_id(&by_doc[doc].signal_key),
+                    "{}: docs {first} and {doc} must merge",
+                    family.name
+                );
+            }
+        }
     }
     for case in &expectations.separate {
         assert!(
@@ -100,12 +117,57 @@ fn golden_grouping_report_and_separation_guards() {
             }
         }
     }
-    // synthetic_merge targets are reported, currently inactive.
+    for case in &expectations.synthetic_merge {
+        let alone = group_signal_keys(&case.keys);
+        // Unrelated synthetic veto examples introduce incompatible explicit
+        // periods/years. An unspecified marker can join only one of those
+        // complete-linkage groups. Merge contracts use the pair alone and the
+        // real benchmark population, while separation guards use all keys.
+        let with_real = group_signal_keys(
+            rows.iter()
+                .map(|row| row.signal_key.as_str())
+                .chain(case.keys.iter().map(String::as_str)),
+        );
+        for groups in [&alone, &with_real] {
+            for key in &case.keys {
+                assert_eq!(
+                    groups.group_id(&case.keys[0]),
+                    groups.group_id(key),
+                    "{}: {key} must merge",
+                    case.name
+                );
+            }
+        }
+    }
     let actual = build_grouping_report(&rows, &groups, &expectations).unwrap();
     assert!(
         actual == REPORT.replace("\r\n", "\n"),
         "grouping report mismatch; actual report follows:\n{actual}"
     );
+}
+
+#[test]
+fn rule_table_fixture_pairs_merge_and_stay_separate() {
+    let expectations: ReportExpectations = serde_json::from_str(include_str!(
+        "fixtures/signal_key_merge/rule-table-cases.json"
+    ))
+    .unwrap();
+    for (cases, should_merge) in [
+        (&expectations.synthetic_merge, true),
+        (&expectations.synthetic, false),
+    ] {
+        for case in cases {
+            assert_eq!(case.keys.len(), 2, "{}", case.name);
+            let groups = group_signal_keys(&case.keys);
+            assert_eq!(
+                groups.group_id(&case.keys[0]) == groups.group_id(&case.keys[1]),
+                should_merge,
+                "{}: {:?}",
+                case.name,
+                case.keys
+            );
+        }
+    }
 }
 
 #[test]

@@ -3,7 +3,7 @@
 Written 2026-10-07 from the design brief relayed by the AI_portfolio repository (the consumer
 of `archive.md`). Revised 2026-10-07 after a Codex review: every issue and recommendation was
 applied, with the user's and the orchestrator's answers folded in (see "Decisions carried
-in"). Status: Phase 2 complete and committed (2026-10-11); Phase 3 next, see "Handoff".
+in"). Status: Phases 1-3 complete and committed (2026-10-11); Phase 4 next, see "Handoff".
 Implementation runs phase by phase; nothing is committed unless the user asks.
 
 Durable documents (design docs, the decision log, code comments) must describe behaviours,
@@ -157,19 +157,27 @@ the brief rules out. Titles appear in the fixture for human audit only.
 2. Fold known two-token names into one token: `hon hai` to `foxconn`, `rocket lab`,
    `northrop grumman`, `data center(s)/centre` to `datacenter`, `open weight(s)` to
    `openweight`, `white house`, `ge vernova`, `bloom energy`, `blue origin`, `sk hynix`,
-   `palo alto`. Single-token aliases: `aws` to `amazon`. Without the compound fold, the second
+   `palo alto`, `astera lab(s)`, `trade desk`. Successive folds absorb `palo alto network(s)`
+   into `paloalto` too. Single-token aliases: `aws` to `amazon`. Without the compound fold, the second
    word of a company name (for example `lab`) would count as shared evidence in every key of
    that company.
 3. Extract **explicit markers** before anything is dropped. They are never evidence for a
    merge, only grounds to refuse one (see "Vetoes"):
-   - *period*: `q1`-`q4` and `h1`/`h2` record that quarter or half, and also add the object
+   - *period*: `q1`-`q4`, `fq1`-`fq4` (fiscal quarters), and `h1`/`h2` record that quarter or half, and also add the object
      `quarter` or `half`. `quarter` and `quarterly` add the object only, so an unspecified
      quarter is compatible with any explicit one;
-   - *year*: a four-digit `19xx`/`20xx` token, and `fyNNNN` read as year `NNNN`, so
-     `fy2031` and `2031` agree;
-   - *version*: a bare integer (no unit suffix) directly after a non-numeric object or lead
-     token, recorded as `(that token, number)`, for example `gemini 4`, `gpt 6` or `crew 13`.
-     A `N-Mb` pair such as `4-2b` is read first as one decimal amount, never as a version.
+   - *year*: a four-digit `19xx`/`20xx` token, `fyNNNN` read as year `NNNN`, and `fyNN`
+     read as `20NN`, so `fy31`, `fy2031` and `2031` agree;
+   - *version*: consecutive integers directly after a non-numeric object or lead token are
+     recorded together as a dotted version, with leading zeros removed from each component:
+     `gemini-3-6` is `(gemini, 3.6)`, distinct from `gemini-3-8`; `gpt-6-1` differs from
+     `gpt-6`. A quantity-shaped letter suffix directly after that base is also a version
+     (`gpt-4o`), except known amount/power suffixes `b bn m mn k w kw mw gw`.
+     Decimal `N-M<unit>` amounts are consumed first when the fraction is a single digit,
+     or has an unambiguous money/power suffix (the same suffix list except ambiguous `b`).
+     Thus `4-2b` is an amount, while `llama-4-70b` and `gemma-4-12b` retain generations
+     4; the size is dropped. `N-M-billion` is also an amount, so Vistra's `4-2-billion`
+     and `4-2b` agree. This refines the earlier blanket `N-Mb` exclusion toward under-merging.
 4. Drop noise: function words (`a an and as at by for from in its of on over the to with
    after amid up new`), `ai`, reporting verbs (`says reportedly report reports prepares plans
    eyes set`), government actors that prefix slugs (`us u s doe federal government
@@ -185,7 +193,7 @@ the brief rules out. Titles appear in the fixture for human audit only.
    | Class | Forms | Shared objects needed |
    |---|---|---|
    | loan | loan(s), lend(s), lending, lender, financing, finance(d) | 1 |
-   | results | revenue(s), sale(s), earning(s), result(s), profit(s) | 1 |
+   | results | revenue(s), sales, earning(s), result(s), profit(s) | 1 |
    | pledge | pledge(s/d), commitment(s), commit(s), promise(s) | 1 |
    | acquisition | acquire(s/d), acquisition, buys, buyout, takeover | 1 |
    | launch | launch(es/ed), release(s/d), debut(s), unveil(s/ed), introduces, rollout | 2 |
@@ -197,12 +205,18 @@ the brief rules out. Titles appear in the fixture for human audit only.
    those classes need two shared objects; loans, results, pledges and acquisitions are rare per
    actor per window. `investment`, `expansion`, `raise` and `target` are deliberately not event
    words: "Amazon invests in a new state" and "Amazon's community investment" would otherwise
-   merge.
+   merge. Singular `sale` remains an ordinary object: an asset or insider share sale is not
+   results evidence. Plural `sales` stays a results form for the Foxconn fixture.
 6. Other tokens lose a trailing `s` when longer than three characters and not ending in `ss`,
    `us` or `is`. Generic objects never count as evidence: `model(s) stock(s) shares market
    company startup`.
-7. **Lead** = the first remaining token that is not an event word. **Objects** = the remaining
-   non-event tokens other than the lead.
+7. **Lead** = the first remaining token that is not an event word or the period object
+   `quarter`/`half`. **Objects** = the remaining non-event tokens other than the lead;
+   period objects may supply evidence but never become the lead.
+
+The proposed structural rule excluding a token directly after the lead in both keys was tried
+and rejected: it splits required Vistra docs 2/5.
+The explicit compound-name route above preserves every active golden target and merge pair.
 
 **When two keys name the same event.** Both conditions:
 
@@ -220,8 +234,8 @@ only one key never vetoes. Without vetoes, normalising every quarter to `quarter
 years would erase exactly the differences that separate two results announcements or two
 model generations.
 
-A key with no lead never merges. A misdetected lead makes two keys disagree, which
-under-merges; it cannot create a merge on its own.
+A key with no lead never merges. Different detected leads under-merge; a shared non-actor lead
+can still over-merge through shared objects, as recorded below.
 
 **Grouping is complete-linkage, never chained.** Keys are bucketed by lead and processed in
 ascending byte order; each key joins the earliest group in which it matches **every** member,
@@ -253,6 +267,16 @@ Anthropic IPO ×2 (identical title; the identical-content fold may catch it).
 same actor that share three or more object words and use event words that are not in the table
 (for example "blackwell ultra gpu shipments delay" versus "... begin"). The folded list makes
 such a merge visible in the export.
+
+**Known residual over-merge class: non-actor leads.** A regulator or country is not necessarily
+the affected company. `eu-ai-act-probe-meta-chatbot` versus
+`eu-ai-act-probe-google-chatbot-gemini` can share lead `eu` and objects `act`/`chatbot`;
+`china-ai-chip-sales-nvidia` versus `china-ai-chip-sales-amd` can share lead `china` and
+results evidence `chip`. The compound fallback does not resolve this class; actor inference
+is outside this slug-only refinement. The synthetic must-stay-separate witness
+`eu-ai-probe-meta-chatbot` versus `eu-ai-probe-google-chatbot-gemini` pins the current
+two-object probe threshold, not a solution to the richer shared-evidence cases above.
+Period words no longer lead; another shared non-actor word can still become the lead.
 
 ### B. Selection pipeline and membership
 
@@ -716,8 +740,10 @@ notes syndicated near-copies differ in boilerplate) and does not change scope.
     selected document is replaced by its first surviving folded member rather than failing the
     export (tolerance over refusal), so every withheld member is listed. Refines 2026-09-19 and
     2026-09-20.
-- `docs/EngineeringDiary.md`: one Implementation entry with the measured before and after numbers
-  and the lesson (observability before pruning; complete linkage against chaining; per-class
+- `docs/EngineeringDiary.md`: extend the existing 2026-10-11 "Deterministic same-event archive
+  grouping" Implementation entry with final measured before and after numbers, rather than
+  adding a duplicate entry, and the lesson (observability before pruning; complete linkage
+  against chaining; per-class
   evidence thresholds; explicit-marker vetoes; set-dependent grouping makes live counts
   non-monotonic). Earlier diary entries, including the one naming the old monotonic test, stay
   as historical record.
@@ -752,7 +778,7 @@ phase of this plan.
 | `docs/Architecture.md` | selection membership, merged groups, identical-content fold, meter wording (may fall on regrouping) | Phases 2-4 |
 | `crates/harvester_core/src/update/tests/archive_meter_tests.rs` | monotonic regression replaced by a recomputed-count test plus a regrouping test | Phase 3 |
 | `docs/DecisionLog.md` | new entries (above) | Phase 5 |
-| `docs/EngineeringDiary.md` | Implementation entry | Phase 5 |
+| `docs/EngineeringDiary.md` | Extend existing grouping Implementation entry | Phase 5 |
 | `docs/FutureIdeas.md` | hints, tracking parameters, near-duplicate note | Phase 5 |
 | `docs/plans/Plan.ArchiveExportContract.md` | step 3b note | Phase 5 |
 
@@ -811,15 +837,75 @@ Filled in during implementation.
 | Measure | Value |
 |---|---|
 | Fixture rows / groups before | 197 / 197 |
-| Groups after the merge rule | |
-| Vistra, Foxconn, Reflection, Amazon, FTC: keys before to groups after | |
+| Groups after the merge rule | 150 (197 before; 47 fewer, 23.9%). Selected-index benchmark, not a counterfactual export. |
+| Vistra, Foxconn, Reflection, Amazon, FTC: keys before to groups after | Vistra 13 -> 1; Foxconn 9 -> 1; Reflection 9 -> 5; Amazon 10 -> 6; FTC 5 -> 1. All requested one-group and floor targets met; no target lowered. Northrop's report-only family is 4 -> 2 rather than the hand estimate of 1; no vocabulary extension made to chase it. |
+| Second benchmark: `output/archive-2026-10-11.md`, keys / groups after | 129 / 105 (24 fewer, 18.6%); previously 104 before review. The year grammar separates doc 22's 2028 target from doc 27's FY31 target; their real slugs are a new hard separation guard. Vistra's spelled `4-2-billion` and suffixed `4-2b` amounts still agree (docs 3/7/12/17/52 merge; docs 8/34 retain their separate `conditional` lead). Read-only `cargo run --offline -p harvester_core --example archive_redundancy_report -- --archive output/archive-2026-10-11.md`. |
 | Window articles (confirms `window_count` 584) and the `--since` used | 584; `--since 2026-10-02T13:00:00Z`, `--until 2026-10-07T04:57:36Z`; all 197 exported documents present. Midnight since gives 686. |
 | Shared-content-hash groups in the window / among the 197 exported | 3 / 0; all 3 window groups are extraction failures (empty text x16, interstitial x3, YouTube boilerplate x2); 0 are syndicated copies. Empty text is not an identical-content candidate. |
-| Must-stay-separate cases (real / synthetic / veto), all passing | 14 real cases (50 cross-set pairs) / 11 synthetic cases, including 5 marker-veto pairs; all passing. |
+| Must-stay-separate cases (real / synthetic / veto), all passing | 14 document-based real cases (50 cross-set pairs) / 33 key-only cases, including 15 marker-veto pairs and 11 pairs verified in the read-only scoring cache. Ten synthetic merge targets cover compatible markers/amounts. Rule-table vocabulary coverage witnesses: 158 must-merge pairs and 158 matched must-stay-separate pairs in `rule-table-cases.json`; singular-sale coverage migrated to independent loan evidence. The coverage guard is not proof that each synthetic boundary isolates its vocabulary entry. Non-actor residuals remain documented above. |
 
 ## Handoff
 
-Updated 2026-10-11, after Phase 2.
+Updated 2026-10-11, after Phase 3.
+
+**Phase 4 starts here.** Run `/implement-with-codex` on Phase 4 (identical-content fold, both
+modes). Baseline to pin before dispatch: `harvester_core` 600, `harvester_engine` 424 (one
+ignored), `harvester_io` 154; workspace 1,341 passed. Audit any test removal. Phase 4 must
+update the Phase 2 missing-snapshot regression in `update/tests/archive_tests.rs` (full mode and
+the fallback currently emit an empty fold report) rather than add a parallel test. Empty clean
+text never folds (settled; see Decisions). Expect zero or one real hit on the 2026-10-07 window
+(Measurements); the fold is still required. `output/archive.md` may be read by an AI_portfolio
+intake: never overwrite or re-export it; use the 2026-10-11 copy for any comparison.
+
+**Phase 3 done and committed.** Owner by-eye check, 2026-10-11: Lars reviewed all 15 merged
+groups of the 2026-10-11 copy (129 -> 105, least certain first: Rocket Lab-Iridium,
+Samsung-TSMC, Broadcom financing, Marvell Investor Day) and found none that is two stories. The pure grouping now implements section A:
+normalization, explicit-marker vetoes, per-class evidence thresholds, guarded
+three-object fallback and complete linkage in byte-sorted lead buckets. All
+requested one-group/floor targets and synthetic merge pairs are active; every
+existing separation guard remains a hard failure. The snapshot was reviewed and
+deliberately replaced: 197 -> 150 groups; the second read-only benchmark is
+129 -> 105 after review (previously 104, owing to a wrong 2028/FY31 merge now vetoed).
+No requested target was lowered. The structural name-evidence rule broke Vistra,
+so the authorized compound-name fallback was used. See Measurements for the
+report-only Northrop under-merge and the 158 paired vocabulary coverage witnesses.
+
+Selection, merged view rows, per-slug exclusion promotion, dialog pins and
+reducer-export membership are covered. The monotonic-meter regression was
+migrated to `mid_run_count_equals_recomputed_selection_while_scoring_is_pending`,
+retaining its pending-scoring loop and upper bounds. The five-key incremental
+regression proves 3 groups before K and 2 after, with recomputed meter equality
+after every save and meter/dialog/export count agreement. Alias-only prefix words
+share the one noise table but remain ordinary evidence outside the existing
+access-restriction alias, preserving compatibility without broadening the evidence rule.
+The access-restriction alias now also skips `ai`, `new`, `the`, `doe` and `says`
+when choosing its actor, pinned by `existing_alias_is_applied_before_grouping`.
+Review guards cover dotted generations, generation-before-size, letter suffixes,
+short fiscal years/quarters, insider/asset sales, company-name leakage and period
+leads. Real cache slugs are checked in as key-only expectations; the cache remains
+read-only. Non-actor lead over-merges remain a documented residual in section A.
+Synthetic merge contracts run alone and with real fixture keys; separation guards
+also run against the combined synthetic population, where unspecified markers
+can join only one of several incompatible complete-linkage groups.
+
+Baseline at `b07c3c7`, measured before code changes: core 585, engine 424 (one
+ignored), I/O 154. Before review: core 598; after review: core 600, engine 424
+(one ignored), I/O 154; no existing
+test deleted. Offline build, golden test (4 passed), core suite, full workspace
+suite (1,341 passed, two existing ignored across the workspace), all-target clippy with denied warnings, cargo fmt and
+fmt --check pass. The baseline workspace run hit the known `host_drain_cost`
+40 ms flake and its targeted rerun passed; both review workspace runs passed
+including all six timing tests. The final additional Palo Alto name-evidence
+guard passed in the golden and core reruns. `output/archive.md` was neither read
+nor modified in this run; benchmarks used the committed fixture and the read-only
+second archive, and cache-derived pairs were verified without changing the cache.
+
+`docs/Architecture.md` describes merged groups, per-key exclusions and the live
+meter's possible decrease. The diary records the implementation and measurements.
+No UI, frontend, IPC, schema, prompt, cache-key or identical-content change.
+Next: Phase 4's identical-content fold. Optional owner verification remains a
+custom-basename desktop export with checkpoint unchecked and inspection of its
+non-empty `folded` fields; no agent launcher or live API was run.
 
 **Phase 2 done.** Exact-key membership reaches both dialog pins and the
 export, including member annotations/summaries, promotion, additive headers/counts and
@@ -851,7 +937,7 @@ verified on the main thread after the fixes: `cargo build`, clippy and fmt clean
 `harvester_core` 581 (575 before), `harvester_engine` 416 (413 before), `harvester_io` 154; no test
 removed. Committed on `feature/archive-redundancy-fold`.
 
-What exists now:
+Artifacts present before Phase 3 (historical Phase 2 handoff):
 
 - `crates/harvester_core/src/signal_key_merge.rs`: `group_signal_keys` as the identity grouping
   (each canonical key its own group); report builder in `signal_key_merge/report.rs`.
@@ -872,6 +958,8 @@ What exists now:
 
 Decisions from this run:
 
+- Lars, 2026-10-11: Phase 3 accepted after the by-eye check above; no merged group in the
+  2026-10-11 benchmark is two different stories.
 - Lars (delegated via orchestrator), 2026-10-11: an article file the exporter cannot parse is skipped and logged, outside window_count, never fails the export; Phase 5 records this as a refinement of DecisionLog 2026-10-03.
 - User, 2026-10-11: the optional label review was skipped; the plan's labels stand (doc 62 is a
   Vistra member; docs 144/145 are report-only).
@@ -879,20 +967,16 @@ Decisions from this run:
   identical-content candidate (see Measurements: all three shared-hash groups in the window are
   extraction failures).
 
-Notes for Phase 3:
+Notes for Phase 4:
 
-- Second benchmark: `output/archive-2026-10-11.md` (129 documents, git-ignored copy); run the
-  example's `--archive` report on it alongside the committed 2026-10-07 fixture.
+- Second benchmark: `output/archive-2026-10-11.md` (129 documents, git-ignored copy);
+  the reviewed read-only report measured 105 groups (104 before the year fix); preserve it
+  for later comparison.
 - The `host_drain_cost` desktop timing checks are flaky on this machine; rerun before blaming a
   change, and compare against the previous commit if a failure persists.
 
-Historical setup notes from the Phase 1 handoff:
-
-- Run it with `/implement-with-codex` on Phase 2. Pin the baseline counts above and audit any test
-  removal.
-- Disk is tight (about 9 GB free on C: at handoff); a full workspace test run failed once for lack
-  of space. Check free space before dispatching.
-- Codex logs from Phase 1 in `.local/archive-redundancy-*` are no longer needed and can be deleted.
+- Disk: about 173 GB free on C: after the 2026-10-11 cleanup of benchmark corpus copies in
+  `.local/bench/`.
 
 ## Open questions
 

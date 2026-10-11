@@ -502,38 +502,7 @@ fn primary_actor_token<'a>(tokens: &'a [&str]) -> Option<&'a str> {
     tokens
         .iter()
         .copied()
-        .find(|token| !is_actor_noise_token(token))
-}
-
-fn is_actor_noise_token(token: &str) -> bool {
-    matches!(
-        token,
-        "after"
-            | "all"
-            | "bar"
-            | "barred"
-            | "bars"
-            | "block"
-            | "blocked"
-            | "blocks"
-            | "commerce"
-            | "department"
-            | "directive"
-            | "foreign"
-            | "foreigners"
-            | "government"
-            | "national"
-            | "nationals"
-            | "order"
-            | "ordered"
-            | "orders"
-            | "s"
-            | "security"
-            | "trump"
-            | "u"
-            | "us"
-            | "users"
-    )
+        .find(|token| !crate::signal_key_merge::is_actor_noise_token(token))
 }
 
 fn is_model_access_restriction_event(tokens: &[&str]) -> bool {
@@ -873,6 +842,75 @@ mod tests {
         ];
         let sel = SignalCandidateSelection::compute(&input, policy(60, Default::default()));
         assert_eq!(sel.selected_urls, vec!["a"]);
+    }
+
+    #[test]
+    fn merged_keys_elect_by_tier_score_url_and_exclusions_promote_only_named_articles() {
+        let keys = [
+            "vistra-4b-loan-nuclear-plant-upgrades",
+            "doe-loan-vistra-nuclear-fleet-uprates",
+            "us-lend-vistra-nuclear-output",
+        ];
+        let input = vec![
+            cand("tier2", 99, keys[0], SourceTier::Tier2),
+            cand("z", 90, keys[1], SourceTier::Tier1),
+            cand("a", 90, keys[2], SourceTier::Tier1),
+            cand("lower", 80, keys[1], SourceTier::Tier1),
+            cand("below", 40, keys[0], SourceTier::Tier1),
+        ];
+        let original = SignalCandidateSelection::compute(&input, policy(60, HashSet::new()));
+        assert_eq!(original.selected_urls, vec!["a"]);
+        let members = &original.folds[&archive_url_key("a")];
+        assert_eq!(
+            members
+                .iter()
+                .map(|member| member.url.as_str())
+                .collect::<Vec<_>>(),
+            vec!["z", "lower", "tier2"]
+        );
+        assert_eq!(members[2].signal_key.as_deref(), Some(keys[0]));
+        assert!(members
+            .iter()
+            .all(|member| member.reason == ArchiveFoldReason::SameEvent));
+        assert!(original.membership_for_url("below").is_none());
+        let mut excluded = HashSet::new();
+        for (key, expected) in [
+            (keys[2], vec!["z"]),
+            (keys[1], vec!["tier2"]),
+            (keys[0], vec![]),
+        ] {
+            excluded.insert(OverrideKey {
+                signal_key: key.into(),
+                prompt_id: ACTIVE_PROMPT_ID.into(),
+                prompt_version: 1,
+            });
+            let selection = SignalCandidateSelection::compute(&input, policy(60, excluded.clone()));
+            assert_eq!(selection.selected_urls, expected);
+            assert_eq!(
+                selection.membership_for_signal_key(key).unwrap().group_id,
+                original.membership_for_signal_key(key).unwrap().group_id
+            );
+            assert_eq!(
+                selection.membership_for_signal_key(key).unwrap().urls.len(),
+                4
+            );
+            let reversed: Vec<_> = input.iter().rev().cloned().collect();
+            assert_eq!(
+                selection,
+                SignalCandidateSelection::compute(&reversed, policy(60, excluded.clone()))
+            );
+            assert!(selection.folds.values().flatten().all(|member| !excluded
+                .iter()
+                .any(|key| Some(&key.signal_key) == member.signal_key.as_ref())));
+            if expected.is_empty() {
+                assert!(selection.folds.is_empty());
+                assert!(selection
+                    .membership_for_signal_key(key)
+                    .unwrap()
+                    .representative
+                    .is_none());
+            }
+        }
     }
 
     #[test]

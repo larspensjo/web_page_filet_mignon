@@ -165,6 +165,72 @@ fn outcome_deduplicates_canonical_model_access_restriction_keys() {
 }
 
 #[test]
+fn outcome_deduplicates_merged_event_keys() {
+    use harvester_engine::llm::dto::SourceTier;
+    let mut state = AppState::new();
+    state.set_signal_candidate_threshold(60);
+
+    let rep = "https://example.com/anthropic-rep/".to_string() + &"a".repeat(96);
+    let dupe = "https://example.com/anthropic-dupe/".to_string() + &"b".repeat(96);
+    insert_done_job(&mut state, 1, &rep);
+    insert_done_job(&mut state, 2, &dupe);
+    complete_candidate(
+        &mut state,
+        &rep,
+        92,
+        "vistra-4b-loan-nuclear-plant-upgrades",
+        SourceTier::Tier2,
+        "kept Vistra loan gist",
+    );
+    complete_candidate(
+        &mut state,
+        &dupe,
+        86,
+        "doe-loan-vistra-nuclear-fleet-uprates",
+        SourceTier::Tier2,
+        "duplicate Vistra loan gist",
+    );
+
+    let rows = state.build_signal_candidate_rows();
+    let dupe_row = rows.iter().find(|row| row.url == dupe).expect("dupe row");
+
+    assert_eq!(
+        outcome_for(&rows, &rep),
+        &Some(SignalCandidateOutcome::Selected)
+    );
+    assert_eq!(
+        &dupe_row.outcome,
+        &Some(SignalCandidateOutcome::Deduplicated {
+            kept_gist: "kept Vistra loan gist".to_string()
+        })
+    );
+    assert_eq!(dupe_row.dupes_count, 1);
+    let version = state
+        .active_version_for(harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate)
+        .unwrap_or_default();
+    state
+        .signal_exclusions_mut()
+        .add_exclusion(crate::signal_candidate::OverrideKey {
+            signal_key: "vistra-4b-loan-nuclear-plant-upgrades".into(),
+            prompt_id: harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate.to_string(),
+            prompt_version: version,
+        });
+    let rows = state.build_signal_candidate_rows();
+    assert_eq!(
+        outcome_for(&rows, &rep),
+        &Some(SignalCandidateOutcome::Excluded)
+    );
+    assert_eq!(
+        outcome_for(&rows, &dupe),
+        &Some(SignalCandidateOutcome::Selected)
+    );
+    assert_eq!(
+        rows.iter().find(|row| row.url == dupe).unwrap().dupes_count,
+        1
+    );
+}
+
+#[test]
 fn outcome_marks_excluded_clusters() {
     use harvester_engine::llm::dto::SourceTier;
     let mut state = AppState::new();

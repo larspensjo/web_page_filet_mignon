@@ -581,6 +581,170 @@
         "spacex-crew-13-iss-launch-docking"
       ],
       "veto": true
+    },
+    {
+      "name": "Cache: Gemini 3.6 versus 3.8 Flash",
+      "keys": [
+        "google-gemini-3-6-flash-launch",
+        "google-gemini-3-8-flash-tts-launch"
+      ],
+      "veto": true
+    },
+    {
+      "name": "Cache: Gemini 3.5 versus 3.7 Flash",
+      "keys": [
+        "google-gemini-3-5-flash-low-cost-launch",
+        "google-gemini-3-7-flash-intro-pricing-launch"
+      ],
+      "veto": true
+    },
+    {
+      "name": "Cache: GPT 6.1 Astra versus GPT 6",
+      "keys": [
+        "openai-gpt-6-1-astra-rollout-scrapped",
+        "openai-gpt-6-astra-launch"
+      ],
+      "veto": true
+    },
+    {
+      "name": "Dotted Opus version veto",
+      "keys": [
+        "anthropic-claude-opus-4-1-launch",
+        "anthropic-claude-opus-4-5-launch"
+      ],
+      "veto": true
+    },
+    {
+      "name": "Llama generation before parameter size veto",
+      "keys": [
+        "meta-llama-4-70b-open-weights-release",
+        "meta-llama-3-70b-open-weights-release"
+      ],
+      "veto": true
+    },
+    {
+      "name": "Gemma generation before parameter size veto",
+      "keys": [
+        "google-gemma-4-12b-edge-release",
+        "google-gemma-3-12b-edge-release"
+      ],
+      "veto": true
+    },
+    {
+      "name": "Cache: fiscal Q2 versus Q1",
+      "keys": [
+        "marvell-fq2-2027-revenue-guidance-ai-infrastructure",
+        "marvell-q1-fy2027-record-revenue-guidance-raise"
+      ],
+      "veto": true
+    },
+    {
+      "name": "Short fiscal year veto",
+      "keys": [
+        "marvell-fy28-revenue-target",
+        "marvell-fy31-revenue-target"
+      ],
+      "veto": true
+    },
+    {
+      "name": "Letter-suffixed version veto",
+      "keys": [
+        "openai-gpt-4o-voice-launch",
+        "openai-gpt-5-voice-launch"
+      ],
+      "veto": true
+    },
+    {
+      "name": "Cache: CoreWeave share sale versus revenue",
+      "keys": [
+        "coreweave-ceo-share-sale-meta-cloud-competition",
+        "coreweave-meta-contract-revenue-surge"
+      ]
+    },
+    {
+      "name": "Cache: SpaceX share sale versus results",
+      "keys": [
+        "spacex-75bn-share-sale-public-debut",
+        "spacex-first-public-quarterly-earnings"
+      ]
+    },
+    {
+      "name": "Cache: CoreWeave different insider sales",
+      "keys": [
+        "coreweave-cdo-brannin-10b5-1-sale",
+        "coreweave-ceo-10b5-1-stock-sale"
+      ]
+    },
+    {
+      "name": "Cache: PANW different insider sales",
+      "keys": [
+        "panw-insider-sale-josh-paul",
+        "panw-insider-sale-aparna-bawa"
+      ]
+    },
+    {
+      "name": "Cache: Astera director sale versus results",
+      "keys": [
+        "astera-labs-director-manuel-alba-10b5-1-sale",
+        "astera-labs-q1-revenue-growth-taiwan-expansion-nasdaq100"
+      ]
+    },
+    {
+      "name": "Cache: Trade Desk different board appointments",
+      "keys": [
+        "the-trade-desk-board-appointment-david-haddad",
+        "the-trade-desk-penry-price-board-appointment"
+      ]
+    },
+    {
+      "name": "Palo Alto Networks name is not results evidence",
+      "keys": [
+        "palo-alto-networks-director-sale",
+        "palo-alto-networks-revenue-growth"
+      ]
+    },
+    {
+      "name": "Astera Labs name is not results evidence",
+      "keys": [
+        "astera-labs-revenue-optics",
+        "astera-labs-earnings-memory"
+      ]
+    },
+    {
+      "name": "Quarter marker cannot lead different actors",
+      "keys": [
+        "q3-earnings-nvidia-guidance",
+        "q3-earnings-amd-guidance"
+      ]
+    },
+    {
+      "name": "Half marker cannot lead different actors",
+      "keys": [
+        "h1-earnings-nvidia-guidance",
+        "h1-earnings-amd-guidance"
+      ]
+    },
+    {
+      "name": "Non-actor lead with only one shared probe object",
+      "keys": [
+        "eu-ai-probe-meta-chatbot",
+        "eu-ai-probe-google-chatbot-gemini"
+      ]
+    },
+    {
+      "name": "Cache and second benchmark: FY31 versus 2028 revenue target",
+      "keys": [
+        "marvell-fy31-revenue-target-scale-up-optics",
+        "marvell-raises-2028-revenue-target-ai-data-center-demand"
+      ],
+      "veto": true
+    },
+    {
+      "name": "Palo Alto Networks name alone cannot join different results",
+      "keys": [
+        "palo-alto-networks-revenue-optics",
+        "palo-alto-networks-earnings-memory"
+      ]
     }
   ],
   "synthetic_merge": [
@@ -603,6 +767,55 @@
       "keys": [
         "marvell-fy2031-revenue-target-90b",
         "marvell-long-range-revenue-target-2031"
+      ]
+    },
+    {
+      "name": "Dotted versions preserve compatible leading zeros",
+      "keys": [
+        "google-gemini-03-06-flash-launch",
+        "google-gemini-3-6-flash-release"
+      ]
+    },
+    {
+      "name": "Version followed by size preserves same generation",
+      "keys": [
+        "meta-llama-4-70b-open-weights-release",
+        "meta-llama-4-8b-open-weight-launch"
+      ]
+    },
+    {
+      "name": "Short fiscal and calendar years agree",
+      "keys": [
+        "marvell-fy31-revenue-target",
+        "marvell-2031-revenue-target"
+      ]
+    },
+    {
+      "name": "Fiscal and calendar quarters agree",
+      "keys": [
+        "marvell-fq2-2027-revenue-guidance",
+        "marvell-q2-fy2027-revenue-guidance"
+      ]
+    },
+    {
+      "name": "Letter-suffixed versions preserve compatible generation",
+      "keys": [
+        "openai-gpt-4o-voice-launch",
+        "openai-gpt-4o-voice-release"
+      ]
+    },
+    {
+      "name": "Spelled and suffixed decimal amounts agree",
+      "keys": [
+        "us-lends-vistra-4-2-billion-nuclear",
+        "vistra-doe-4-2b-loan-nuclear"
+      ]
+    },
+    {
+      "name": "Gemma size is not its generation",
+      "keys": [
+        "google-gemma-4-12b-edge-release",
+        "google-gemma-4-edge-launch"
       ]
     }
   ]

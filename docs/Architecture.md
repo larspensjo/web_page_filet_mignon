@@ -313,9 +313,20 @@ Manual exclusions are reducer state, persisted through the reducer-emitted
 `PersistSignalCandidateOverrides` effect and cleared by a checkpoint export.
 The pure signal selection groups all above-threshold canonical keys before
 exclusions and carries fold membership in representative election order (tier,
-score, URL). Exact-key duplicates retain their own raw slugs with reason
-`same_event`; excluded clusters contribute no folds. Membership accessors supply
-the candidate rows' duplicate counts and kept representative gist.
+score, URL). Slug-only normalization folds compound names and aliases, removes
+noise and quantities, and requires a shared lead plus class-specific object
+evidence (or three shared objects without disjoint event classes). Explicit
+period, year and version differences veto a merge, including fiscal `fqN`/`fyNN`
+forms, dotted model generations and letter-suffixed versions. Parameter sizes
+preserve the preceding generation, while rounded loan amounts do not veto.
+Period-derived `quarter`/`half` objects never become the lead. Compound company
+names keep their trailing words out of evidence; singular `sale` is an ordinary
+object, while plural `sales` remains results evidence. Keys are bucketed by lead in
+ascending byte order and grouped by complete linkage, so every member must match
+every other member. Same-event members retain their own raw slugs with reason
+`same_event`. Exclusions remove only articles with the named canonical key;
+excluding a representative promotes the next eligible member. Membership accessors
+supply the candidate rows' duplicate counts and kept representative gist.
 The dialog pins the signal selection and its membership, and a full-mode URL
 list with empty membership beside the triage corpus. Full mode and the
 missing-signal-snapshot fallback use that full-mode pin. Submit sends the chosen
@@ -331,9 +342,11 @@ summary under any key, with full article tokens when no summary resolves. The
 legacy summary accessor still prefers a live session summary before that lookup.
 The grouped `archive_meter` counts only selected saved current-key scored articles
 that are actionable and in the checkpoint window, applying the score threshold,
-duplicate-cluster representatives and manual exclusions. It never falls back to
-the triage corpus. Its fixed article target is 150; its summary-token estimate uses
-the same newest-summary-for-content-hash rule over just those selected articles.
+merged same-event group representatives and manual exclusions. It shows the
+recomputed selection count, which may decrease when a newly scored key regroups
+existing articles. Only the dialog pin fixes a selection for one export. It never
+falls back to the triage corpus. Its fixed article target is 150; its summary-token
+estimate uses the same newest-summary-for-content-hash rule over just those selected articles.
 Its backlog counts actionable window articles missing current-key triage, summary
 above the summary cutoff, or scoring at or above the scoring cutoff. Failed attempts
 remain unfinished; settled articles below the cutoffs do not count. Pending startup

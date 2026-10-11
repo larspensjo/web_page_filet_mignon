@@ -1,29 +1,29 @@
 Archive signal-key grouping (selected-index benchmark)
 Rows: 197
 Groups before: 197
-Groups after: 197
+Groups after: 150
 
-Families (merge targets inactive):
-- Vistra DOE loan: 13 keys -> 13 groups; one_group (inactive); docs [2, 5, 16, 21, 24, 33, 34, 53, 62, 85, 146, 184, 192]
-- Foxconn Q3: 9 keys -> 9 groups; one_group (inactive); docs [4, 13, 40, 56, 72, 73, 97, 107, 181]
-- Reflection Beam: 9 keys -> 9 groups; report; docs [7, 14, 51, 91, 106, 112, 118, 131, 170]
-  floor [7, 14, 106, 112, 131]: 5 groups; one_group (inactive)
-- Amazon community pledge: 10 keys -> 10 groups; report; docs [35, 52, 63, 87, 92, 119, 124, 135, 159, 171]
-  floor [87, 119, 124]: 3 groups; one_group (inactive)
-- FTC OpenAI and Anthropic probe: 5 keys -> 5 groups; one_group (inactive); docs [48, 93, 99, 161, 174]
-- Tencent-Oracle lease: 4 keys -> 4 groups; report; docs [3, 15, 67, 190]
-- Northrop YFQ-48A first flight: 4 keys -> 4 groups; report; docs [54, 79, 94, 136]
-- Rocket Lab-Synspective: 6 keys -> 6 groups; report; docs [30, 44, 50, 105, 129, 150]
-- Tesla AI5/AI6 memory: 3 keys -> 3 groups; report; docs [140, 154, 163]
-- Tesla night-time limit: 2 keys -> 2 groups; report; docs [109, 196]
-- Tesla cautious expansion / extended hours: 2 keys -> 2 groups; report; docs [144, 145]
-- Tesla (all ten selected keys): 10 keys -> 10 groups; report; docs [86, 109, 140, 144, 145, 154, 162, 163, 191, 196]
-- Marvell 2031 revenue target: 3 keys -> 3 groups; report; docs [18, 19, 66]
-  floor [18, 19]: 2 groups; one_group (inactive)
-- AMD demand outrunning supply: 2 keys -> 2 groups; report; docs [83, 104]
-- DeepSeek-Huawei software stack: 2 keys -> 2 groups; report; docs [45, 197]
-- Nebius-Inferize acquisition: 2 keys -> 2 groups; report; docs [80, 169]
-- Broadcom chip financing: 2 keys -> 2 groups; report; docs [37, 164]
+Families:
+- Vistra DOE loan: 13 keys -> 1 groups; one_group; docs [2, 5, 16, 21, 24, 33, 34, 53, 62, 85, 146, 184, 192]
+- Foxconn Q3: 9 keys -> 1 groups; one_group; docs [4, 13, 40, 56, 72, 73, 97, 107, 181]
+- Reflection Beam: 9 keys -> 5 groups; report; docs [7, 14, 51, 91, 106, 112, 118, 131, 170]
+  floor [7, 14, 106, 112, 131]: 1 groups; one_group
+- Amazon community pledge: 10 keys -> 6 groups; report; docs [35, 52, 63, 87, 92, 119, 124, 135, 159, 171]
+  floor [87, 119, 124]: 1 groups; one_group
+- FTC OpenAI and Anthropic probe: 5 keys -> 1 groups; one_group; docs [48, 93, 99, 161, 174]
+- Tencent-Oracle lease: 4 keys -> 2 groups; report; docs [3, 15, 67, 190]
+- Northrop YFQ-48A first flight: 4 keys -> 2 groups; report; docs [54, 79, 94, 136]
+- Rocket Lab-Synspective: 6 keys -> 4 groups; report; docs [30, 44, 50, 105, 129, 150]
+- Tesla AI5/AI6 memory: 3 keys -> 1 groups; report; docs [140, 154, 163]
+- Tesla night-time limit: 2 keys -> 1 groups; report; docs [109, 196]
+- Tesla cautious expansion / extended hours: 2 keys -> 1 groups; report; docs [144, 145]
+- Tesla (all ten selected keys): 10 keys -> 6 groups; report; docs [86, 109, 140, 144, 145, 154, 162, 163, 191, 196]
+- Marvell 2031 revenue target: 3 keys -> 2 groups; report; docs [18, 19, 66]
+  floor [18, 19]: 1 groups; one_group
+- AMD demand outrunning supply: 2 keys -> 1 groups; report; docs [83, 104]
+- DeepSeek-Huawei software stack: 2 keys -> 1 groups; report; docs [45, 197]
+- Nebius-Inferize acquisition: 2 keys -> 1 groups; report; docs [80, 169]
+- Broadcom chip financing: 2 keys -> 1 groups; report; docs [37, 164]
 - Gemini argon / argron (known under-merge): 2 keys -> 2 groups; report; docs [22, 189]
 - California SB1246 (known under-merge): 3 keys -> 3 groups; report; docs [49, 89, 96]
 - Nebius-Meta (known under-merge): 3 keys -> 3 groups; report; docs [82, 122, 183]
@@ -37,12 +37,101 @@ Families (merge targets inactive):
 - Nebius GPU price rise: 2 keys -> 2 groups; report; docs [9, 10]
 - Micron earnings: 2 keys -> 2 groups; report; docs [17, 177]
 
-Separation guards: 14 real cases / 11 synthetic cases (5 marker vetoes)
+Separation guards: 14 real cases / 33 synthetic cases (15 marker vetoes)
 
-Synthetic merge targets (inactive):
-- Unspecified quarter is compatible: 2 keys -> 2 groups; ["foxconn-q3-revenue-ai-demand", "foxconn-quarterly-revenue-beat-ai-demand"]
-- Rounded amounts never veto: 2 keys -> 2 groups; ["vistra-4b-loan-nuclear-plant-upgrades", "vistra-4-2b-doe-loan-nuclear-uprates"]
-- Fiscal and calendar year agree: 2 keys -> 2 groups; ["marvell-fy2031-revenue-target-90b", "marvell-long-range-revenue-target-2031"]
+Synthetic merge targets:
+- Unspecified quarter is compatible: 2 keys -> 1 groups; ["foxconn-q3-revenue-ai-demand", "foxconn-quarterly-revenue-beat-ai-demand"]
+- Rounded amounts never veto: 2 keys -> 1 groups; ["vistra-4b-loan-nuclear-plant-upgrades", "vistra-4-2b-doe-loan-nuclear-uprates"]
+- Fiscal and calendar year agree: 2 keys -> 1 groups; ["marvell-fy2031-revenue-target-90b", "marvell-long-range-revenue-target-2031"]
+- Dotted versions preserve compatible leading zeros: 2 keys -> 1 groups; ["google-gemini-03-06-flash-launch", "google-gemini-3-6-flash-release"]
+- Version followed by size preserves same generation: 2 keys -> 1 groups; ["meta-llama-4-70b-open-weights-release", "meta-llama-4-8b-open-weight-launch"]
+- Short fiscal and calendar years agree: 2 keys -> 1 groups; ["marvell-fy31-revenue-target", "marvell-2031-revenue-target"]
+- Fiscal and calendar quarters agree: 2 keys -> 1 groups; ["marvell-fq2-2027-revenue-guidance", "marvell-q2-fy2027-revenue-guidance"]
+- Letter-suffixed versions preserve compatible generation: 2 keys -> 1 groups; ["openai-gpt-4o-voice-launch", "openai-gpt-4o-voice-release"]
+- Spelled and suffixed decimal amounts agree: 2 keys -> 1 groups; ["us-lends-vistra-4-2-billion-nuclear", "vistra-doe-4-2b-loan-nuclear"]
+- Gemma size is not its generation: 2 keys -> 1 groups; ["google-gemma-4-12b-edge-release", "google-gemma-4-edge-launch"]
 
 Multi-member groups:
-(none)
+- amazon-1b-data-center-community-investment
+  doc 52 | amazon-data-center-community-investment | Amazon to invest $1B into data center communities amid backlash against data center rollouts
+  doc 171 | amazon-1b-data-center-community-investment | Amazon to invest US$1 billion over five years in U.S. data centre communities
+- amazon-built-together-data-center-community-program
+  doc 92 | amazon-data-center-commitment-built-together | The race our nation can’t afford to lose, plus a new commitment from us and a fresh set of community investments
+  doc 159 | amazon-built-together-data-center-community-program | Amazon Will Pay for Your Community College. Not Its Full Property Tax
+- amazon-data-center-commitment
+  doc 87 | amazon-data-center-commitment | Amazon writes scary blog warning communities not to block data centers
+  doc 119 | amazon-data-center-transparency-pledge | Amazon pledges greater transparency on data centers
+  doc 124 | amazon-data-center-community-commitment | Amazon promete millonaria inversión para ciudades con centros de datos de IA
+- amd-ai-chip-demand-outstripping-supply-2027-ramp
+  doc 83 | amd-ai-chip-demand-outstripping-supply-2027-ramp | AMD Reportedly Sees AI Chip Demand Outrunning Supply — Lisa Su Plans ‘Substantial’ 2027 Ramp
+  doc 104 | amd-ai-demand-outrunning-chip-supply | AMD Says AI Demand Is Outrunning Chip Supply
+- broadcom-60b-ai-chip-financing-anthropic
+  doc 37 | broadcom-60b-ai-chip-financing-anthropic | Broadcom amassing US$60 billion to fund chips for Anthropic: sources
+  doc 164 | broadcom-ai-chip-financing-deal | Why Is Broadcom (NASDAQ:AVGO) Lining Up a Large AI Chip Financing Deal?
+- deepseek-huawei-ascend-cuda-stack
+  doc 45 | deepseek-huawei-ascend-cuda-stack | 🗞️DeepSeek and Huawei Target Nvidia's CUDA Moat, and Manus Relaunches as the Agent Wars Heat Up
+  doc 197 | deepseek-huawei-tilelang-ascend-software-stack | DeepSeek, Huawei Challenge the Software Powering Nvidia’s AI Dominance
+- doe-4-2b-loan-vistra-nuclear-plant-life-extensions
+  doc 2 | vistra-4-2b-doe-loan-nuclear-uprates | US to Loan Vistra $4.2 Billion to Expand Nuclear Output at Three Plants — BigGo Finance
+  doc 5 | doe-loan-vistra-nuclear-fleet-uprates | DOE intends to loan Vistra $4.2B for nuclear fleet improvements
+  doc 16 | vistra-4b-loan-nuclear-plant-upgrades | TheValueist (@TheValueist) on X
+  doc 21 | us-lend-vistra-4-2b-nuclear-uprates | U.S. to lend $4.2 billion to Vistra to boost nuclear power output, source says
+  doc 24 | doe-4b-loan-vistra-nuclear-upgrades | Did a US$4 Billion Federal Nuclear Loan Just Shift Vistra's (VST) Investment Narrative?
+  doc 33 | vistra-nuclear-loan-upgrade | Acciones de Vistra rebotan tras reporte de préstamo nuclear de $4B
+  doc 34 | doe-4-2b-loan-vistra-nuclear-plant-life-extensions | Department of Energy Announces a New Multibillion-Dollar Nuclear Energy Deal / The Motley Fool
+  doc 53 | doe-prepares-4b-loan-for-vistra-nuclear-upgrade | Trump Administration Reportedly Prepares $4B Federal Loan to Expand Vistra’s Nuclear Capacity
+  doc 62 | doe-loan-vistra-nuclear-plant-upgrade | Why Centrus Stock Popped on Tuesday / The Motley Fool
+  doc 85 | us-loan-vistra-nuclear-output-uprate | US to reportedly lend $4.2 billion to Vistra to boost nuclear power output - VST News
+  doc 146 | vistra-federal-nuclear-financing-plant-upgrades | Vistra rises as reported federal nuclear financing lifts outlook for plant upgrades / VST Stock News
+  doc 184 | doe-4-2b-loan-vistra-nuclear-upgrades | Why Vistra Stock Popped on Tuesday / The Motley Fool
+  doc 192 | vistra-nuclear-plant-upgrade-financing-package | Why this Nancy Pelosi and Peter Thiel stock is rocketing today
+- foxconn-q3-2026-revenue-jumps-on-ai-servers
+  doc 4 | foxconn-q3-2026-revenue-jumps-on-ai-servers | Foxconn Q3 2026 revenue jumps 47% on AI servers
+  doc 13 | foxconn-q3-revenue-surge-ai-server-demand | Foxconn Reports 47% Year-on-Year Revenue Surge in Q3
+  doc 40 | foxconn-q3-revenue-ai-server-demand | AI Server Orders Power Foxconn to a $95 Billion Quarter as Nvidia Shares Set a Record - SSBCrack News
+  doc 56 | foxconn-q3-revenue-ai-hardware-demand | Foxconn Third-Quarter Revenue Soars 47% on Surge in AI Hardware Demand
+  doc 72 | foxconn-q3-revenue-jumps-ai-server-demand | Foxconn Revenue Jumps 47% As AI Server Demand Surges
+  doc 73 | foxconn-q3-revenue-ai-demand | Foxconn Q3 Revenue Up 47% to T$3.03 Trillion on AI Demand - FourWeekMBA
+  doc 97 | hon-hai-quarterly-revenue-beats-estimates-ai-demand | Dunia Masih Demam AI, Vendor Nvidia & Apple Semakin Diuntungkan - Teknologi
+  doc 107 | foxconn-q3-sales-up-47-percent-ai-demand | Penjualan Foxconn Kuartal III Naik 47% ke NT$3,03 Triliun, Ditopang AI
+  doc 181 | foxconn-quarterly-revenue-beat-ai-hardware-demand | Foxconn's revenue surged by 47%, and the spen...
+- ftc-investigates-anthropic-openai-ai-safety-probe
+  doc 48 | ftc-probes-openai-anthropic-product-safety | FTC Probing OpenAI, Anthropic Over Product Safety Concerns
+  doc 93 | ftc-investigation-openai-anthropic-ai-safety | The Federal Trade Commission Is Investigating Anthropic And OpenAI — Here’s Why
+  doc 99 | ftc-investigation-anthropic-openai | US FTC will investigate Anthropic and OpenAI
+  doc 161 | ftc-investigation-openai-anthropic-consumer-risk | FTC is investigating OpenAI and Anthropic over possible risks to consumers / Texarkana Gazette
+  doc 174 | ftc-investigates-anthropic-openai-ai-safety-probe | The Federal Trade Commission Is Investigating Anthropic And OpenAI — Here's Why - AfroTech
+- marvell-fy2031-revenue-target-90b
+  doc 18 | marvell-long-range-revenue-target-2031 | Marvell Technology Targets Up to $90B Revenue by 2031 as AI Demand Accelerates
+  doc 19 | marvell-fy2031-revenue-target-90b | Marvell Technology Stock Jumps as 2031 Target Hits $90B
+- nebius-acquires-inferize
+  doc 80 | nebius-acquires-inferize | Neocloud Nebius Acquires Cold-Start Fixer Inferize to Strengthen Inference Stack - WOWTALE
+  doc 169 | nebius-inferize-acquisition | Nebius Rallies 9% on an Inference Deal While Its Earnings Multiple Sits Near 197x; CoreWeave Gains 4%, Oracle Advances 3%
+- northrop-talon-blue-first-autonomous-flight
+  doc 79 | northrop-talon-blue-first-autonomous-flight | Northrop Talon Blue: primer vuelo del wingman del F-35 – El Ecosistema Startup
+  doc 94 | northrop-yfq-48a-talon-blue-first-flight | Northrop Grumman's YFQ-48A Talon Blue flies for the first time
+  doc 136 | northrop-yfq-48a-talon-blue-autonomous-flight | Northrop Grumman’s YFQ-48A Talon Blue completes first fully autonomous flight in company-funded aircraft development program
+- reflection-ai-beam-open-weight-launch
+  doc 7 | reflection-ai-beam-open-weight-release | Reflection AI Launches Open-Weight Model 'Beam,' Pushing the Western Open Frontier - WOWTALE
+  doc 14 | reflection-ai-beam-open-weight-launch | What Beam Is and Why Nvidia Is Betting Big on Reflection AI - Startup Fortune
+  doc 106 | reflection-ai-beam-open-weight-model-release | Reflection AI unveils Beam, a 501-billion-parameter open model to rival China - Startup Fortune
+  doc 112 | reflection-ai-launches-beam-open-weight-model | Nvidia-backed Reflection unveils first AI model to take on Chinese open models
+  doc 131 | reflection-ai-beam-open-weight-model-launch | Nvidia-Backed Reflection Unveils Open AI Model, Taking on China
+- rocket-lab-synspective-20-launch-electron-contract
+  doc 30 | rocket-lab-synspective-20-mission-electron-deal | Rocket Lab Climbs 5% as Largest-Ever Electron Deal Lifts Backlog Past 100 Missions; AST SpaceMobile Ticks Up, SpaceX Holds Flat - AOL
+  doc 50 | rocket-lab-synspective-20-launch-electron-contract | How Investors May Respond To Rocket Lab (RKLB) Winning Synspective’s Record 20-Launch Electron Contract
+  doc 105 | rocket-lab-synspective-electron-launch-deal | Largest Electron Launch Deal At Rocket Lab (RKLB) Has Changed Its Investment Story
+- tencent-oracle-100000-ai-chips-lease
+  doc 3 | tencent-oracle-100000-ai-chips-lease | Tencent leases 100,000 Oracle AI chips abroad in a $7bn deal
+  doc 15 | tencent-oracle-offshore-ai-chip-lease | Tencent scores 100,000 offshore AI chip deal with Oracle for $7 billion despite climbing prices
+  doc 67 | tencent-oracle-ai-chip-lease | [News] Tencent Reportedly Signs $7B Deal to Lease 100,000 AI Chips From Oracle in Southeast Asia
+- tesla-ai5-ai6-memory-cut-optimus
+  doc 140 | tesla-ai5-ai6-memory-cut-optimus-volume | Tesla Slashed AI5 Chip Memory to Hit Optimus Volume, Musk Says
+  doc 154 | tesla-optimus-ai5-ai6-memory-reduction | « C'était la seule façon »: Elon Musk fait une confidence sur le robot Tesla Optimus
+  doc 163 | tesla-ai5-ai6-memory-cut-optimus | Tesla cuts AI5 memory for Optimus, but not as much as originally planned
+- tesla-austin-robotaxi-cautious-expansion
+  doc 144 | tesla-austin-robotaxi-cautious-expansion | Musk frena el entusiasmo por el robotaxi: «Máxima cautela» con Tesla
+  doc 145 | tesla-austin-robotaxi-hours-cybercab-fleet-expansion | Tesla Extends Robotaxi Hours in Austin, Adds 111 Cybercabs - Not a Tesla App
+- tesla-austin-robotaxi-nighttime-limit
+  doc 109 | tesla-robotaxi-nighttime-animal-detection-limit | Robotaxis Tesla : Elon Musk avoue ce qui les empêche de rouler plus tard le soir
+  doc 196 | tesla-austin-robotaxi-nighttime-limit | Elon Musk Says Gray Kittens Are Grounding Tesla Robotaxis At Night

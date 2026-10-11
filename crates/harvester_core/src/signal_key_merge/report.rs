@@ -182,7 +182,7 @@ pub fn build_grouping_report(
         .collect::<BTreeSet<_>>()
         .len();
     let mut report = format!(
-        "Archive signal-key grouping (selected-index benchmark)\nRows: {}\nGroups before: {before}\nGroups after: {}\n\nFamilies (merge targets inactive):\n",
+        "Archive signal-key grouping (selected-index benchmark)\nRows: {}\nGroups before: {before}\nGroups after: {}\n\nFamilies:\n",
         rows.len(), groups.groups().len()
     );
     for family in &expectations.families {
@@ -194,7 +194,7 @@ pub fn build_grouping_report(
             .len();
         let after = distinct_groups(keys.iter().copied(), groups)?;
         let target = match family.target {
-            FamilyTarget::OneGroup => "one_group (inactive)",
+            FamilyTarget::OneGroup => "one_group",
             FamilyTarget::Report => "report",
         };
         writeln!(
@@ -207,7 +207,7 @@ pub fn build_grouping_report(
             let floor_keys = keys_for(&family.floor)?;
             writeln!(
                 report,
-                "  floor {:?}: {} groups; one_group (inactive)",
+                "  floor {:?}: {} groups; one_group",
                 family.floor,
                 distinct_groups(floor_keys, groups)?
             )
@@ -226,7 +226,7 @@ pub fn build_grouping_report(
             .count()
     )
     .unwrap();
-    report.push_str("\nSynthetic merge targets (inactive):\n");
+    report.push_str("\nSynthetic merge targets:\n");
     for case in &expectations.synthetic_merge {
         let groups = group_signal_keys(&case.keys);
         writeln!(

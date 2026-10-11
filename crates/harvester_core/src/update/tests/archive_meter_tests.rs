@@ -936,7 +936,60 @@ fn fresh_window_after_checkpoint_archive_reads_zero_then_grows() {
     }
 }
 #[test]
-fn mid_run_count_grows_monotonically_while_scoring_is_pending() {
+fn newly_scored_early_key_regroups_meter_from_three_groups_to_two() {
+    let f = Fixture::new(&[
+        ("a", Some(5), true, None),
+        ("b", Some(5), true, None),
+        ("c", Some(5), true, None),
+        ("d", Some(5), true, None),
+        ("k", Some(5), true, None),
+    ]);
+    let mut state = f.ready();
+    for (index, key) in crate::signal_key_merge::REGROUPING_KEYS.iter().enumerate() {
+        state = save_score(state, &f.articles[index], key);
+        let count = state.archive_meter_view().selected_count;
+        assert_eq!(
+            count,
+            state.signal_candidate_selection().selected_urls.len()
+        );
+        assert_eq!(count, [1, 1, 2, 3, 2][index]);
+        assert_eq!(state.archive_meter_view().unsettled_count, 4 - index);
+    }
+    let count = state.archive_meter_view().selected_count;
+    let state = dialog(state, DialogDefault::OnAllSettled);
+    let request_id = state.archive_request_id();
+    let (_, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "regroup-test.md".into(),
+            set_checkpoint: false,
+            submitted_at: now(),
+            use_summaries: true,
+            use_signal_candidates: true,
+        },
+    );
+    let (urls, folds) = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::ArchiveRequested {
+                ordered_urls,
+                folds,
+                ..
+            } => Some((ordered_urls, folds)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(urls.len(), count);
+    assert_eq!(folds.values().map(Vec::len).sum::<usize>(), 3);
+    assert!(folds
+        .values()
+        .flatten()
+        .all(|member| member.reason == harvester_engine::ArchiveFoldReason::SameEvent));
+}
+
+#[test]
+fn mid_run_count_equals_recomputed_selection_while_scoring_is_pending() {
     let f = Fixture::new(&[
         ("a", Some(5), true, None),
         ("b", Some(5), true, None),
@@ -952,13 +1005,15 @@ fn mid_run_count_grows_monotonically_while_scoring_is_pending() {
     );
     let (mut state, mut effects) =
         crate::fixture_support::complete_processing_start(state, effects, 100_000);
-    let mut previous = 0;
     let mut completed = 0;
     loop {
-        assert!(state.archive_meter_view().selected_count >= previous);
-        previous = state.archive_meter_view().selected_count;
-        assert!(previous <= 2);
-        assert!(previous < f.articles.len());
+        let selected_count = state.archive_meter_view().selected_count;
+        assert_eq!(
+            selected_count,
+            state.signal_candidate_selection().selected_urls.len()
+        );
+        assert!(selected_count <= 2);
+        assert!(selected_count < f.articles.len());
         let Some(id) =
             super::support::request_id_for_prompt(&effects, PromptId::ArticleSignalCandidate)
         else {

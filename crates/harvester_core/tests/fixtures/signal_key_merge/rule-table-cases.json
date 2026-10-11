@@ -1,0 +1,2220 @@
+{
+  "families": [],
+  "separate": [],
+  "synthetic": [
+    {
+      "name": "Noise a boundary",
+      "keys": [
+        "a-witnessnoise0-loan-nuclear",
+        "witnessnoise0-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise an boundary",
+      "keys": [
+        "an-witnessnoise1-loan-nuclear",
+        "witnessnoise1-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise and boundary",
+      "keys": [
+        "and-witnessnoise2-loan-nuclear",
+        "witnessnoise2-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise as boundary",
+      "keys": [
+        "as-witnessnoise3-loan-nuclear",
+        "witnessnoise3-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise at boundary",
+      "keys": [
+        "at-witnessnoise4-loan-nuclear",
+        "witnessnoise4-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise by boundary",
+      "keys": [
+        "by-witnessnoise5-loan-nuclear",
+        "witnessnoise5-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise for boundary",
+      "keys": [
+        "for-witnessnoise6-loan-nuclear",
+        "witnessnoise6-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise from boundary",
+      "keys": [
+        "from-witnessnoise7-loan-nuclear",
+        "witnessnoise7-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise in boundary",
+      "keys": [
+        "in-witnessnoise8-loan-nuclear",
+        "witnessnoise8-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise its boundary",
+      "keys": [
+        "its-witnessnoise9-loan-nuclear",
+        "witnessnoise9-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise of boundary",
+      "keys": [
+        "of-witnessnoise10-loan-nuclear",
+        "witnessnoise10-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise on boundary",
+      "keys": [
+        "on-witnessnoise11-loan-nuclear",
+        "witnessnoise11-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise over boundary",
+      "keys": [
+        "over-witnessnoise12-loan-nuclear",
+        "witnessnoise12-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise the boundary",
+      "keys": [
+        "the-witnessnoise13-loan-nuclear",
+        "witnessnoise13-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise to boundary",
+      "keys": [
+        "to-witnessnoise14-loan-nuclear",
+        "witnessnoise14-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise with boundary",
+      "keys": [
+        "with-witnessnoise15-loan-nuclear",
+        "witnessnoise15-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise after boundary",
+      "keys": [
+        "after-witnessnoise16-loan-nuclear",
+        "witnessnoise16-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise amid boundary",
+      "keys": [
+        "amid-witnessnoise17-loan-nuclear",
+        "witnessnoise17-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise up boundary",
+      "keys": [
+        "up-witnessnoise18-loan-nuclear",
+        "witnessnoise18-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise new boundary",
+      "keys": [
+        "new-witnessnoise19-loan-nuclear",
+        "witnessnoise19-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise ai boundary",
+      "keys": [
+        "ai-witnessnoise20-loan-nuclear",
+        "witnessnoise20-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise says boundary",
+      "keys": [
+        "says-witnessnoise21-loan-nuclear",
+        "witnessnoise21-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise reportedly boundary",
+      "keys": [
+        "reportedly-witnessnoise22-loan-nuclear",
+        "witnessnoise22-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise report boundary",
+      "keys": [
+        "report-witnessnoise23-loan-nuclear",
+        "witnessnoise23-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise reports boundary",
+      "keys": [
+        "reports-witnessnoise24-loan-nuclear",
+        "witnessnoise24-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise prepares boundary",
+      "keys": [
+        "prepares-witnessnoise25-loan-nuclear",
+        "witnessnoise25-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise plans boundary",
+      "keys": [
+        "plans-witnessnoise26-loan-nuclear",
+        "witnessnoise26-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise eyes boundary",
+      "keys": [
+        "eyes-witnessnoise27-loan-nuclear",
+        "witnessnoise27-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise set boundary",
+      "keys": [
+        "set-witnessnoise28-loan-nuclear",
+        "witnessnoise28-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise us boundary",
+      "keys": [
+        "us-witnessnoise29-loan-nuclear",
+        "witnessnoise29-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise u boundary",
+      "keys": [
+        "u-witnessnoise30-loan-nuclear",
+        "witnessnoise30-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise s boundary",
+      "keys": [
+        "s-witnessnoise31-loan-nuclear",
+        "witnessnoise31-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise doe boundary",
+      "keys": [
+        "doe-witnessnoise32-loan-nuclear",
+        "witnessnoise32-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise federal boundary",
+      "keys": [
+        "federal-witnessnoise33-loan-nuclear",
+        "witnessnoise33-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise government boundary",
+      "keys": [
+        "government-witnessnoise34-loan-nuclear",
+        "witnessnoise34-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise administration boundary",
+      "keys": [
+        "administration-witnessnoise35-loan-nuclear",
+        "witnessnoise35-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise trump boundary",
+      "keys": [
+        "trump-witnessnoise36-loan-nuclear",
+        "witnessnoise36-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise whitehouse boundary",
+      "keys": [
+        "whitehouse-witnessnoise37-loan-nuclear",
+        "witnessnoise37-loan-solar"
+      ]
+    },
+    {
+      "name": "Noise percent boundary",
+      "keys": [
+        "percent-witnessnoise38-loan-nuclear",
+        "witnessnoise38-loan-solar"
+      ]
+    },
+    {
+      "name": "Compound hon hai boundary",
+      "keys": [
+        "witnesscompound0-loan-hon-hai",
+        "witnesscompound0-loan-solar"
+      ]
+    },
+    {
+      "name": "Actor compound hon hai boundary",
+      "keys": [
+        "hon-hai-loan-red",
+        "hon-hai-loan-blue"
+      ]
+    },
+    {
+      "name": "Compound rocket lab boundary",
+      "keys": [
+        "witnesscompound3-loan-rocket-lab",
+        "witnesscompound3-loan-solar"
+      ]
+    },
+    {
+      "name": "Actor compound rocket lab boundary",
+      "keys": [
+        "rocket-lab-loan-red",
+        "rocket-lab-loan-blue"
+      ]
+    },
+    {
+      "name": "Compound northrop grumman boundary",
+      "keys": [
+        "witnesscompound6-loan-northrop-grumman",
+        "witnesscompound6-loan-solar"
+      ]
+    },
+    {
+      "name": "Actor compound northrop grumman boundary",
+      "keys": [
+        "northrop-grumman-loan-red",
+        "northrop-grumman-loan-blue"
+      ]
+    },
+    {
+      "name": "Compound data center boundary",
+      "keys": [
+        "witnesscompound9-loan-data-center",
+        "witnesscompound9-loan-solar"
+      ]
+    },
+    {
+      "name": "Compound data centers boundary",
+      "keys": [
+        "witnesscompound12-loan-data-centers",
+        "witnesscompound12-loan-solar"
+      ]
+    },
+    {
+      "name": "Compound data centre boundary",
+      "keys": [
+        "witnesscompound15-loan-data-centre",
+        "witnesscompound15-loan-solar"
+      ]
+    },
+    {
+      "name": "Compound open weight boundary",
+      "keys": [
+        "witnesscompound18-loan-open-weight",
+        "witnesscompound18-loan-solar"
+      ]
+    },
+    {
+      "name": "Compound open weights boundary",
+      "keys": [
+        "witnesscompound21-loan-open-weights",
+        "witnesscompound21-loan-solar"
+      ]
+    },
+    {
+      "name": "Compound white house boundary",
+      "keys": [
+        "witnesscompound24-loan-white-house-nuclear",
+        "witnesscompound24-loan-solar"
+      ]
+    },
+    {
+      "name": "Compound ge vernova boundary",
+      "keys": [
+        "witnesscompound27-loan-ge-vernova",
+        "witnesscompound27-loan-solar"
+      ]
+    },
+    {
+      "name": "Actor compound ge vernova boundary",
+      "keys": [
+        "ge-vernova-loan-red",
+        "ge-vernova-loan-blue"
+      ]
+    },
+    {
+      "name": "Compound bloom energy boundary",
+      "keys": [
+        "witnesscompound30-loan-bloom-energy",
+        "witnesscompound30-loan-solar"
+      ]
+    },
+    {
+      "name": "Actor compound bloom energy boundary",
+      "keys": [
+        "bloom-energy-loan-red",
+        "bloom-energy-loan-blue"
+      ]
+    },
+    {
+      "name": "Compound blue origin boundary",
+      "keys": [
+        "witnesscompound33-loan-blue-origin",
+        "witnesscompound33-loan-solar"
+      ]
+    },
+    {
+      "name": "Actor compound blue origin boundary",
+      "keys": [
+        "blue-origin-loan-red",
+        "blue-origin-loan-blue"
+      ]
+    },
+    {
+      "name": "Compound sk hynix boundary",
+      "keys": [
+        "witnesscompound36-loan-sk-hynix",
+        "witnesscompound36-loan-solar"
+      ]
+    },
+    {
+      "name": "Actor compound sk hynix boundary",
+      "keys": [
+        "sk-hynix-loan-red",
+        "sk-hynix-loan-blue"
+      ]
+    },
+    {
+      "name": "Compound palo alto boundary",
+      "keys": [
+        "witnesscompound39-loan-palo-alto",
+        "witnesscompound39-loan-solar"
+      ]
+    },
+    {
+      "name": "Actor compound palo alto boundary",
+      "keys": [
+        "palo-alto-loan-red",
+        "palo-alto-loan-blue"
+      ]
+    },
+    {
+      "name": "Alias aws boundary",
+      "keys": [
+        "aws-loan-nuclear",
+        "amazon-loan-solar"
+      ]
+    },
+    {
+      "name": "Event loan threshold 1 boundary",
+      "keys": [
+        "witnessevent0form0-loan-nuclear-turbine",
+        "witnessevent0form0-loan-solar-panel"
+      ]
+    },
+    {
+      "name": "Event loans threshold 1 boundary",
+      "keys": [
+        "witnessevent0form1-loans-nuclear-turbine",
+        "witnessevent0form1-loan-solar-panel"
+      ]
+    },
+    {
+      "name": "Event lend threshold 1 boundary",
+      "keys": [
+        "witnessevent0form2-lend-nuclear-turbine",
+        "witnessevent0form2-loan-solar-panel"
+      ]
+    },
+    {
+      "name": "Event lends threshold 1 boundary",
+      "keys": [
+        "witnessevent0form3-lends-nuclear-turbine",
+        "witnessevent0form3-loan-solar-panel"
+      ]
+    },
+    {
+      "name": "Event lending threshold 1 boundary",
+      "keys": [
+        "witnessevent0form4-lending-nuclear-turbine",
+        "witnessevent0form4-loan-solar-panel"
+      ]
+    },
+    {
+      "name": "Event lender threshold 1 boundary",
+      "keys": [
+        "witnessevent0form5-lender-nuclear-turbine",
+        "witnessevent0form5-loan-solar-panel"
+      ]
+    },
+    {
+      "name": "Event financing threshold 1 boundary",
+      "keys": [
+        "witnessevent0form6-financing-nuclear-turbine",
+        "witnessevent0form6-loan-solar-panel"
+      ]
+    },
+    {
+      "name": "Event finance threshold 1 boundary",
+      "keys": [
+        "witnessevent0form7-finance-nuclear-turbine",
+        "witnessevent0form7-loan-solar-panel"
+      ]
+    },
+    {
+      "name": "Event financed threshold 1 boundary",
+      "keys": [
+        "witnessevent0form8-financed-nuclear-turbine",
+        "witnessevent0form8-loan-solar-panel"
+      ]
+    },
+    {
+      "name": "Event revenue threshold 1 boundary",
+      "keys": [
+        "witnessevent1form0-revenue-nuclear-turbine",
+        "witnessevent1form0-revenue-solar-panel"
+      ]
+    },
+    {
+      "name": "Event revenues threshold 1 boundary",
+      "keys": [
+        "witnessevent1form1-revenues-nuclear-turbine",
+        "witnessevent1form1-revenue-solar-panel"
+      ]
+    },
+    {
+      "name": "Event sales threshold 1 boundary",
+      "keys": [
+        "witnessevent1form3-sales-nuclear-turbine",
+        "witnessevent1form3-revenue-solar-panel"
+      ]
+    },
+    {
+      "name": "Event earning threshold 1 boundary",
+      "keys": [
+        "witnessevent1form4-earning-nuclear-turbine",
+        "witnessevent1form4-revenue-solar-panel"
+      ]
+    },
+    {
+      "name": "Event earnings threshold 1 boundary",
+      "keys": [
+        "witnessevent1form5-earnings-nuclear-turbine",
+        "witnessevent1form5-revenue-solar-panel"
+      ]
+    },
+    {
+      "name": "Event result threshold 1 boundary",
+      "keys": [
+        "witnessevent1form6-result-nuclear-turbine",
+        "witnessevent1form6-revenue-solar-panel"
+      ]
+    },
+    {
+      "name": "Event results threshold 1 boundary",
+      "keys": [
+        "witnessevent1form7-results-nuclear-turbine",
+        "witnessevent1form7-revenue-solar-panel"
+      ]
+    },
+    {
+      "name": "Event profit threshold 1 boundary",
+      "keys": [
+        "witnessevent1form8-profit-nuclear-turbine",
+        "witnessevent1form8-revenue-solar-panel"
+      ]
+    },
+    {
+      "name": "Event profits threshold 1 boundary",
+      "keys": [
+        "witnessevent1form9-profits-nuclear-turbine",
+        "witnessevent1form9-revenue-solar-panel"
+      ]
+    },
+    {
+      "name": "Event pledge threshold 1 boundary",
+      "keys": [
+        "witnessevent2form0-pledge-nuclear-turbine",
+        "witnessevent2form0-pledge-solar-panel"
+      ]
+    },
+    {
+      "name": "Event pledges threshold 1 boundary",
+      "keys": [
+        "witnessevent2form1-pledges-nuclear-turbine",
+        "witnessevent2form1-pledge-solar-panel"
+      ]
+    },
+    {
+      "name": "Event pledged threshold 1 boundary",
+      "keys": [
+        "witnessevent2form2-pledged-nuclear-turbine",
+        "witnessevent2form2-pledge-solar-panel"
+      ]
+    },
+    {
+      "name": "Event commitment threshold 1 boundary",
+      "keys": [
+        "witnessevent2form3-commitment-nuclear-turbine",
+        "witnessevent2form3-pledge-solar-panel"
+      ]
+    },
+    {
+      "name": "Event commitments threshold 1 boundary",
+      "keys": [
+        "witnessevent2form4-commitments-nuclear-turbine",
+        "witnessevent2form4-pledge-solar-panel"
+      ]
+    },
+    {
+      "name": "Event commit threshold 1 boundary",
+      "keys": [
+        "witnessevent2form5-commit-nuclear-turbine",
+        "witnessevent2form5-pledge-solar-panel"
+      ]
+    },
+    {
+      "name": "Event commits threshold 1 boundary",
+      "keys": [
+        "witnessevent2form6-commits-nuclear-turbine",
+        "witnessevent2form6-pledge-solar-panel"
+      ]
+    },
+    {
+      "name": "Event promise threshold 1 boundary",
+      "keys": [
+        "witnessevent2form7-promise-nuclear-turbine",
+        "witnessevent2form7-pledge-solar-panel"
+      ]
+    },
+    {
+      "name": "Event promises threshold 1 boundary",
+      "keys": [
+        "witnessevent2form8-promises-nuclear-turbine",
+        "witnessevent2form8-pledge-solar-panel"
+      ]
+    },
+    {
+      "name": "Event acquire threshold 1 boundary",
+      "keys": [
+        "witnessevent3form0-acquire-nuclear-turbine",
+        "witnessevent3form0-acquire-solar-panel"
+      ]
+    },
+    {
+      "name": "Event acquires threshold 1 boundary",
+      "keys": [
+        "witnessevent3form1-acquires-nuclear-turbine",
+        "witnessevent3form1-acquire-solar-panel"
+      ]
+    },
+    {
+      "name": "Event acquired threshold 1 boundary",
+      "keys": [
+        "witnessevent3form2-acquired-nuclear-turbine",
+        "witnessevent3form2-acquire-solar-panel"
+      ]
+    },
+    {
+      "name": "Event acquisition threshold 1 boundary",
+      "keys": [
+        "witnessevent3form3-acquisition-nuclear-turbine",
+        "witnessevent3form3-acquire-solar-panel"
+      ]
+    },
+    {
+      "name": "Event buys threshold 1 boundary",
+      "keys": [
+        "witnessevent3form4-buys-nuclear-turbine",
+        "witnessevent3form4-acquire-solar-panel"
+      ]
+    },
+    {
+      "name": "Event buyout threshold 1 boundary",
+      "keys": [
+        "witnessevent3form5-buyout-nuclear-turbine",
+        "witnessevent3form5-acquire-solar-panel"
+      ]
+    },
+    {
+      "name": "Event takeover threshold 1 boundary",
+      "keys": [
+        "witnessevent3form6-takeover-nuclear-turbine",
+        "witnessevent3form6-acquire-solar-panel"
+      ]
+    },
+    {
+      "name": "Event launch threshold 2 boundary",
+      "keys": [
+        "witnessevent4form0-launch-nuclear-turbine",
+        "witnessevent4form0-launch-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event launches threshold 2 boundary",
+      "keys": [
+        "witnessevent4form1-launches-nuclear-turbine",
+        "witnessevent4form1-launch-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event launched threshold 2 boundary",
+      "keys": [
+        "witnessevent4form2-launched-nuclear-turbine",
+        "witnessevent4form2-launch-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event release threshold 2 boundary",
+      "keys": [
+        "witnessevent4form3-release-nuclear-turbine",
+        "witnessevent4form3-launch-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event releases threshold 2 boundary",
+      "keys": [
+        "witnessevent4form4-releases-nuclear-turbine",
+        "witnessevent4form4-launch-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event released threshold 2 boundary",
+      "keys": [
+        "witnessevent4form5-released-nuclear-turbine",
+        "witnessevent4form5-launch-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event debut threshold 2 boundary",
+      "keys": [
+        "witnessevent4form6-debut-nuclear-turbine",
+        "witnessevent4form6-launch-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event debuts threshold 2 boundary",
+      "keys": [
+        "witnessevent4form7-debuts-nuclear-turbine",
+        "witnessevent4form7-launch-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event unveil threshold 2 boundary",
+      "keys": [
+        "witnessevent4form8-unveil-nuclear-turbine",
+        "witnessevent4form8-launch-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event unveils threshold 2 boundary",
+      "keys": [
+        "witnessevent4form9-unveils-nuclear-turbine",
+        "witnessevent4form9-launch-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event unveiled threshold 2 boundary",
+      "keys": [
+        "witnessevent4form10-unveiled-nuclear-turbine",
+        "witnessevent4form10-launch-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event introduces threshold 2 boundary",
+      "keys": [
+        "witnessevent4form11-introduces-nuclear-turbine",
+        "witnessevent4form11-launch-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event rollout threshold 2 boundary",
+      "keys": [
+        "witnessevent4form12-rollout-nuclear-turbine",
+        "witnessevent4form12-launch-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event deal threshold 2 boundary",
+      "keys": [
+        "witnessevent5form0-deal-nuclear-turbine",
+        "witnessevent5form0-deal-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event deals threshold 2 boundary",
+      "keys": [
+        "witnessevent5form1-deals-nuclear-turbine",
+        "witnessevent5form1-deal-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event lease threshold 2 boundary",
+      "keys": [
+        "witnessevent5form2-lease-nuclear-turbine",
+        "witnessevent5form2-deal-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event leases threshold 2 boundary",
+      "keys": [
+        "witnessevent5form3-leases-nuclear-turbine",
+        "witnessevent5form3-deal-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event contract threshold 2 boundary",
+      "keys": [
+        "witnessevent5form4-contract-nuclear-turbine",
+        "witnessevent5form4-deal-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event contracts threshold 2 boundary",
+      "keys": [
+        "witnessevent5form5-contracts-nuclear-turbine",
+        "witnessevent5form5-deal-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event agreement threshold 2 boundary",
+      "keys": [
+        "witnessevent5form6-agreement-nuclear-turbine",
+        "witnessevent5form6-deal-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event agreements threshold 2 boundary",
+      "keys": [
+        "witnessevent5form7-agreements-nuclear-turbine",
+        "witnessevent5form7-deal-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event probe threshold 2 boundary",
+      "keys": [
+        "witnessevent6form0-probe-nuclear-turbine",
+        "witnessevent6form0-probe-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event probes threshold 2 boundary",
+      "keys": [
+        "witnessevent6form1-probes-nuclear-turbine",
+        "witnessevent6form1-probe-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event probing threshold 2 boundary",
+      "keys": [
+        "witnessevent6form2-probing-nuclear-turbine",
+        "witnessevent6form2-probe-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event investigation threshold 2 boundary",
+      "keys": [
+        "witnessevent6form3-investigation-nuclear-turbine",
+        "witnessevent6form3-probe-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event investigate threshold 2 boundary",
+      "keys": [
+        "witnessevent6form4-investigate-nuclear-turbine",
+        "witnessevent6form4-probe-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event investigates threshold 2 boundary",
+      "keys": [
+        "witnessevent6form5-investigates-nuclear-turbine",
+        "witnessevent6form5-probe-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event inquiry threshold 2 boundary",
+      "keys": [
+        "witnessevent6form6-inquiry-nuclear-turbine",
+        "witnessevent6form6-probe-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event funding threshold 2 boundary",
+      "keys": [
+        "witnessevent7form0-funding-nuclear-turbine",
+        "witnessevent7form0-funding-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event round threshold 2 boundary",
+      "keys": [
+        "witnessevent7form1-round-nuclear-turbine",
+        "witnessevent7form1-funding-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Event series threshold 2 boundary",
+      "keys": [
+        "witnessevent7form2-series-nuclear-turbine",
+        "witnessevent7form2-funding-nuclear-panel"
+      ]
+    },
+    {
+      "name": "Generic model boundary",
+      "keys": [
+        "witnessgeneric0-launch-nuclear-model",
+        "witnessgeneric0-release-nuclear-model"
+      ]
+    },
+    {
+      "name": "Generic stock boundary",
+      "keys": [
+        "witnessgeneric1-launch-nuclear-stock",
+        "witnessgeneric1-release-nuclear-stock"
+      ]
+    },
+    {
+      "name": "Generic share boundary",
+      "keys": [
+        "witnessgeneric2-launch-nuclear-share",
+        "witnessgeneric2-release-nuclear-share"
+      ]
+    },
+    {
+      "name": "Generic market boundary",
+      "keys": [
+        "witnessgeneric3-launch-nuclear-market",
+        "witnessgeneric3-release-nuclear-market"
+      ]
+    },
+    {
+      "name": "Generic company boundary",
+      "keys": [
+        "witnessgeneric4-launch-nuclear-company",
+        "witnessgeneric4-release-nuclear-company"
+      ]
+    },
+    {
+      "name": "Generic startup boundary",
+      "keys": [
+        "witnessgeneric5-launch-nuclear-startup",
+        "witnessgeneric5-release-nuclear-startup"
+      ]
+    },
+    {
+      "name": "Access alias prefix all boundary",
+      "keys": [
+        "all-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-launch-pricing"
+      ]
+    },
+    {
+      "name": "Access alias prefix bar boundary",
+      "keys": [
+        "bar-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-launch-pricing"
+      ]
+    },
+    {
+      "name": "Access alias prefix barred boundary",
+      "keys": [
+        "barred-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-launch-pricing"
+      ]
+    },
+    {
+      "name": "Access alias prefix bars boundary",
+      "keys": [
+        "bars-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-launch-pricing"
+      ]
+    },
+    {
+      "name": "Access alias prefix block boundary",
+      "keys": [
+        "block-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-launch-pricing"
+      ]
+    },
+    {
+      "name": "Access alias prefix blocked boundary",
+      "keys": [
+        "blocked-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-launch-pricing"
+      ]
+    },
+    {
+      "name": "Access alias prefix blocks boundary",
+      "keys": [
+        "blocks-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-launch-pricing"
+      ]
+    },
+    {
+      "name": "Access alias prefix commerce boundary",
+      "keys": [
+        "commerce-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-launch-pricing"
+      ]
+    },
+    {
+      "name": "Access alias prefix department boundary",
+      "keys": [
+        "department-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-launch-pricing"
+      ]
+    },
+    {
+      "name": "Access alias prefix directive boundary",
+      "keys": [
+        "directive-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-launch-pricing"
+      ]
+    },
+    {
+      "name": "Access alias prefix foreign boundary",
+      "keys": [
+        "foreign-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-launch-pricing"
+      ]
+    },
+    {
+      "name": "Access alias prefix foreigners boundary",
+      "keys": [
+        "foreigners-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-launch-pricing"
+      ]
+    },
+    {
+      "name": "Access alias prefix national boundary",
+      "keys": [
+        "national-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-launch-pricing"
+      ]
+    },
+    {
+      "name": "Access alias prefix nationals boundary",
+      "keys": [
+        "nationals-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-launch-pricing"
+      ]
+    },
+    {
+      "name": "Access alias prefix order boundary",
+      "keys": [
+        "order-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-launch-pricing"
+      ]
+    },
+    {
+      "name": "Access alias prefix ordered boundary",
+      "keys": [
+        "ordered-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-launch-pricing"
+      ]
+    },
+    {
+      "name": "Access alias prefix orders boundary",
+      "keys": [
+        "orders-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-launch-pricing"
+      ]
+    },
+    {
+      "name": "Access alias prefix security boundary",
+      "keys": [
+        "security-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-launch-pricing"
+      ]
+    },
+    {
+      "name": "Access alias prefix users boundary",
+      "keys": [
+        "users-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-launch-pricing"
+      ]
+    },
+    {
+      "name": "Compound paloalto network boundary",
+      "keys": [
+        "the-paloalto-network-revenue-optics",
+        "paloalto-earnings-memory"
+      ]
+    },
+    {
+      "name": "Compound paloalto networks boundary",
+      "keys": [
+        "the-paloalto-networks-revenue-optics",
+        "paloalto-earnings-memory"
+      ]
+    },
+    {
+      "name": "Compound astera lab boundary",
+      "keys": [
+        "the-astera-lab-revenue-optics",
+        "asteralabs-earnings-memory"
+      ]
+    },
+    {
+      "name": "Compound astera labs boundary",
+      "keys": [
+        "the-astera-labs-revenue-optics",
+        "asteralabs-earnings-memory"
+      ]
+    },
+    {
+      "name": "Compound trade desk boundary",
+      "keys": [
+        "the-trade-desk-revenue-optics",
+        "tradedesk-earnings-memory"
+      ]
+    },
+    {
+      "name": "Singular sale needs independent event evidence boundary",
+      "keys": [
+        "witnesssale-sale-nuclear",
+        "witnesssale-revenue-nuclear"
+      ]
+    }
+  ],
+  "synthetic_merge": [
+    {
+      "name": "Noise a",
+      "keys": [
+        "a-witnessnoise0-loan-nuclear",
+        "witnessnoise0-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise an",
+      "keys": [
+        "an-witnessnoise1-loan-nuclear",
+        "witnessnoise1-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise and",
+      "keys": [
+        "and-witnessnoise2-loan-nuclear",
+        "witnessnoise2-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise as",
+      "keys": [
+        "as-witnessnoise3-loan-nuclear",
+        "witnessnoise3-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise at",
+      "keys": [
+        "at-witnessnoise4-loan-nuclear",
+        "witnessnoise4-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise by",
+      "keys": [
+        "by-witnessnoise5-loan-nuclear",
+        "witnessnoise5-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise for",
+      "keys": [
+        "for-witnessnoise6-loan-nuclear",
+        "witnessnoise6-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise from",
+      "keys": [
+        "from-witnessnoise7-loan-nuclear",
+        "witnessnoise7-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise in",
+      "keys": [
+        "in-witnessnoise8-loan-nuclear",
+        "witnessnoise8-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise its",
+      "keys": [
+        "its-witnessnoise9-loan-nuclear",
+        "witnessnoise9-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise of",
+      "keys": [
+        "of-witnessnoise10-loan-nuclear",
+        "witnessnoise10-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise on",
+      "keys": [
+        "on-witnessnoise11-loan-nuclear",
+        "witnessnoise11-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise over",
+      "keys": [
+        "over-witnessnoise12-loan-nuclear",
+        "witnessnoise12-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise the",
+      "keys": [
+        "the-witnessnoise13-loan-nuclear",
+        "witnessnoise13-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise to",
+      "keys": [
+        "to-witnessnoise14-loan-nuclear",
+        "witnessnoise14-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise with",
+      "keys": [
+        "with-witnessnoise15-loan-nuclear",
+        "witnessnoise15-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise after",
+      "keys": [
+        "after-witnessnoise16-loan-nuclear",
+        "witnessnoise16-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise amid",
+      "keys": [
+        "amid-witnessnoise17-loan-nuclear",
+        "witnessnoise17-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise up",
+      "keys": [
+        "up-witnessnoise18-loan-nuclear",
+        "witnessnoise18-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise new",
+      "keys": [
+        "new-witnessnoise19-loan-nuclear",
+        "witnessnoise19-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise ai",
+      "keys": [
+        "ai-witnessnoise20-loan-nuclear",
+        "witnessnoise20-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise says",
+      "keys": [
+        "says-witnessnoise21-loan-nuclear",
+        "witnessnoise21-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise reportedly",
+      "keys": [
+        "reportedly-witnessnoise22-loan-nuclear",
+        "witnessnoise22-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise report",
+      "keys": [
+        "report-witnessnoise23-loan-nuclear",
+        "witnessnoise23-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise reports",
+      "keys": [
+        "reports-witnessnoise24-loan-nuclear",
+        "witnessnoise24-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise prepares",
+      "keys": [
+        "prepares-witnessnoise25-loan-nuclear",
+        "witnessnoise25-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise plans",
+      "keys": [
+        "plans-witnessnoise26-loan-nuclear",
+        "witnessnoise26-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise eyes",
+      "keys": [
+        "eyes-witnessnoise27-loan-nuclear",
+        "witnessnoise27-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise set",
+      "keys": [
+        "set-witnessnoise28-loan-nuclear",
+        "witnessnoise28-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise us",
+      "keys": [
+        "us-witnessnoise29-loan-nuclear",
+        "witnessnoise29-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise u",
+      "keys": [
+        "u-witnessnoise30-loan-nuclear",
+        "witnessnoise30-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise s",
+      "keys": [
+        "s-witnessnoise31-loan-nuclear",
+        "witnessnoise31-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise doe",
+      "keys": [
+        "doe-witnessnoise32-loan-nuclear",
+        "witnessnoise32-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise federal",
+      "keys": [
+        "federal-witnessnoise33-loan-nuclear",
+        "witnessnoise33-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise government",
+      "keys": [
+        "government-witnessnoise34-loan-nuclear",
+        "witnessnoise34-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise administration",
+      "keys": [
+        "administration-witnessnoise35-loan-nuclear",
+        "witnessnoise35-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise trump",
+      "keys": [
+        "trump-witnessnoise36-loan-nuclear",
+        "witnessnoise36-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise whitehouse",
+      "keys": [
+        "whitehouse-witnessnoise37-loan-nuclear",
+        "witnessnoise37-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Noise percent",
+      "keys": [
+        "percent-witnessnoise38-loan-nuclear",
+        "witnessnoise38-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Compound hon hai",
+      "keys": [
+        "witnesscompound0-loan-hon-hai",
+        "witnesscompound0-financing-foxconn"
+      ]
+    },
+    {
+      "name": "Actor compound hon hai",
+      "keys": [
+        "hon-hai-loan-nuclear",
+        "foxconn-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Compound rocket lab",
+      "keys": [
+        "witnesscompound3-loan-rocket-lab",
+        "witnesscompound3-financing-rocketlab"
+      ]
+    },
+    {
+      "name": "Actor compound rocket lab",
+      "keys": [
+        "rocket-lab-loan-nuclear",
+        "rocketlab-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Compound northrop grumman",
+      "keys": [
+        "witnesscompound6-loan-northrop-grumman",
+        "witnesscompound6-financing-northropgrumman"
+      ]
+    },
+    {
+      "name": "Actor compound northrop grumman",
+      "keys": [
+        "northrop-grumman-loan-nuclear",
+        "northropgrumman-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Compound data center",
+      "keys": [
+        "witnesscompound9-loan-data-center",
+        "witnesscompound9-financing-datacenter"
+      ]
+    },
+    {
+      "name": "Compound data centers",
+      "keys": [
+        "witnesscompound12-loan-data-centers",
+        "witnesscompound12-financing-datacenter"
+      ]
+    },
+    {
+      "name": "Compound data centre",
+      "keys": [
+        "witnesscompound15-loan-data-centre",
+        "witnesscompound15-financing-datacenter"
+      ]
+    },
+    {
+      "name": "Compound open weight",
+      "keys": [
+        "witnesscompound18-loan-open-weight",
+        "witnesscompound18-financing-openweight"
+      ]
+    },
+    {
+      "name": "Compound open weights",
+      "keys": [
+        "witnesscompound21-loan-open-weights",
+        "witnesscompound21-financing-openweight"
+      ]
+    },
+    {
+      "name": "Compound white house",
+      "keys": [
+        "witnesscompound24-loan-white-house-nuclear",
+        "witnesscompound24-financing-whitehouse-nuclear"
+      ]
+    },
+    {
+      "name": "Compound ge vernova",
+      "keys": [
+        "witnesscompound27-loan-ge-vernova",
+        "witnesscompound27-financing-gevernova"
+      ]
+    },
+    {
+      "name": "Actor compound ge vernova",
+      "keys": [
+        "ge-vernova-loan-nuclear",
+        "gevernova-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Compound bloom energy",
+      "keys": [
+        "witnesscompound30-loan-bloom-energy",
+        "witnesscompound30-financing-bloomenergy"
+      ]
+    },
+    {
+      "name": "Actor compound bloom energy",
+      "keys": [
+        "bloom-energy-loan-nuclear",
+        "bloomenergy-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Compound blue origin",
+      "keys": [
+        "witnesscompound33-loan-blue-origin",
+        "witnesscompound33-financing-blueorigin"
+      ]
+    },
+    {
+      "name": "Actor compound blue origin",
+      "keys": [
+        "blue-origin-loan-nuclear",
+        "blueorigin-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Compound sk hynix",
+      "keys": [
+        "witnesscompound36-loan-sk-hynix",
+        "witnesscompound36-financing-skhynix"
+      ]
+    },
+    {
+      "name": "Actor compound sk hynix",
+      "keys": [
+        "sk-hynix-loan-nuclear",
+        "skhynix-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Compound palo alto",
+      "keys": [
+        "witnesscompound39-loan-palo-alto",
+        "witnesscompound39-financing-paloalto"
+      ]
+    },
+    {
+      "name": "Actor compound palo alto",
+      "keys": [
+        "palo-alto-loan-nuclear",
+        "paloalto-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Alias aws",
+      "keys": [
+        "aws-loan-nuclear",
+        "amazon-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Event loan threshold 1",
+      "keys": [
+        "witnessevent0form0-loan-nuclear",
+        "witnessevent0form0-loan-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event loans threshold 1",
+      "keys": [
+        "witnessevent0form1-loans-nuclear",
+        "witnessevent0form1-loan-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event lend threshold 1",
+      "keys": [
+        "witnessevent0form2-lend-nuclear",
+        "witnessevent0form2-loan-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event lends threshold 1",
+      "keys": [
+        "witnessevent0form3-lends-nuclear",
+        "witnessevent0form3-loan-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event lending threshold 1",
+      "keys": [
+        "witnessevent0form4-lending-nuclear",
+        "witnessevent0form4-loan-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event lender threshold 1",
+      "keys": [
+        "witnessevent0form5-lender-nuclear",
+        "witnessevent0form5-loan-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event financing threshold 1",
+      "keys": [
+        "witnessevent0form6-financing-nuclear",
+        "witnessevent0form6-loan-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event finance threshold 1",
+      "keys": [
+        "witnessevent0form7-finance-nuclear",
+        "witnessevent0form7-loan-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event financed threshold 1",
+      "keys": [
+        "witnessevent0form8-financed-nuclear",
+        "witnessevent0form8-loan-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event revenue threshold 1",
+      "keys": [
+        "witnessevent1form0-revenue-nuclear",
+        "witnessevent1form0-revenue-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event revenues threshold 1",
+      "keys": [
+        "witnessevent1form1-revenues-nuclear",
+        "witnessevent1form1-revenue-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event sales threshold 1",
+      "keys": [
+        "witnessevent1form3-sales-nuclear",
+        "witnessevent1form3-revenue-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event earning threshold 1",
+      "keys": [
+        "witnessevent1form4-earning-nuclear",
+        "witnessevent1form4-revenue-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event earnings threshold 1",
+      "keys": [
+        "witnessevent1form5-earnings-nuclear",
+        "witnessevent1form5-revenue-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event result threshold 1",
+      "keys": [
+        "witnessevent1form6-result-nuclear",
+        "witnessevent1form6-revenue-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event results threshold 1",
+      "keys": [
+        "witnessevent1form7-results-nuclear",
+        "witnessevent1form7-revenue-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event profit threshold 1",
+      "keys": [
+        "witnessevent1form8-profit-nuclear",
+        "witnessevent1form8-revenue-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event profits threshold 1",
+      "keys": [
+        "witnessevent1form9-profits-nuclear",
+        "witnessevent1form9-revenue-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event pledge threshold 1",
+      "keys": [
+        "witnessevent2form0-pledge-nuclear",
+        "witnessevent2form0-pledge-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event pledges threshold 1",
+      "keys": [
+        "witnessevent2form1-pledges-nuclear",
+        "witnessevent2form1-pledge-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event pledged threshold 1",
+      "keys": [
+        "witnessevent2form2-pledged-nuclear",
+        "witnessevent2form2-pledge-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event commitment threshold 1",
+      "keys": [
+        "witnessevent2form3-commitment-nuclear",
+        "witnessevent2form3-pledge-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event commitments threshold 1",
+      "keys": [
+        "witnessevent2form4-commitments-nuclear",
+        "witnessevent2form4-pledge-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event commit threshold 1",
+      "keys": [
+        "witnessevent2form5-commit-nuclear",
+        "witnessevent2form5-pledge-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event commits threshold 1",
+      "keys": [
+        "witnessevent2form6-commits-nuclear",
+        "witnessevent2form6-pledge-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event promise threshold 1",
+      "keys": [
+        "witnessevent2form7-promise-nuclear",
+        "witnessevent2form7-pledge-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event promises threshold 1",
+      "keys": [
+        "witnessevent2form8-promises-nuclear",
+        "witnessevent2form8-pledge-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event acquire threshold 1",
+      "keys": [
+        "witnessevent3form0-acquire-nuclear",
+        "witnessevent3form0-acquire-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event acquires threshold 1",
+      "keys": [
+        "witnessevent3form1-acquires-nuclear",
+        "witnessevent3form1-acquire-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event acquired threshold 1",
+      "keys": [
+        "witnessevent3form2-acquired-nuclear",
+        "witnessevent3form2-acquire-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event acquisition threshold 1",
+      "keys": [
+        "witnessevent3form3-acquisition-nuclear",
+        "witnessevent3form3-acquire-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event buys threshold 1",
+      "keys": [
+        "witnessevent3form4-buys-nuclear",
+        "witnessevent3form4-acquire-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event buyout threshold 1",
+      "keys": [
+        "witnessevent3form5-buyout-nuclear",
+        "witnessevent3form5-acquire-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event takeover threshold 1",
+      "keys": [
+        "witnessevent3form6-takeover-nuclear",
+        "witnessevent3form6-acquire-nuclear-detail"
+      ]
+    },
+    {
+      "name": "Event launch threshold 2",
+      "keys": [
+        "witnessevent4form0-launch-nuclear-turbine",
+        "witnessevent4form0-launch-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event launches threshold 2",
+      "keys": [
+        "witnessevent4form1-launches-nuclear-turbine",
+        "witnessevent4form1-launch-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event launched threshold 2",
+      "keys": [
+        "witnessevent4form2-launched-nuclear-turbine",
+        "witnessevent4form2-launch-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event release threshold 2",
+      "keys": [
+        "witnessevent4form3-release-nuclear-turbine",
+        "witnessevent4form3-launch-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event releases threshold 2",
+      "keys": [
+        "witnessevent4form4-releases-nuclear-turbine",
+        "witnessevent4form4-launch-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event released threshold 2",
+      "keys": [
+        "witnessevent4form5-released-nuclear-turbine",
+        "witnessevent4form5-launch-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event debut threshold 2",
+      "keys": [
+        "witnessevent4form6-debut-nuclear-turbine",
+        "witnessevent4form6-launch-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event debuts threshold 2",
+      "keys": [
+        "witnessevent4form7-debuts-nuclear-turbine",
+        "witnessevent4form7-launch-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event unveil threshold 2",
+      "keys": [
+        "witnessevent4form8-unveil-nuclear-turbine",
+        "witnessevent4form8-launch-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event unveils threshold 2",
+      "keys": [
+        "witnessevent4form9-unveils-nuclear-turbine",
+        "witnessevent4form9-launch-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event unveiled threshold 2",
+      "keys": [
+        "witnessevent4form10-unveiled-nuclear-turbine",
+        "witnessevent4form10-launch-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event introduces threshold 2",
+      "keys": [
+        "witnessevent4form11-introduces-nuclear-turbine",
+        "witnessevent4form11-launch-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event rollout threshold 2",
+      "keys": [
+        "witnessevent4form12-rollout-nuclear-turbine",
+        "witnessevent4form12-launch-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event deal threshold 2",
+      "keys": [
+        "witnessevent5form0-deal-nuclear-turbine",
+        "witnessevent5form0-deal-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event deals threshold 2",
+      "keys": [
+        "witnessevent5form1-deals-nuclear-turbine",
+        "witnessevent5form1-deal-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event lease threshold 2",
+      "keys": [
+        "witnessevent5form2-lease-nuclear-turbine",
+        "witnessevent5form2-deal-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event leases threshold 2",
+      "keys": [
+        "witnessevent5form3-leases-nuclear-turbine",
+        "witnessevent5form3-deal-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event contract threshold 2",
+      "keys": [
+        "witnessevent5form4-contract-nuclear-turbine",
+        "witnessevent5form4-deal-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event contracts threshold 2",
+      "keys": [
+        "witnessevent5form5-contracts-nuclear-turbine",
+        "witnessevent5form5-deal-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event agreement threshold 2",
+      "keys": [
+        "witnessevent5form6-agreement-nuclear-turbine",
+        "witnessevent5form6-deal-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event agreements threshold 2",
+      "keys": [
+        "witnessevent5form7-agreements-nuclear-turbine",
+        "witnessevent5form7-deal-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event probe threshold 2",
+      "keys": [
+        "witnessevent6form0-probe-nuclear-turbine",
+        "witnessevent6form0-probe-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event probes threshold 2",
+      "keys": [
+        "witnessevent6form1-probes-nuclear-turbine",
+        "witnessevent6form1-probe-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event probing threshold 2",
+      "keys": [
+        "witnessevent6form2-probing-nuclear-turbine",
+        "witnessevent6form2-probe-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event investigation threshold 2",
+      "keys": [
+        "witnessevent6form3-investigation-nuclear-turbine",
+        "witnessevent6form3-probe-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event investigate threshold 2",
+      "keys": [
+        "witnessevent6form4-investigate-nuclear-turbine",
+        "witnessevent6form4-probe-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event investigates threshold 2",
+      "keys": [
+        "witnessevent6form5-investigates-nuclear-turbine",
+        "witnessevent6form5-probe-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event inquiry threshold 2",
+      "keys": [
+        "witnessevent6form6-inquiry-nuclear-turbine",
+        "witnessevent6form6-probe-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event funding threshold 2",
+      "keys": [
+        "witnessevent7form0-funding-nuclear-turbine",
+        "witnessevent7form0-funding-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event round threshold 2",
+      "keys": [
+        "witnessevent7form1-round-nuclear-turbine",
+        "witnessevent7form1-funding-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Event series threshold 2",
+      "keys": [
+        "witnessevent7form2-series-nuclear-turbine",
+        "witnessevent7form2-funding-nuclear-turbine-detail"
+      ]
+    },
+    {
+      "name": "Generic model",
+      "keys": [
+        "witnessgeneric0-launch-nuclear-turbine-model",
+        "witnessgeneric0-release-nuclear-turbine"
+      ]
+    },
+    {
+      "name": "Generic stock",
+      "keys": [
+        "witnessgeneric1-launch-nuclear-turbine-stock",
+        "witnessgeneric1-release-nuclear-turbine"
+      ]
+    },
+    {
+      "name": "Generic share",
+      "keys": [
+        "witnessgeneric2-launch-nuclear-turbine-share",
+        "witnessgeneric2-release-nuclear-turbine"
+      ]
+    },
+    {
+      "name": "Generic market",
+      "keys": [
+        "witnessgeneric3-launch-nuclear-turbine-market",
+        "witnessgeneric3-release-nuclear-turbine"
+      ]
+    },
+    {
+      "name": "Generic company",
+      "keys": [
+        "witnessgeneric4-launch-nuclear-turbine-company",
+        "witnessgeneric4-release-nuclear-turbine"
+      ]
+    },
+    {
+      "name": "Generic startup",
+      "keys": [
+        "witnessgeneric5-launch-nuclear-turbine-startup",
+        "witnessgeneric5-release-nuclear-turbine"
+      ]
+    },
+    {
+      "name": "Access alias prefix all",
+      "keys": [
+        "all-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-access-restriction"
+      ]
+    },
+    {
+      "name": "Access alias prefix bar",
+      "keys": [
+        "bar-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-access-restriction"
+      ]
+    },
+    {
+      "name": "Access alias prefix barred",
+      "keys": [
+        "barred-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-access-restriction"
+      ]
+    },
+    {
+      "name": "Access alias prefix bars",
+      "keys": [
+        "bars-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-access-restriction"
+      ]
+    },
+    {
+      "name": "Access alias prefix block",
+      "keys": [
+        "block-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-access-restriction"
+      ]
+    },
+    {
+      "name": "Access alias prefix blocked",
+      "keys": [
+        "blocked-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-access-restriction"
+      ]
+    },
+    {
+      "name": "Access alias prefix blocks",
+      "keys": [
+        "blocks-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-access-restriction"
+      ]
+    },
+    {
+      "name": "Access alias prefix commerce",
+      "keys": [
+        "commerce-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-access-restriction"
+      ]
+    },
+    {
+      "name": "Access alias prefix department",
+      "keys": [
+        "department-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-access-restriction"
+      ]
+    },
+    {
+      "name": "Access alias prefix directive",
+      "keys": [
+        "directive-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-access-restriction"
+      ]
+    },
+    {
+      "name": "Access alias prefix foreign",
+      "keys": [
+        "foreign-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-access-restriction"
+      ]
+    },
+    {
+      "name": "Access alias prefix foreigners",
+      "keys": [
+        "foreigners-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-access-restriction"
+      ]
+    },
+    {
+      "name": "Access alias prefix national",
+      "keys": [
+        "national-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-access-restriction"
+      ]
+    },
+    {
+      "name": "Access alias prefix nationals",
+      "keys": [
+        "nationals-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-access-restriction"
+      ]
+    },
+    {
+      "name": "Access alias prefix order",
+      "keys": [
+        "order-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-access-restriction"
+      ]
+    },
+    {
+      "name": "Access alias prefix ordered",
+      "keys": [
+        "ordered-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-access-restriction"
+      ]
+    },
+    {
+      "name": "Access alias prefix orders",
+      "keys": [
+        "orders-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-access-restriction"
+      ]
+    },
+    {
+      "name": "Access alias prefix security",
+      "keys": [
+        "security-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-access-restriction"
+      ]
+    },
+    {
+      "name": "Access alias prefix users",
+      "keys": [
+        "users-anthropic-frontier-model-access-blocked",
+        "anthropic-frontier-model-access-restriction"
+      ]
+    },
+    {
+      "name": "Compound paloalto network",
+      "keys": [
+        "the-paloalto-network-loan-nuclear",
+        "paloalto-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Compound paloalto networks",
+      "keys": [
+        "the-paloalto-networks-loan-nuclear",
+        "paloalto-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Compound astera lab",
+      "keys": [
+        "the-astera-lab-loan-nuclear",
+        "asteralabs-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Compound astera labs",
+      "keys": [
+        "the-astera-labs-loan-nuclear",
+        "asteralabs-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Compound trade desk",
+      "keys": [
+        "the-trade-desk-loan-nuclear",
+        "tradedesk-financing-nuclear"
+      ]
+    },
+    {
+      "name": "Singular sale needs independent event evidence",
+      "keys": [
+        "witnesssale-sale-loan-nuclear",
+        "witnesssale-sale-financing-nuclear"
+      ]
+    }
+  ]
+}
