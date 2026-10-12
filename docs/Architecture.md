@@ -221,7 +221,7 @@ session. Summary settlement saves per-article results and completes without anot
 and signal-scoring work after reducer messages. All three stages share
 `llm_max_in_flight`, clamped by `harvester_engine::llm::MAX_LLM_CONCURRENT_REQUESTS`
 (10); the LLM worker's semaphore stays at this configured budget. Desktop uses `LLM_MAX_CONCURRENT_REQUESTS`
-(default 3). Batch uses `--llm-concurrency` (default 10, maximum 10).
+(default 10). Batch uses `--llm-concurrency` (default 10, maximum 10).
 
 The reducer owns an effective cap for new article-model dispatch, reset to the
 configured budget at each run start. A completion returning `RateLimited`, or

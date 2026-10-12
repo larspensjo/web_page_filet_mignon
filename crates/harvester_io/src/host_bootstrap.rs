@@ -24,7 +24,7 @@ pub struct HostLlmDefaults {
     pub session_id_prefix: &'static str,
 }
 
-pub const DEFAULT_LLM_MAX_CONCURRENT_REQUESTS: usize = 3;
+pub const DEFAULT_LLM_MAX_CONCURRENT_REQUESTS: usize = 10;
 pub use harvester_engine::llm::MAX_LLM_CONCURRENT_REQUESTS;
 
 pub fn parse_llm_max_concurrency_requests(raw: Option<&str>) -> usize {
@@ -750,10 +750,7 @@ mod tests {
 
     #[test]
     fn parse_llm_max_concurrency_uses_default_when_missing_or_invalid() {
-        assert_eq!(
-            parse_llm_max_concurrency_requests(None),
-            DEFAULT_LLM_MAX_CONCURRENT_REQUESTS
-        );
+        assert_eq!(parse_llm_max_concurrency_requests(None), 10);
         assert_eq!(
             parse_llm_max_concurrency_requests(Some("not-a-number")),
             DEFAULT_LLM_MAX_CONCURRENT_REQUESTS
@@ -768,11 +765,39 @@ mod tests {
     fn parse_llm_max_concurrency_clamps_to_valid_range() {
         assert_eq!(parse_llm_max_concurrency_requests(Some("1")), 1);
         assert_eq!(parse_llm_max_concurrency_requests(Some("3")), 3);
-        assert_eq!(
-            parse_llm_max_concurrency_requests(Some("999")),
-            MAX_LLM_CONCURRENT_REQUESTS
-        );
+        assert_eq!(parse_llm_max_concurrency_requests(Some("999")), 10);
+        assert_eq!(parse_llm_max_concurrency_requests(Some("0")), 1);
         assert_eq!(parse_llm_max_concurrency_requests(Some(" 2 ")), 2);
+    }
+
+    #[test]
+    fn desktop_default_budget_reaches_startup_state_and_llm_worker() {
+        use harvester_engine::llm::{MockLlmProvider, ModelId, ProviderKind};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = RuntimePaths::with_defaults(dir.path().to_path_buf());
+        let llm_concurrency = parse_llm_max_concurrency_requests(None);
+        let defaults = HostLlmDefaults {
+            default_model: ModelId::new(ProviderKind::OpenAi, "host-fallback"),
+            session_id_prefix: "test-",
+        };
+        let provider = Arc::new(MockLlmProvider::new());
+        let (msg_tx, _msg_rx) = mpsc::channel();
+        let (_runner, config) = build_effect_runner_with_provider(
+            &paths,
+            msg_tx,
+            llm_concurrency,
+            &defaults,
+            provider,
+            Box::new(crate::NoOpPlatformHandler),
+            Box::new(crate::NoOpRuntimePersistenceSink),
+            None,
+        );
+        let (state, _) =
+            prepare_desktop_startup_state(AppState::new(), &paths, llm_concurrency, None, None);
+
+        assert_eq!(state.llm_max_in_flight(), 10);
+        assert_eq!(config.max_concurrent_requests, 10);
     }
 
     #[test]
