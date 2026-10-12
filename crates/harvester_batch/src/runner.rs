@@ -196,7 +196,7 @@ pub fn run(args: Args) -> Result<i32, String> {
     }
     progress.paint(&state, state.llm_quota().usage.cost_microdollars, true);
     let mut effect_sink = |effects| effect_runner.enqueue(effects);
-    let mut reducer_observer = |_: &str, _: Duration| {};
+    let mut reducer_observer = effect_runner.reducer_observer("batch");
     let mut cycle_counts = CycleCounts::default();
     let mut cycle_outcome = CycleOutcome::Success;
     let mut poll_summary = PollSummaryReporter::default();
@@ -263,7 +263,7 @@ pub fn prepare_cycle_state_with_effect_sink(
     args: &Args,
     msg_rx: &mpsc::Receiver<Msg>,
     effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
-    reducer_observer: &mut dyn FnMut(&str, Duration),
+    reducer_observer: &mut dyn FnMut(&str, Duration, &AppState),
 ) -> Result<AppState, String> {
     let (hydrated_state, startup_effects) = bootstrap::hydrate_batch_state(paths, args);
     let mut state = bootstrap::apply_llm_availability(
@@ -291,7 +291,7 @@ pub fn run_single_cycle_with_effect_sink(
     msg_tx: &mpsc::Sender<Msg>,
     msg_rx: &mpsc::Receiver<Msg>,
     effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
-    reducer_observer: &mut dyn FnMut(&str, Duration),
+    reducer_observer: &mut dyn FnMut(&str, Duration, &AppState),
     file_write_observer: &harvester_io::FileWriteObserver,
 ) -> Result<(), String> {
     let shutdown_flag = Arc::new(AtomicBool::new(false));
@@ -342,7 +342,7 @@ fn execute_cycle_with_sink<F>(
     msg_tx: &mpsc::Sender<Msg>,
     msg_rx: &mpsc::Receiver<Msg>,
     effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
-    reducer_observer: &mut dyn FnMut(&str, Duration),
+    reducer_observer: &mut dyn FnMut(&str, Duration, &AppState),
     shutdown_flag: &Arc<AtomicBool>,
     progress: &mut live_progress::LiveSystemBatchProgress,
     after_dispatch: F,
@@ -351,7 +351,7 @@ fn execute_cycle_with_sink<F>(
 where
     F: FnOnce(CycleOutcome, &AppState, &mut live_progress::LiveSystemBatchProgress),
 {
-    let outcome = dispatch_cycle_with_sink(
+    let outcome = dispatch_cycle_with_state_observer(
         state,
         msg_tx,
         msg_rx,
@@ -370,12 +370,12 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-fn dispatch_cycle_with_sink(
+fn dispatch_cycle_with_state_observer(
     state: &mut AppState,
     msg_tx: &mpsc::Sender<Msg>,
     msg_rx: &mpsc::Receiver<Msg>,
     effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
-    reducer_observer: &mut dyn FnMut(&str, Duration),
+    reducer_observer: &mut dyn FnMut(&str, Duration, &AppState),
     shutdown_flag: &Arc<AtomicBool>,
     progress: Option<&mut live_progress::LiveSystemBatchProgress>,
 ) -> Result<CycleOutcome, String> {
@@ -386,7 +386,7 @@ fn dispatch_cycle_with_sink(
             })
             .map_err(|error| format!("Failed to request full pipeline run: {error}"))?;
     }
-    dispatch_loop::run_dispatch_loop_with_sink(
+    dispatch_loop::run_dispatch_loop_with_state_observer(
         state,
         msg_rx,
         effect_sink,
@@ -396,6 +396,29 @@ fn dispatch_cycle_with_sink(
             tick_interval: Duration::from_millis(75),
             ..DispatchLoopOptions::default()
         },
+        progress,
+    )
+}
+
+// Keep existing timing-only test fixtures exercising the same dispatch implementation.
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+fn dispatch_cycle_with_sink(
+    state: &mut AppState,
+    msg_tx: &mpsc::Sender<Msg>,
+    msg_rx: &mpsc::Receiver<Msg>,
+    sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
+    observer: &mut dyn FnMut(&str, Duration),
+    shutdown: &Arc<AtomicBool>,
+    progress: Option<&mut live_progress::LiveSystemBatchProgress>,
+) -> Result<CycleOutcome, String> {
+    dispatch_cycle_with_state_observer(
+        state,
+        msg_tx,
+        msg_rx,
+        sink,
+        &mut |kind, elapsed, _| observer(kind, elapsed),
+        shutdown,
         progress,
     )
 }

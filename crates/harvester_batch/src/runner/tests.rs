@@ -261,6 +261,61 @@ fn test_should_stop_after_cycle_for_shutdown_signal() {
 }
 
 #[test]
+fn batch_dispatch_loop_emits_one_terminal_timeline_with_batch_host() {
+    engine_logging::initialize_for_tests();
+    let article = test_loaded_article(1);
+    let temp_dir = TempDir::new().unwrap();
+    let (mut state, runner, mock, msg_tx, msg_rx) = fake_full_cycle_runner(&temp_dir, &article);
+    mock.queue_json_success(
+        r#"{"category":"news","priority":1,"tags":[],"rationale":"Low priority fixture."}"#,
+    );
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    let mut timeline = harvester_io::run_timeline::RunTimeline::default();
+    let mut lines = Vec::new();
+    let mut observer = |kind: &str, elapsed: Duration, state: &AppState| {
+        lines.extend(timeline.observe_reducer(
+            state,
+            kind,
+            elapsed,
+            std::time::Instant::now(),
+            "batch",
+        ));
+    };
+    let mut sink = |effects| runner.enqueue(effects);
+    dispatch_cycle_with_state_observer(
+        &mut state,
+        &msg_tx,
+        &msg_rx,
+        &mut sink,
+        &mut observer,
+        &shutdown_flag,
+        None,
+    )
+    .expect("keyless batch cycle settles");
+    assert!(state.run_progress().unwrap().is_terminal());
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| line.starts_with("[run-timing] "))
+            .count(),
+        1
+    );
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|line| line.starts_with("[run-timing-waves] "))
+            .count(),
+        3
+    );
+    assert!(lines[0]
+        .split_whitespace()
+        .any(|field| field == "host=batch"));
+    assert!(lines[0]
+        .split_whitespace()
+        .any(|field| field == "outcome=completed"));
+}
+
+#[test]
 fn dispatch_loop_survives_more_than_ten_thousand_quiet_download_iterations() {
     use harvester_engine::{SourceId, SourceKind};
     let (_msg_tx, msg_rx) = mpsc::channel();

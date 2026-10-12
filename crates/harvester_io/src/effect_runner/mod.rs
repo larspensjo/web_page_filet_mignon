@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{atomic::AtomicBool, mpsc, Arc, Mutex, RwLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use engine_logging::{engine_error, engine_info, engine_warn};
@@ -106,6 +106,7 @@ impl RuntimePersistenceSink for NoOpRuntimePersistenceSink {
 ///
 pub struct EffectRunner {
     engine: EngineHandle,
+    timeline: Arc<Mutex<crate::run_timeline::RunTimeline>>,
     corpus_scan_index: Arc<Mutex<harvester_engine::CorpusScanIndex>>,
     corpus_scan_reset_requested: Arc<AtomicBool>,
     msg_tx: mpsc::Sender<Msg>,
@@ -124,6 +125,32 @@ pub struct EffectRunner {
 }
 
 impl EffectRunner {
+    /// Shares the I/O timeline with a host's post-reducer observer without locking the runner.
+    pub fn reducer_observer(
+        &self,
+        host: &str,
+    ) -> impl FnMut(&str, Duration, &harvester_core::AppState) + Send + 'static {
+        let timeline = Arc::clone(&self.timeline);
+        let host = host.to_owned();
+        move |kind, elapsed, state| {
+            let lines = timeline
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .observe_reducer(state, kind, elapsed, Instant::now(), &host);
+            for line in lines {
+                engine_info!("{}", line);
+            }
+        }
+    }
+
+    fn send_llm_message(&self, message: Msg) {
+        self.timeline
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .llm_completed(&message, Instant::now());
+        let _ = self.msg_tx.send(message);
+    }
+
     pub fn new(
         paths: RuntimePaths,
         msg_tx: mpsc::Sender<Msg>,
@@ -219,6 +246,7 @@ impl EffectRunner {
         ));
         persistence_sink.set_message_sender(msg_tx.clone());
         let runner = Self {
+            timeline: Arc::new(Mutex::new(crate::run_timeline::RunTimeline::default())),
             corpus_scan_index: Arc::new(Mutex::new(harvester_engine::CorpusScanIndex::default())),
             corpus_scan_reset_requested: Arc::new(AtomicBool::new(false)),
             engine,
@@ -261,6 +289,7 @@ impl EffectRunner {
         ));
         persistence_sink.set_message_sender(msg_tx.clone());
         let runner = Self {
+            timeline: Arc::new(Mutex::new(crate::run_timeline::RunTimeline::default())),
             corpus_scan_index: Arc::new(Mutex::new(harvester_engine::CorpusScanIndex::default())),
             corpus_scan_reset_requested: Arc::new(AtomicBool::new(false)),
             engine,
@@ -291,11 +320,36 @@ impl EffectRunner {
 
     pub fn enqueue(&self, effects: Vec<Effect>) {
         for effect in effects {
+            let started = Instant::now();
+            let is_enqueue = matches!(effect, Effect::EnqueueUrl { .. });
+            if let Effect::EnqueueUrl { job_id, .. } = &effect {
+                self.timeline
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .download_queued(*job_id);
+            }
+            if let Effect::RequestLlmCompletion {
+                request_id,
+                prompt_id,
+                ..
+            } = &effect
+            {
+                self.timeline
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .llm_dispatched(*request_id, *prompt_id, started);
+            }
             if let Err(reason) = self.validate_effect(&effect) {
                 self.reject_effect(effect, reason);
-                continue;
+            } else {
+                self.execute_effect(effect);
             }
-            self.execute_effect(effect);
+            if is_enqueue {
+                self.timeline
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .enqueue_handed_off(started.elapsed());
+            }
         }
     }
 
@@ -303,6 +357,7 @@ impl EffectRunner {
         // Engine event loop
         let engine = self.engine.clone();
         let engine_tx = msg_tx.clone();
+        let timeline = Arc::clone(&self.timeline);
         thread::spawn(move || loop {
             if let Some(event) = engine.try_recv() {
                 match event {
@@ -314,7 +369,12 @@ impl EffectRunner {
                             bytes: progress.bytes,
                         });
                     }
-                    EngineEvent::JobCompleted { job_id, result } => {
+                    EngineEvent::JobCompleted {
+                        job_id,
+                        result,
+                        timing,
+                        sent_at,
+                    } => {
                         let class = harvester_engine::classify_fetch_outcome(&result);
                         let failure_label = result.as_ref().err().map(|k| k.to_string());
                         // Stamp the time here, at the side-effect→action boundary,
@@ -322,6 +382,10 @@ impl EffectRunner {
                         let recorded_at = Utc::now();
                         // Emit the blacklist classification first so the job's URL
                         // is still resolvable when the reducer handles it.
+                        timeline
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .download_completed(job_id, &timing, &result, sent_at, Instant::now());
                         let _ = engine_tx.send(Msg::FetchOutcomeClassified {
                             job_id,
                             class,
@@ -362,6 +426,7 @@ impl EffectRunner {
         if let Some(llm_handle) = &self.llm_handle {
             let llm_tx = msg_tx.clone();
             let receiver = llm_handle.event_receiver();
+            let timeline = Arc::clone(&self.timeline);
             thread::spawn(move || loop {
                 let event = {
                     let guard = receiver.lock().expect("LLM event receiver lock");
@@ -370,6 +435,10 @@ impl EffectRunner {
                 match event {
                     Ok(llm_event) => {
                         let msg = map_llm_event(llm_event);
+                        timeline
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .llm_completed(&msg, Instant::now());
                         if llm_tx.send(msg).is_err() {
                             break;
                         }
@@ -433,7 +502,7 @@ impl EffectRunner {
                     prompt_id,
                     reason
                 );
-                let _ = self.msg_tx.send(Msg::LlmCompleted {
+                self.send_llm_message(Msg::LlmCompleted {
                     request_id,
                     result: harvester_core::LlmResultKind::Failed { reason },
                     metadata: None,

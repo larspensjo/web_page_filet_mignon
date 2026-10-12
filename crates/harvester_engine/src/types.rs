@@ -1,6 +1,6 @@
 use crate::links::ExtractedLink;
 use std::fmt;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub type JobId = u64;
 
@@ -23,12 +23,31 @@ pub struct JobProgress {
     pub tokens: Option<u32>,
 }
 
+/// Wall-clock measurements of a download job, including failed or unstarted jobs.
+/// Unreached steps stay zero; fetch includes retry backoff. Total includes queue wait.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct JobTiming {
+    pub queue_wait: Duration,
+    pub fetch: Duration,
+    pub fetch_attempts: usize,
+    pub decode: Duration,
+    pub extract: Duration,
+    pub tokenize: Duration,
+    pub document_build: Duration,
+    pub article_write: Duration,
+    pub marker_write: Duration,
+    pub total: Duration,
+    pub bytes: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EngineEvent {
     Progress(JobProgress),
     JobCompleted {
         job_id: JobId,
         result: Result<JobOutcome, FailureKind>,
+        timing: Box<JobTiming>,
+        sent_at: Instant,
     },
 }
 

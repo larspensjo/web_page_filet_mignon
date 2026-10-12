@@ -120,6 +120,15 @@ pub(crate) struct StageCounts {
 }
 
 impl RunProgress {
+    /// Stable identifier of the reducer-owned run, for host-boundary observation.
+    pub fn run_id(&self) -> u64 {
+        self.run_id
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        self.terminal
+    }
+
     pub(crate) fn new(
         run_id: u64,
         started_at_utc: Option<DateTime<Utc>>,

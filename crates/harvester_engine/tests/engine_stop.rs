@@ -14,7 +14,7 @@ async fn wait_for_completions(
         let mut completions = BTreeMap::new();
         loop {
             while let Some(event) = engine.try_recv() {
-                if let EngineEvent::JobCompleted { job_id, result } = event {
+                if let EngineEvent::JobCompleted { job_id, result, .. } = event {
                     completions.insert(job_id, result);
                 }
             }

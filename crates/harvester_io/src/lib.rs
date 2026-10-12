@@ -9,6 +9,7 @@ mod persistence;
 mod persistence_worker;
 mod prompt_template_store;
 pub mod run_lock;
+pub mod run_timeline;
 mod runtime_paths;
 mod seen_set_store;
 pub mod signal_candidate_cache_store;

@@ -194,7 +194,15 @@ pub fn default_work_dir() -> PathBuf {
         .join(timestamp.to_string())
 }
 
+#[allow(dead_code)] // Used by integration fixtures with the unchanged default budget.
 pub fn run_benchmark(options: HarnessOptions) -> Result<BenchmarkReport, String> {
+    run_benchmark_with_concurrency(options, None)
+}
+
+pub fn run_benchmark_with_concurrency(
+    options: HarnessOptions,
+    concurrency: Option<usize>,
+) -> Result<BenchmarkReport, String> {
     let source_dir = resolve_existing(&options.source_dir)?;
     if !source_dir.is_dir() {
         return Err(format!(
@@ -272,7 +280,7 @@ pub fn run_benchmark(options: HarnessOptions) -> Result<BenchmarkReport, String>
     };
     let provider_routes = prepare_provider_routes(&held_articles)?;
 
-    let args = Args::try_parse_from([
+    let mut args = Args::try_parse_from([
         "harvester_batch",
         "--output-dir",
         work_dir.to_str().ok_or("work path is not valid UTF-8")?,
@@ -294,6 +302,12 @@ pub fn run_benchmark(options: HarnessOptions) -> Result<BenchmarkReport, String>
     ])
     .map_err(|error| error.to_string())?;
 
+    if let Some(concurrency) = concurrency {
+        if !(1..=10).contains(&concurrency) {
+            return Err("LLM concurrency must be between 1 and 10".into());
+        }
+        args.llm_concurrency = concurrency;
+    }
     let measurements = Arc::new(Mutex::new(Measurements::default()));
     let file_observer = make_file_observer(Arc::clone(&measurements));
     let (msg_tx, msg_rx) = mpsc::channel();
@@ -336,7 +350,12 @@ pub fn run_benchmark(options: HarnessOptions) -> Result<BenchmarkReport, String>
             &measurements,
         );
     };
-    let mut reducer_observer = |kind: &str, elapsed| {
+    let mut timeline_observer = effect_runner.reducer_observer(match options.host {
+        BenchmarkHost::Batch => "batch",
+        BenchmarkHost::Desktop => "desktop",
+    });
+    let mut reducer_observer = |kind: &str, elapsed, state: &AppState| {
+        timeline_observer(kind, elapsed, state);
         measurements
             .lock()
             .expect("benchmark measurements")
@@ -426,7 +445,8 @@ pub fn run_benchmark(options: HarnessOptions) -> Result<BenchmarkReport, String>
                 move || desktop_started.elapsed(),
                 {
                     let measurements = Arc::clone(&measurements);
-                    move |kind, elapsed| {
+                    move |kind, elapsed, state: &AppState| {
+                        timeline_observer(kind, elapsed, state);
                         measurements
                             .lock()
                             .expect("benchmark measurements")

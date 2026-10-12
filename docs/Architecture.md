@@ -10,6 +10,20 @@ This document describes the overall system shape, centered on a unidirectional d
 3. Effects perform all I/O and return results as new messages.
 4. Views render read-only snapshots of state.
 
+### Run timing
+
+Both hosts observe each reducer result through a shared `RunTimeline` in
+`harvester_io`. The reducer stays clock-free: read-only accessors expose the run
+identifier, settlement, stop status, provider halt, model requests in flight,
+and this run's released waves in ledger order. Effect boundaries supply polling, download step timings,
+provider headroom, model dispatch/completion, enqueue hand-off, and event
+forwarding delay. Terminal observation logs one `[run-timing]` summary and
+`[run-timing-waves]` release offsets and sizes per model stage, including Stop
+and drain timing, then resets. Outcomes (`completed`, `stopped`, `halted`) follow
+read-only state rather than message names. Poisoned diagnostics locks recover
+without interrupting completion forwarding. Observation adds no reducer state
+or effects and does not change scheduling, retry policy, or output bytes.
+
 ### Reducer-owned pipeline lifecycle
 
 The reducer owns process-lifetime triage, summary and scoring sessions and a

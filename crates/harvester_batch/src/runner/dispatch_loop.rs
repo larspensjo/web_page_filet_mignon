@@ -134,7 +134,7 @@ pub(super) fn prepare_startup_window(
     effect_runner: &EffectRunner,
 ) -> Result<(), String> {
     let mut effect_sink = |effects| effect_runner.enqueue(effects);
-    let mut reducer_observer = |_: &str, _: Duration| {};
+    let mut reducer_observer = effect_runner.reducer_observer("batch");
     prepare_startup_window_with_sink(state, msg_rx, &mut effect_sink, &mut reducer_observer)
 }
 
@@ -142,7 +142,7 @@ pub(super) fn prepare_startup_window_with_sink(
     state: &mut AppState,
     msg_rx: &mpsc::Receiver<Msg>,
     effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
-    reducer_observer: &mut dyn FnMut(&str, Duration),
+    reducer_observer: &mut dyn FnMut(&str, Duration, &AppState),
 ) -> Result<(), String> {
     let mut templates_loaded = false;
     let mut metadata_loaded = false;
@@ -169,7 +169,7 @@ pub(super) fn prepare_startup_window_with_sink(
                 let (next, effects, refresh_triggered) =
                     pump_pre_triage_refresh(std::mem::take(state));
                 if refresh_triggered {
-                    reducer_observer("EvaluatePreTriageRefresh", refresh_started.elapsed());
+                    reducer_observer("EvaluatePreTriageRefresh", refresh_started.elapsed(), &next);
                 }
                 *state = next;
                 if !effects.is_empty() {
@@ -229,8 +229,8 @@ pub(super) fn run_dispatch_loop_with_tick_interval(
     progress: Option<&mut LiveSystemBatchProgress>,
 ) -> Result<CycleOutcome, String> {
     let mut effect_sink = |effects| effect_runner.enqueue(effects);
-    let mut reducer_observer = |_: &str, _: Duration| {};
-    run_dispatch_loop_with_sink(
+    let mut reducer_observer = effect_runner.reducer_observer("batch");
+    run_dispatch_loop_with_state_observer(
         state,
         msg_rx,
         &mut effect_sink,
@@ -242,11 +242,11 @@ pub(super) fn run_dispatch_loop_with_tick_interval(
 }
 
 #[allow(clippy::too_many_arguments)] // Keeps sink and reducer timing at the host boundary.
-pub(super) fn run_dispatch_loop_with_sink(
+pub(super) fn run_dispatch_loop_with_state_observer(
     state: &mut AppState,
     msg_rx: &mpsc::Receiver<Msg>,
     effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
-    reducer_observer: &mut dyn FnMut(&str, Duration),
+    reducer_observer: &mut dyn FnMut(&str, Duration, &AppState),
     shutdown_flag: &Arc<AtomicBool>,
     options: DispatchLoopOptions,
     progress: Option<&mut LiveSystemBatchProgress>,
@@ -267,7 +267,7 @@ fn run_dispatch_loop_with_sink_inner(
     state: &mut AppState,
     msg_rx: &mpsc::Receiver<Msg>,
     effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
-    reducer_observer: &mut dyn FnMut(&str, Duration),
+    reducer_observer: &mut dyn FnMut(&str, Duration, &AppState),
     shutdown_flag: &Arc<AtomicBool>,
     options: DispatchLoopOptions,
     mut progress: Option<&mut LiveSystemBatchProgress>,
@@ -336,7 +336,11 @@ fn run_dispatch_loop_with_sink_inner(
                 let (next_state, effects, refresh_triggered) =
                     pump_pre_triage_refresh(current_state);
                 if refresh_triggered {
-                    reducer_observer("EvaluatePreTriageRefresh", refresh_started.elapsed());
+                    reducer_observer(
+                        "EvaluatePreTriageRefresh",
+                        refresh_started.elapsed(),
+                        &next_state,
+                    );
                 }
                 *state = next_state;
                 queued_effects.extend(effects);
@@ -413,7 +417,7 @@ fn run_dispatch_loop_with_sink_inner(
 fn reduce_timed_owned(
     state: AppState,
     message: Msg,
-    observer: &mut dyn FnMut(&str, Duration),
+    observer: &mut dyn FnMut(&str, Duration, &AppState),
 ) -> (AppState, Vec<harvester_core::Effect>) {
     let kind = message.kind();
     let started = Instant::now();
@@ -426,6 +430,28 @@ fn reduce_timed_owned(
             elapsed.as_millis()
         );
     }
-    observer(kind, elapsed);
+    observer(kind, elapsed, &next_state);
     (next_state, effects)
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn run_dispatch_loop_with_sink(
+    state: &mut AppState,
+    msg_rx: &mpsc::Receiver<Msg>,
+    sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
+    observer: &mut dyn FnMut(&str, Duration),
+    shutdown: &Arc<AtomicBool>,
+    options: DispatchLoopOptions,
+    progress: Option<&mut LiveSystemBatchProgress>,
+) -> Result<CycleOutcome, String> {
+    run_dispatch_loop_with_state_observer(
+        state,
+        msg_rx,
+        sink,
+        &mut |kind, elapsed, _| observer(kind, elapsed),
+        shutdown,
+        options,
+        progress,
+    )
 }

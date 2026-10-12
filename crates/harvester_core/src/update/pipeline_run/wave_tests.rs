@@ -1,6 +1,52 @@
 use super::*;
 use crate::PipelineRunScope;
 
+#[test]
+fn released_run_waves_reports_only_current_run_in_release_order_without_mutation() {
+    let (mut state, _) = start_resume(
+        add_metadata(AppState::new()),
+        (0..10).map(loaded_article).collect(),
+    );
+    let run_id = state.run_progress().unwrap().run_id();
+    // Include previous-run history, and different stages and member counts.
+    state.pipeline_waves.push(
+        run_id + 100,
+        PipelineStage::Triaging,
+        vec![("old".into(), "old-hash".into())],
+    );
+    state.pipeline_waves.push(
+        run_id,
+        PipelineStage::Summarizing,
+        vec![("a".into(), "ha".into()), ("b".into(), "hb".into())],
+    );
+    state.pipeline_waves.push(
+        run_id,
+        PipelineStage::ScoringSignals,
+        vec![("a".into(), "ha".into())],
+    );
+    let before = state.clone();
+    let expected: Vec<_> = state
+        .pipeline_waves()
+        .waves()
+        .iter()
+        .filter(|w| w.run_id == run_id)
+        .map(|w| (w.number, w.stage, w.members.len()))
+        .collect();
+    let observed: Vec<_> = state.released_run_waves().collect();
+    assert_eq!(observed, expected);
+    assert!(observed.windows(2).all(|waves| waves[0].0 < waves[1].0));
+    assert_eq!(observed[observed.len() - 2].1, PipelineStage::Summarizing);
+    assert_eq!(observed[observed.len() - 2].2, 2);
+    assert_eq!(observed.last().unwrap().1, PipelineStage::ScoringSignals);
+    assert_eq!(observed.last().unwrap().2, 1);
+    assert_eq!(state, before, "observation cannot mutate reducer state");
+    assert_eq!(
+        crate::update(state, Msg::PipelineRunAdvance),
+        crate::update(before, Msg::PipelineRunAdvance),
+        "observation cannot alter subsequent effects or state"
+    );
+}
+
 fn start_resume(state: AppState, articles: Vec<LoadedArticle>) -> (AppState, Vec<Effect>) {
     let (state, effects) = crate::update(
         state,

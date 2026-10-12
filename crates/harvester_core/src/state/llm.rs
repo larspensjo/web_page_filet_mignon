@@ -24,6 +24,13 @@ impl AppState {
             .as_ref()
             .map(|halt| halt.reason())
     }
+    /// Existing provider halt status, exposed only for host-boundary diagnostics.
+    pub fn provider_dispatch_halted(&self) -> bool {
+        matches!(
+            self.model_dispatch_halt_reason,
+            Some(ModelDispatchHalt::ProviderCredits(_) | ModelDispatchHalt::RateLimit(_))
+        )
+    }
     pub(crate) fn halt_model_dispatch(&mut self, halt: ModelDispatchHalt) {
         if self.model_dispatch_halt_reason.is_none()
             || (matches!(halt, ModelDispatchHalt::SessionQuota(_))
@@ -54,7 +61,8 @@ impl AppState {
             _ => None,
         }
     }
-    pub(crate) fn article_model_requests_in_flight(&self) -> usize {
+    /// Article requests currently holding the shared model budget, for read-only observation.
+    pub fn article_model_requests_in_flight(&self) -> usize {
         self.llm_requests
             .values()
             .filter(|request| {

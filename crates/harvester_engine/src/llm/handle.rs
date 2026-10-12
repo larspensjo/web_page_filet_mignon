@@ -649,7 +649,7 @@ async fn handle_completion_concurrent(
                 return;
             }
 
-            let metadata = LlmRunMetadata::new(LlmRunMetadataInit {
+            let mut metadata = LlmRunMetadata::new(LlmRunMetadataInit {
                 prompt_id,
                 prompt_version: version,
                 resolved_model: response.model_id().model_name().to_string(),
@@ -664,11 +664,19 @@ async fn handle_completion_concurrent(
                 cache_status: CacheStatus::Miss,
                 timestamp_utc: timestamp_utc.clone(),
             });
+            metadata.rate_limit_headroom = response.rate_limit_headroom().cloned().map(Box::new);
+            let headroom = metadata.rate_limit_headroom.as_deref();
             engine_info!(
-                "[llm-run] request_id={} prompt_id={:?} version={} model={} input_bytes={} input_tokens={} output_tokens={} cached_input_tokens={} cost_microdollars={} wall_ms={} parse_ok=true cache_status=miss",
+                "[llm-run] request_id={} prompt_id={:?} version={} model={} input_bytes={} input_tokens={} output_tokens={} cached_input_tokens={} cost_microdollars={} wall_ms={} parse_ok=true cache_status=miss remaining_requests={} remaining_tokens={} limit_requests={} limit_tokens={} reset_requests={} reset_tokens={}",
                 request_id, metadata.prompt_id, metadata.prompt_version, metadata.resolved_model,
                 metadata.input_bytes, metadata.input_tokens, metadata.output_tokens,
-                metadata.cached_input_tokens, metadata.cost_microdollars, metadata.wall_ms
+                metadata.cached_input_tokens, metadata.cost_microdollars, metadata.wall_ms,
+                headroom_field(headroom.and_then(|h| h.remaining_requests)),
+                headroom_field(headroom.and_then(|h| h.remaining_tokens)),
+                headroom_field(headroom.and_then(|h| h.limit_requests)),
+                headroom_field(headroom.and_then(|h| h.limit_tokens)),
+                headroom_field(headroom.and_then(|h| h.reset_requests.as_deref())),
+                headroom_field(headroom.and_then(|h| h.reset_tokens.as_deref())),
             );
 
             let result = LlmCompletionResult {
@@ -738,6 +746,19 @@ async fn handle_completion_concurrent(
             );
         }
     }
+}
+
+fn headroom_field(value: Option<impl std::fmt::Display>) -> String {
+    // Provider reset strings are untrusted header values; keep each field one token.
+    value.map_or_else(
+        || "none".into(),
+        |v| {
+            v.to_string()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join("_")
+        },
+    )
 }
 
 /// Resolve the model for a request.

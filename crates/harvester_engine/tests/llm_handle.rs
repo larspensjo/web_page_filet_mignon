@@ -9,6 +9,50 @@ use harvester_engine::llm::{
     PricingRegistry, PromptId, PromptRegistry, ProviderKind, TokenUsage,
 };
 
+#[test]
+fn llm_worker_copies_provider_headroom_into_additive_metadata() {
+    let provider = Arc::new(MockLlmProvider::new());
+    let headroom = openai_provider_kit::RateLimitHeadroom {
+        remaining_requests: Some(8),
+        remaining_tokens: Some(900),
+        reset_requests: Some("2s".into()),
+        ..Default::default()
+    };
+    provider.queue_response(Ok(LlmResponse::new(
+        r#"{"category":"news","priority":3,"tags":[],"rationale":"ok"}"#,
+        TokenUsage::new(10, 20),
+        ModelId::new(ProviderKind::OpenAi, "mock"),
+        FinishReason::Stop,
+    )
+    .with_rate_limit_headroom(Some(headroom.clone()))));
+    let dir = tempdir().unwrap();
+    let handle = LlmHandle::new(make_config(provider, prompt_registry_arc(), &dir));
+    handle
+        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
+            request_id: 77,
+            prompt_id: PromptId::ArticleTriage,
+            prompt_version: Some(1),
+            input_content: "document".into(),
+            context: vec![],
+            extra_template_vars: vec![],
+        })))
+        .unwrap();
+    let LlmEvent::Completed { result, .. } = recv_event(&handle) else {
+        panic!("completion expected");
+    };
+    let metadata = result.unwrap().metadata;
+    assert_eq!(metadata.rate_limit_headroom, Some(Box::new(headroom)));
+    let mut json = serde_json::to_value(&metadata).unwrap();
+    let enriched: harvester_engine::llm::LlmRunMetadata =
+        serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(enriched, metadata);
+    json.as_object_mut().unwrap().remove("rate_limit_headroom");
+    let old: harvester_engine::llm::LlmRunMetadata = serde_json::from_value(json).unwrap();
+    assert_eq!(old.rate_limit_headroom, None);
+    assert_eq!(old.input_tokens, metadata.input_tokens);
+    assert_eq!(old.output_tokens, metadata.output_tokens);
+}
+
 fn make_config(
     provider_trait: Arc<dyn LlmProvider>,
     registry: Arc<RwLock<PromptRegistry>>,

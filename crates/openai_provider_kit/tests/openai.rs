@@ -10,6 +10,131 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 static OPENAI_API_KEY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
+async fn response_with_headers(headers: &[(&str, &str)]) -> openai_provider_kit::LlmResponse {
+    let server = MockServer::start().await;
+    let mut template = ResponseTemplate::new(200).set_body_json(serde_json::json!({
+        "model": "gpt-4.1", "choices": [{"message":{"content":"ok"},"finish_reason":"stop"}],
+        "usage": {"prompt_tokens":2,"completion_tokens":1}
+    }));
+    for (name, value) in headers {
+        template = template.insert_header(*name, *value);
+    }
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(template)
+        .mount(&server)
+        .await;
+    OpenAiProvider::new("test-key".into())
+        .with_base_url(format!("{}/v1", server.uri()))
+        .complete(&sample_request())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn rate_limit_headroom_parses_all_headers() {
+    let response = response_with_headers(&[
+        ("x-ratelimit-limit-requests", "100"),
+        ("x-ratelimit-remaining-requests", "90"),
+        ("x-ratelimit-limit-tokens", "50000"),
+        ("x-ratelimit-remaining-tokens", "49000"),
+        ("x-ratelimit-reset-requests", "1m30s"),
+        ("x-ratelimit-reset-tokens", "250ms"),
+    ])
+    .await;
+    assert_eq!(
+        response.rate_limit_headroom(),
+        Some(&openai_provider_kit::RateLimitHeadroom {
+            limit_requests: Some(100),
+            remaining_requests: Some(90),
+            limit_tokens: Some(50000),
+            remaining_tokens: Some(49000),
+            reset_requests: Some("1m30s".into()),
+            reset_tokens: Some("250ms".into()),
+        })
+    );
+}
+
+#[tokio::test]
+async fn rate_limit_headroom_parses_partial_headers() {
+    let response = response_with_headers(&[
+        ("x-ratelimit-remaining-requests", "0"),
+        ("x-ratelimit-reset-tokens", "1.5s"),
+    ])
+    .await;
+    assert_eq!(
+        response.rate_limit_headroom(),
+        Some(&openai_provider_kit::RateLimitHeadroom {
+            remaining_requests: Some(0),
+            reset_tokens: Some("1.5s".into()),
+            ..Default::default()
+        })
+    );
+}
+
+#[tokio::test]
+async fn rate_limit_headroom_is_absent_without_headers() {
+    assert_eq!(response_with_headers(&[]).await.rate_limit_headroom(), None);
+}
+
+#[tokio::test]
+async fn rate_limit_headroom_ignores_malformed_values_individually() {
+    let response = response_with_headers(&[
+        ("x-ratelimit-limit-requests", "-1"),
+        ("x-ratelimit-remaining-requests", "n/a"),
+        ("x-ratelimit-limit-tokens", "18446744073709551616"),
+        ("x-ratelimit-remaining-tokens", "120"),
+        ("x-ratelimit-reset-requests", "soon"),
+        ("x-ratelimit-reset-tokens", "-3s"),
+    ])
+    .await;
+    assert_eq!(
+        response.rate_limit_headroom(),
+        Some(&openai_provider_kit::RateLimitHeadroom {
+            remaining_tokens: Some(120),
+            ..Default::default()
+        })
+    );
+    assert_eq!(
+        response_with_headers(&[
+            ("x-ratelimit-remaining-requests", "NaN"),
+            ("x-ratelimit-reset-tokens", "1msjunk")
+        ])
+        .await
+        .rate_limit_headroom(),
+        None
+    );
+}
+
+#[test]
+fn response_constructor_and_old_serialized_response_remain_compatible() {
+    let response = openai_provider_kit::LlmResponse::new(
+        "ok",
+        openai_provider_kit::TokenUsage::new(1, 2),
+        ModelId::new(ProviderKind::OpenAi, "test"),
+        FinishReason::Stop,
+    );
+    assert_eq!(response.rate_limit_headroom(), None);
+    let json = serde_json::to_value(&response).unwrap();
+    assert!(json.get("rate_limit_headroom").is_none());
+    assert_eq!(
+        serde_json::from_value::<openai_provider_kit::LlmResponse>(json).unwrap(),
+        response
+    );
+    let enriched =
+        response.with_rate_limit_headroom(Some(openai_provider_kit::RateLimitHeadroom {
+            remaining_requests: Some(3),
+            ..Default::default()
+        }));
+    assert_eq!(
+        serde_json::from_str::<openai_provider_kit::LlmResponse>(
+            &serde_json::to_string(&enriched).unwrap()
+        )
+        .unwrap(),
+        enriched
+    );
+}
+
 struct SavedApiKey(Option<std::ffi::OsString>);
 
 impl SavedApiKey {

@@ -34,6 +34,8 @@ pub enum CacheStatus {
 /// Uniform metadata for a successful (or validation-failed) LLM run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LlmRunMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit_headroom: Option<Box<openai_provider_kit::RateLimitHeadroom>>,
     pub prompt_id: PromptId,
     pub prompt_version: PromptVersion,
     /// Stable model name string (not the enum), safe across serialization.
@@ -81,6 +83,7 @@ impl LlmRunMetadata {
     /// Smart constructor — all fields validated at build time.
     pub fn new(init: LlmRunMetadataInit) -> Self {
         Self {
+            rate_limit_headroom: None,
             prompt_id: init.prompt_id,
             prompt_version: init.prompt_version,
             resolved_model: init.resolved_model,
@@ -160,6 +163,7 @@ impl From<LlmFailureMetadata> for LlmRunMetadata {
     /// Token and cost fields are set to zero; `parse_ok` is `false`.
     fn from(f: LlmFailureMetadata) -> Self {
         Self {
+            rate_limit_headroom: None,
             prompt_id: f.prompt_id,
             prompt_version: f.prompt_version,
             resolved_model: f.resolved_model.unwrap_or_default(),

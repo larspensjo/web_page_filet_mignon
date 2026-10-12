@@ -178,6 +178,18 @@ impl LlmRequest {
     }
 }
 
+/// Provider-reported limits, preserved for diagnostics rather than scheduling policy.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RateLimitHeadroom {
+    pub limit_requests: Option<u64>,
+    pub remaining_requests: Option<u64>,
+    pub limit_tokens: Option<u64>,
+    pub remaining_tokens: Option<u64>,
+    /// Provider duration string (for example `1m30s`), without interpretation as a deadline.
+    pub reset_requests: Option<String>,
+    pub reset_tokens: Option<String>,
+}
+
 /// Provider-agnostic completion response.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LlmResponse {
@@ -185,6 +197,8 @@ pub struct LlmResponse {
     usage: TokenUsage,
     model_id: ModelId,
     finish_reason: FinishReason,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rate_limit_headroom: Option<RateLimitHeadroom>,
 }
 
 impl LlmResponse {
@@ -199,6 +213,7 @@ impl LlmResponse {
             usage,
             model_id,
             finish_reason,
+            rate_limit_headroom: None,
         }
     }
 
@@ -216,6 +231,15 @@ impl LlmResponse {
 
     pub fn finish_reason(&self) -> FinishReason {
         self.finish_reason
+    }
+
+    pub fn rate_limit_headroom(&self) -> Option<&RateLimitHeadroom> {
+        self.rate_limit_headroom.as_ref()
+    }
+
+    pub fn with_rate_limit_headroom(mut self, headroom: Option<RateLimitHeadroom>) -> Self {
+        self.rate_limit_headroom = headroom;
+        self
     }
 }
 

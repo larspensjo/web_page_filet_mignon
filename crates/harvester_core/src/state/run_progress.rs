@@ -9,6 +9,27 @@ pub(crate) struct PollPipelineJobSnapshot {
 }
 
 impl AppState {
+    /// Stop remains observable after same-step settlement, which clears the phase.
+    /// Read immediately after reduction: normal settlement creates a completion
+    /// notice; stopped settlement does not. A later notice dismissal clears that evidence.
+    pub fn run_stopped(&self) -> bool {
+        self.pipeline_run_phase == PipelineRunPhase::Stopping
+            || (self.run_progress().is_some_and(RunProgress::is_terminal)
+                && self.run_completion_notice.is_none())
+    }
+
+    /// This run's released waves, in ledger order, without changing admission or state.
+    pub fn released_run_waves(
+        &self,
+    ) -> impl Iterator<Item = (u64, crate::PipelineStage, usize)> + '_ {
+        let run_id = self.run_progress().map(|run| run.run_id());
+        self.pipeline_waves
+            .waves()
+            .iter()
+            .filter(move |wave| Some(wave.run_id) == run_id)
+            .map(|wave| (wave.number, wave.stage, wave.members.len()))
+    }
+
     pub fn pipeline_waves(&self) -> &crate::PipelineWaves {
         &self.pipeline_waves
     }

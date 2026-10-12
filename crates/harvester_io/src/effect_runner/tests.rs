@@ -934,3 +934,154 @@ fn archive_requested_writes_archive_markdown_for_selected_urls() {
     assert_eq!(archive.matches("===== DOC START =====").count(), 1);
     assert!(!archive.contains("A body"));
 }
+
+#[tokio::test]
+async fn run_timeline_observes_real_poll_engine_handoff_and_terminal_without_new_effects() {
+    use harvester_core::{update, AiAvailability, AiUnavailableReason, PipelineRunScope};
+    use harvester_engine::{
+        EngineConfig, SourceConfig, SourceId, SourceRegistry, SourceType, UrlPolicy,
+    };
+    use std::time::Instant;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let server = MockServer::start().await;
+    Mock::given(method("GET")).and(path("/article"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(format!("<html><head><title>Boundary timing</title></head><body><article><p>{}</p></article></body></html>", "Detailed news report with meaningful article content. ".repeat(60)), "text/html; charset=utf-8"))
+        .expect(1).mount(&server).await;
+    let dir = tempdir().unwrap();
+    let paths = make_test_runtime_paths(dir.path());
+    let registry = SourceRegistry {
+        sources: vec![SourceConfig {
+            id: SourceId::new("timing-fixture").unwrap(),
+            source_type: SourceType::CuratedList {
+                urls: vec![format!("{}/article", server.uri())],
+            },
+            enabled: true,
+            max_urls_per_poll: None,
+            description: String::new(),
+        }],
+    };
+    fs::write(&paths.sources_path, ron::to_string(&registry).unwrap()).unwrap();
+    let mut config = EngineConfig::default_with_output(paths.output_dir.clone());
+    config.url_policy = UrlPolicy {
+        block_private_ips: false,
+        ..Default::default()
+    };
+    let (tx, rx) = mpsc::channel();
+    let runner = EffectRunner::with_engine_config(
+        paths,
+        tx,
+        config,
+        Box::new(NoOpPlatformHandler),
+        Box::new(NoOpRuntimePersistenceSink),
+    );
+    let state = update(
+        AppState::new(),
+        Msg::AiAvailabilityDetected {
+            availability: AiAvailability::Unavailable {
+                reason: AiUnavailableReason::MissingApiKey,
+            },
+        },
+    )
+    .0;
+    let (mut state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: PipelineRunScope::Full,
+        },
+    );
+    let run_id = state.run_progress().unwrap().run_id();
+    // A diagnostics panic must not interrupt poll, enqueue, or JobDone forwarding.
+    let timeline = std::sync::Arc::clone(&runner.timeline);
+    assert!(std::thread::spawn(move || {
+        let _guard = timeline.lock().unwrap();
+        panic!("poison diagnostics for regression coverage");
+    })
+    .join()
+    .is_err());
+    let mut host_observer = runner.reducer_observer("batch");
+    host_observer("PipelineRunRequested", Duration::ZERO, &state);
+    runner.send_llm_message(Msg::LlmCompleted {
+        request_id: u64::MAX,
+        result: harvester_core::LlmResultKind::RateLimited {
+            reason: "fixture".into(),
+        },
+        metadata: None,
+    });
+    assert!(matches!(
+        rx.recv().unwrap(),
+        Msg::LlmCompleted {
+            request_id: u64::MAX,
+            ..
+        }
+    ));
+    let observe = |state: &AppState, kind| {
+        runner
+            .timeline
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .observe_reducer(state, kind, Duration::ZERO, Instant::now(), "batch")
+    };
+    assert!(observe(&state, "PipelineRunRequested").is_empty());
+    assert_eq!(effects, vec![Effect::PollAllSources]);
+    runner.enqueue(effects);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut lines = Vec::new();
+    let mut job_messages = Vec::new();
+    while lines.is_empty() {
+        assert!(
+            Instant::now() < deadline,
+            "run must settle: {:?}",
+            state.pipeline_activity()
+        );
+        if let Ok(msg) = rx.try_recv() {
+            let kind = msg.kind();
+            if matches!(
+                msg,
+                Msg::FetchOutcomeClassified { .. } | Msg::JobDone { .. }
+            ) {
+                job_messages.push(kind);
+            }
+            let (next, effects) = update(state, msg);
+            state = next;
+            lines.extend(observe(&state, kind));
+            runner.enqueue(effects);
+        }
+        let (next, effects, refreshed) = crate::host_bootstrap::pump_pre_triage_refresh(state);
+        state = next;
+        if refreshed {
+            lines.extend(observe(&state, "EvaluatePreTriageRefresh"));
+        }
+        runner.enqueue(effects);
+        let (next, effects) = update(state, Msg::tick_at(chrono::Utc::now()));
+        state = next;
+        lines.extend(observe(&state, "Tick"));
+        runner.enqueue(effects);
+        let (next, effects) = update(state, Msg::PipelineRunAdvance);
+        state = next;
+        lines.extend(observe(&state, "PipelineRunAdvance"));
+        runner.enqueue(effects);
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    assert_eq!(job_messages, ["FetchOutcomeClassified", "JobDone"]);
+    assert_eq!(state.batch_observation().jobs_done, 1);
+    assert!(state.run_progress().unwrap().is_terminal());
+    let summary = &lines[0];
+    for field in [
+        format!("run_id={run_id}"),
+        "host=batch".into(),
+        "downloads=1".into(),
+        "download_successes=1".into(),
+        "max_downloads_in_flight=1".into(),
+        "triage_requests=0".into(),
+    ] {
+        assert!(
+            summary.split_whitespace().any(|v| v == field),
+            "missing {field}: {summary}"
+        );
+    }
+    assert!(!summary.contains("poll_end_ms=none"));
+    assert!(!summary.contains("first_download_start_ms=none"));
+    assert!(!summary.contains("last_download_completion_ms=none"));
+    assert!(observe(&state, "Tick").is_empty());
+}

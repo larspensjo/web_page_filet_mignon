@@ -223,7 +223,7 @@ impl EffectRunner {
                             request_id,
                             err
                         );
-                        let _ = self.msg_tx.send(Msg::LlmCompleted {
+                        self.send_llm_message(Msg::LlmCompleted {
                             request_id,
                             result: LlmResultKind::Failed {
                                 reason: "LLM worker unavailable".to_string(),
@@ -242,7 +242,7 @@ impl EffectRunner {
                         "LLM completion requested without handle: request_id={}",
                         request_id
                     );
-                    let _ = self.msg_tx.send(Msg::LlmCompleted {
+                    self.send_llm_message(Msg::LlmCompleted {
                         request_id,
                         result: LlmResultKind::Failed {
                             reason: "LLM not configured".to_string(),

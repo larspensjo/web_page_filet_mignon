@@ -3,7 +3,9 @@ mod replay_support;
 use std::path::PathBuf;
 
 use clap::{Parser, ValueEnum};
-use replay_support::{default_work_dir, run_benchmark, BenchmarkHost, HarnessOptions};
+use replay_support::{
+    default_work_dir, run_benchmark_with_concurrency, BenchmarkHost, HarnessOptions,
+};
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum HostArg {
@@ -37,6 +39,10 @@ struct Cli {
     /// Synthetic provider delay for each model call.
     #[arg(long, default_value_t = 0, value_name = "MS")]
     llm_latency_ms: u64,
+
+    /// Synthetic model request budget; defaults to the batch budget.
+    #[arg(long, value_name = "N")]
+    llm_concurrency: Option<usize>,
 }
 
 fn main() {
@@ -66,7 +72,7 @@ fn main() {
         },
         llm_latency_ms: cli.llm_latency_ms,
     };
-    if let Err(error) = run_benchmark(options) {
+    if let Err(error) = run_benchmark_with_concurrency(options, cli.llm_concurrency) {
         eprintln!("replay_bench: {error}");
         std::process::exit(2);
     }

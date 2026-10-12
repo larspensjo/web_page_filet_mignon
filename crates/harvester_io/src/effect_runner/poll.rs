@@ -23,9 +23,14 @@ impl EffectRunner {
         let url_policy = self.url_policy.clone();
         let fetch_settings = self.fetch_settings.clone();
 
+        let timeline = std::sync::Arc::clone(&self.timeline);
         thread::spawn(move || {
-            let _guard = PollGuard::new(msg_tx.clone());
             let poll_started = Instant::now();
+            timeline
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .poll_started(poll_started);
+            let _guard = PollGuard::with_timeline(msg_tx.clone(), timeline);
 
             engine_info!("[source-config] loading {}", sources_path.display());
             let registry = load_sources(&sources_path);

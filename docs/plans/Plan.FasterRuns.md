@@ -303,7 +303,8 @@ Regression tests:
 - Engine: `JobCompleted` carries timing on success and on each failure path; the existing
   `engine_stop.rs` and `fetch.rs` tests pass unchanged apart from pattern updates for the new
   event field.
-- Existing reducer tests pass unchanged. The reducer gains only the read-only ledger accessor.
+- Existing reducer tests pass unchanged. The reducer gains only read-only accessors
+  (ledger, run id, terminal status, model requests in flight, stop status and provider halt).
 
 Verification:
 
@@ -320,6 +321,31 @@ Verification:
 
 Docs: Architecture.md gains a short "Run timing" note (host-boundary observation; the reducer
 stays clock-free). `openai_provider_kit/CHANGELOG.md` gets an entry.
+
+**Phase 1 hand-off (done 2026-10-12).**
+
+- Implemented by Codex and reviewed once by Opus. All 5 findings were applied: the benchmark
+  crash on Windows, poison-tolerant timeline locks, flat key=value log fields, Windows-safe
+  timing tests, and the outcome read from state as completed/stopped/halted.
+- The core gained only read-only accessors: the wave ledger, run id, terminal status, and
+  model requests in flight.
+- Verified keylessly:
+  - `cargo build` passes.
+  - Per-crate tests for the six touched crates: 1384 passed, 0 failed, 2 ignored. The baseline
+    was 1352 tests and none were removed.
+  - Both clippy gates pass.
+  - `cargo fmt` is clean.
+  - The IPC probe passed every gate.
+- Sequential `download_bench` baseline (4 sites, 12 jobs, 50 ms latency, 8 KiB bodies):
+  `wall_ms=682 max_concurrency=1 failures=0`. The step sums are `queue_wait_ms=3766 fetch_ms=624
+  extract_ms=9 write_ms=17 manifest_ms=19 total_ms=4446`.
+- Follow-ups for Phase 2:
+  - Rate-limit headroom is captured only from successful responses. 429 responses also carry
+    the headers, but recording them needs an additive extension to the kit's error contract.
+    Consider this when adding rate-limit retry.
+  - A batch run interrupted with Ctrl-C logs no `[run-timing]` line.
+- Not yet observed: the `[run-timing]` lines from a live desktop run (optional; the user's run).
+- Next: Phase 2.
 
 ### Phase 2 - Rate-limit retry and reducer-owned adaptive cap (desktop default still 3)
 

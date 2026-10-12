@@ -213,7 +213,7 @@ where
         snapshot_sink,
         bodies,
         now,
-        |_, _| {},
+        |_, _, _| {},
         |_| {},
         None::<fn(DriverIterationTiming)>,
         |_| false,
@@ -241,7 +241,7 @@ where
     CS: FnMut(UiCommand),
     SS: FnMut(SnapshotSignal),
     N: FnMut() -> Duration,
-    RO: FnMut(&str, Duration),
+    RO: FnMut(&str, Duration, &AppState),
     VO: FnMut(Duration),
     IO: FnMut(DriverIterationTiming),
     STOP: FnMut(&AppState) -> bool,
@@ -312,7 +312,7 @@ where
                         elapsed.as_millis()
                     );
                 }
-                reducer_observer(&last_message_kind, elapsed);
+                reducer_observer(&last_message_kind, elapsed, &next);
                 state = next;
                 measure_phase!(
                     timing,
@@ -324,7 +324,7 @@ where
             let (next, effects, refresh_triggered) =
                 measure_phase!(timing, pre_triage_pump, pump_pre_triage_refresh(state));
             if refresh_triggered {
-                reducer_observer("EvaluatePreTriageRefresh", refresh_started.elapsed());
+                reducer_observer("EvaluatePreTriageRefresh", refresh_started.elapsed(), &next);
             }
             state = next;
             measure_phase!(
@@ -340,7 +340,7 @@ where
                 let reducer_started = Instant::now();
                 let (next, effects) =
                     measure_phase!(timing, reduce, reducer(state, Msg::PipelineRunAdvance));
-                reducer_observer(&last_message_kind, reducer_started.elapsed());
+                reducer_observer(&last_message_kind, reducer_started.elapsed(), &next);
                 state = next;
                 measure_phase!(
                     timing,

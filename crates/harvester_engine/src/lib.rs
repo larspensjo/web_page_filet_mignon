@@ -83,7 +83,7 @@ pub use text_safety::truncate_to_char_boundary;
 pub use token::{TokenCounter, WhitespaceTokenCounter};
 pub use types::{
     EngineEvent, FailureKind, FetchError, FetchMetadata, FetchOutput, JobId, JobOutcome,
-    JobProgress, Stage,
+    JobProgress, JobTiming, Stage,
 };
 pub use url_policy::{UrlPolicy, UrlPolicyViolation};
 

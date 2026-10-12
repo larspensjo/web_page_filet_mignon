@@ -121,17 +121,30 @@ pub fn handle_rss_source_poll(
 
 pub struct PollGuard {
     msg_tx: mpsc::Sender<Msg>,
+    timeline: Option<std::sync::Arc<std::sync::Mutex<crate::run_timeline::RunTimeline>>>,
 }
 
 impl PollGuard {
-    pub fn new(msg_tx: mpsc::Sender<Msg>) -> Self {
-        Self { msg_tx }
+    pub fn with_timeline(
+        msg_tx: mpsc::Sender<Msg>,
+        timeline: std::sync::Arc<std::sync::Mutex<crate::run_timeline::RunTimeline>>,
+    ) -> Self {
+        Self {
+            msg_tx,
+            timeline: Some(timeline),
+        }
     }
 }
 
 impl Drop for PollGuard {
     fn drop(&mut self) {
         let _ = self.msg_tx.send(Msg::AllSourcesPollEnded);
+        if let Some(timeline) = &self.timeline {
+            timeline
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .poll_ended(std::time::Instant::now());
+        }
     }
 }
 

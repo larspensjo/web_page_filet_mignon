@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::provider::LlmProvider;
 use crate::types::{
     ChatRole, FinishReason, LlmError, LlmRequest, LlmResponse, ModelId, ProviderKind,
-    ResponseFormat, TokenUsage,
+    RateLimitHeadroom, ResponseFormat, TokenUsage,
 };
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(120);
@@ -203,8 +203,10 @@ impl LlmProvider for OpenAiProvider {
             return Err(Self::map_status_code(status, &headers, body_text));
         }
 
+        let headroom = parse_rate_limit_headroom(response.headers());
         let bytes = response.bytes().await.map_err(Self::map_reqwest_error)?;
         Self::parse_response_body(&bytes)
+            .map(|response| response.with_rate_limit_headroom(headroom))
     }
 
     fn provider_name(&self) -> &str {
@@ -268,6 +270,58 @@ impl LlmProvider for OpenAiProvider {
 
         Ok(chat_models)
     }
+}
+
+fn parse_rate_limit_headroom(headers: &header::HeaderMap) -> Option<RateLimitHeadroom> {
+    let number = |name| {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<u64>().ok())
+    };
+    let reset = |name| {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .filter(|v| valid_reset_duration(v))
+            .map(str::to_owned)
+    };
+    let headroom = RateLimitHeadroom {
+        limit_requests: number("x-ratelimit-limit-requests"),
+        remaining_requests: number("x-ratelimit-remaining-requests"),
+        limit_tokens: number("x-ratelimit-limit-tokens"),
+        remaining_tokens: number("x-ratelimit-remaining-tokens"),
+        reset_requests: reset("x-ratelimit-reset-requests"),
+        reset_tokens: reset("x-ratelimit-reset-tokens"),
+    };
+    (headroom != RateLimitHeadroom::default()).then_some(headroom)
+}
+
+fn valid_reset_duration(mut value: &str) -> bool {
+    if value.is_empty() {
+        return false;
+    }
+    while !value.is_empty() {
+        let end = value
+            .find(|c: char| !c.is_ascii_digit() && c != '.')
+            .unwrap_or(value.len());
+        let Ok(number) = value[..end].parse::<f64>() else {
+            return false;
+        };
+        if !number.is_finite() || number < 0.0 {
+            return false;
+        }
+        value = &value[end..];
+        let Some(unit) = ["ms", "s", "m", "h", "d"]
+            .into_iter()
+            .find(|unit| value.starts_with(unit))
+        else {
+            return false;
+        };
+        value = &value[unit.len()..];
+    }
+    true
 }
 
 /// Builds the exact JSON object sent to OpenAI's Chat Completions endpoint.

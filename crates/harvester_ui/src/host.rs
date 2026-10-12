@@ -21,7 +21,7 @@ use harvester_io::{
     DESKTOP_LOCK_IDENTITY,
 };
 use harvester_ui_bridge::{
-    decode_intent, fetch_body as bridge_fetch_body, run_driver, BodyKey, BodyResponse, BodyTable,
+    decode_intent, fetch_body as bridge_fetch_body, BodyKey, BodyResponse, BodyTable,
     DriverTermination, SnapshotEnvelope, SnapshotSignal, CSP,
 };
 use tauri::{Emitter, Manager};
@@ -825,7 +825,11 @@ fn start_driver(
         let emitted = Arc::clone(&driver_host.highest_emitted);
         let bodies = Arc::clone(&driver_host.bodies);
         let effect_runner = Arc::clone(&runner);
-        let result = run_driver(
+        let reducer_observer = runner
+            .lock()
+            .expect("effect runner lock")
+            .reducer_observer("desktop");
+        let result = harvester_ui_bridge::driver::run_driver_with_observers(
             state,
             receiver,
             update,
@@ -860,6 +864,10 @@ fn start_driver(
                 let started = std::time::Instant::now();
                 move || started.elapsed()
             },
+            reducer_observer,
+            |_| {},
+            None::<fn(harvester_ui_bridge::driver::DriverIterationTiming)>,
+            |_| false,
         );
         if result == DriverTermination::Fatal {
             engine_error!("[ui-host] driver terminated fatally");

@@ -4,6 +4,12 @@ All notable changes to `openai_provider_kit` will be documented in this file.
 
 The format follows Keep a Changelog-style sections, and this crate uses semantic versioning once it is published outside the Harvester workspace.
 
+## 0.5.0 - 2026-10-12
+
+### Added
+
+- Optional provider rate-limit headroom on completion responses, parsed from OpenAI response headers. The existing response constructor remains source-compatible.
+
 ## 0.4.0 - 2026-09-30
 
 ### Removed

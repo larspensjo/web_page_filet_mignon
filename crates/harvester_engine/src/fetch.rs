@@ -80,6 +80,8 @@ impl Default for FetchSettings {
 
 pub trait ProgressSink: Send + Sync {
     fn emit(&self, event: EngineEvent);
+    /// Observation only: does not emit progress or alter retry policy.
+    fn fetch_attempt(&self) {}
 }
 
 pub struct ChannelProgressSink {
@@ -342,6 +344,7 @@ impl Fetcher for ReqwestFetcher {
     ) -> Result<FetchOutput, FetchError> {
         let max_attempts = self.settings.retry_settings.max_retries + 1;
         for attempt in 1..=max_attempts {
+            sink.fetch_attempt();
             match self.fetch_once(job_id, url, sink).await {
                 Ok(output) => {
                     if attempt > 1 {
