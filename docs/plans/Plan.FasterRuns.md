@@ -502,6 +502,33 @@ Verification:
 Docs: Architecture.md budget paragraph changes "Desktop uses `LLM_MAX_CONCURRENT_REQUESTS`
 (default 3)" to default 10.
 
+**Phase 3 hand-off (done 2026-10-12, commit d4f14de).**
+
+- Implemented by Codex and reviewed once by Opus. The verdict was Approved, with 1 minor
+  finding, which was applied: the startup test now feeds one parsed budget to both the desktop
+  startup state and the real effect-runner builder, as `harvester_ui` does, and asserts the
+  literal 10 for each.
+- Verified keylessly:
+  - `cargo build` passes.
+  - `cargo test -p harvester_io`: 177 passed, 0 failed. One test was added and none was
+    removed. Two assertions were tightened from constants to the literal 10, and `"0"`
+    clamping to 1 was added.
+  - `cargo clippy --all-targets -- -D warnings` passes, and `cargo fmt --check` is clean.
+  - `harvester_ui_bridge` fixtures set the budget explicitly, so they were unaffected.
+  - Synthetic `replay_bench` (desktop host, 2500 ms model latency): driver wall 83.2 s at
+    concurrency 3 and 33.1 s at concurrency 10. This shows model-stage scaling only.
+  - IPC probe: passed, all four cases.
+  - Not run: the full workspace `cargo test` (deferred to the close-out quiet window).
+- Reviewer notes for the checkpoint run:
+  - Desktop waves grow from 12 to 40 members, because wave size is four times the budget.
+    `[run-timing-waves]` shows fewer, larger waves. This is expected; wave tuning is out of
+    scope.
+  - No `[llm-concurrency]` line is logged when the variable is absent. Core's
+    `[model-budget] llm_max_in_flight=10` line confirms the new default.
+- Next: the checkpoint. The user runs a live desktop Full run and returns its `[run-timing]`,
+  `[run-timing-waves]` and any `[llm-adaptive-cap]` lines. Do not start Phase 4 before the
+  checkpoint decision is recorded here.
+
 ### Checkpoint after Phase 3 - live run decides Phases 4-7 (user decision)
 
 Implementation stops after Phase 3. The user performs a live desktop run with Phases 1-3 in
