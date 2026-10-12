@@ -485,6 +485,8 @@ follows emitted order and changes when the selection or mode changes the order; 
 absent, not `0`, when grouping did not run. False merges are tested as deliberately as recovered
 retellings, and every source document remains present in the archive whatever its cluster.
 
+Update 2026-10-12: identical copies are now folded before export, so the "identical bodies at two URLs are two members" test no longer describes the archive.
+
 **Model-assisted grouping is deferred**, not designed here. The earlier sketch (one grouping
 call per entity bucket, started when the dialog opens, cached by the set of content hashes,
 returning a partition of document numbers) is withdrawn because:

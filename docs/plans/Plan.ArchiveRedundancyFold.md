@@ -3,8 +3,9 @@
 Written 2026-10-07 from the design brief relayed by the AI_portfolio repository (the consumer
 of `archive.md`). Revised 2026-10-07 after a Codex review: every issue and recommendation was
 applied, with the user's and the orchestrator's answers folded in (see "Decisions carried
-in"). Status: Phases 1-3 committed; Phase 4 complete and verified (2026-10-11), uncommitted;
-Phase 5 next, see "Handoff".
+in"). Status: Phases 1-3 committed; Phase 4 complete and verified (2026-10-11); Phase 5 done
+(2026-10-12), uncommitted at time of writing. Next: user acceptance, merge into main coordinated
+by the orchestrator, then delete this plan; see "Handoff".
 Implementation runs phase by phase; nothing is committed unless the user asks.
 
 Durable documents (design docs, the decision log, code comments) must describe behaviours,
@@ -847,7 +848,14 @@ Filled in during implementation.
 
 ## Handoff
 
-Updated 2026-10-11, after Phase 4 verification and approved-review fixes.
+Updated 2026-10-12: **Phase 5 done; uncommitted at time of writing.** Project memory,
+deferred ideas and the older export-contract test note are updated. Documentation-only
+verification checked plan references and LF endings; no build or tests were run.
+
+Next: the user's acceptance, merge into main coordinated by the orchestrator, then delete
+this plan. The plan remains in place until acceptance and merge.
+
+Historical handoff from 2026-10-11, after Phase 4 verification and approved-review fixes:
 
 **Phase 4 complete and verified; uncommitted.** Signal selection now follows threshold ->
 all above-threshold key grouping -> exclusions -> identical-content election -> same-event

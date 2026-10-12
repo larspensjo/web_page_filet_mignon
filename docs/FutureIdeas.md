@@ -1006,6 +1006,25 @@ SuccessCriteria:
 - Validation messages include exact line references.
 - Editor can focus and highlight offending lines.
 
+#### [FI-LLM-PromptContext-0007] Reuse existing event keys in scoring prompts
+Status: Candidate
+TopLevel: LLM
+SubLevel: PromptContext
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: docs/EngineeringDiary.md
+- SourceSection: Deterministic same-event archive grouping
+- Captured: 2026-10-12
+Tags: [llm, scoring, dedup, cache]
+Summary: Offer prompt-side key-reuse hints only if measured residual redundancy after deterministic grouping warrants them.
+Rationale: Hints may reduce fragmented event keys, but changing cache identity as scores arrive would create unbounded paid re-scoring.
+SuccessCriteria:
+- Measure residual redundancy before adding hints.
+- Compute hints in the reducer at dispatch time; never freeze them into SignalCandidateInputSnapshot at enqueue or include them in the scoring cache key.
+Notes: unfinished_work.rs and saved_results.rs recompute keys through input_key_for_current_result_fields_with_context_hash. If hints enter that key, each new score changes other articles' keys, marks them unfinished and triggers re-scoring.
+
 ### Providers
 
 #### [FI-LLM-Providers-0001] Additional LLM provider adapters
@@ -1584,6 +1603,7 @@ Rationale: Avoids redundant LLM calls across sessions.
 SuccessCriteria:
 - Fingerprints are generated for normalized clean text.
 - Near-duplicate detection can skip or flag redundant items.
+Notes (2026-10-12): Syndicated near-copies remain evidence for this work: Nebius "$1,000 Invested" x3 and "Anthropic Could Beat OpenAI" x2. Byte-identical folding does not detect these near-copies.
 
 ### ExportArtifacts
 
@@ -1686,6 +1706,25 @@ Rationale: Prevents cache collisions when normalization rules change.
 SuccessCriteria:
 - Replay keys include a normalization version identifier.
 - Changing normalization rules results in new cache entries.
+
+#### [FI-Storage-NormalizationVersioning-0002] Strip tracking parameters from URL identity
+Status: Candidate
+TopLevel: Storage
+SubLevel: NormalizationVersioning
+Priority: P3
+Effort: M
+Risk: H
+Origin:
+- SourceDoc: docs/EngineeringDiary.md
+- SourceSection: Deterministic same-event archive grouping
+- Captured: 2026-10-12
+Tags: [url, dedup, storage, cache]
+Summary: Revisit stripping tracking parameters from URL identity when tracked links appear.
+Rationale: The measured corpus has only one saved article with a tracking parameter, and none of the 77 retellings are tracking-parameter duplicates.
+SuccessCriteria:
+- Measure tracked-link prevalence before changing normalization.
+- Preserve saved-record reachability and scoring reuse through an explicit identity migration.
+Notes: archive_url_key and normalize_url_for_dedupe drive URL identity across about 18 files, including saved scoring keys. Changing them risks orphaned records or an unannounced paid re-score.
 
 ### PreviewCache
 
