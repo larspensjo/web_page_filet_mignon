@@ -11,33 +11,63 @@ use engine_logging::{engine_info, engine_warn};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::{validate_summary, validate_triage, LlmRunMetadata, QuotaOrigin};
 
+enum RequestOwner {
+    Scoring,
+    Summary(usize),
+    Triage(usize),
+}
+
 pub(super) fn handle(
     state: &mut AppState,
     request_id: u64,
     result: LlmResultKind,
     metadata: Option<LlmRunMetadata>,
 ) -> Vec<Effect> {
+    let pending = matches!(
+        state.llm_request_state(request_id),
+        Some(LlmRequestState::Pending { .. })
+    );
+    let owner = if state
+        .signal_candidate()
+        .url_for_request(request_id)
+        .is_some()
+    {
+        Some(RequestOwner::Scoring)
+    } else if let Some(article_idx) = state.briefing().find_article_by_request_id(request_id) {
+        Some(RequestOwner::Summary(article_idx))
+    } else {
+        state
+            .triage()
+            .find_article_by_request_id(request_id)
+            .map(RequestOwner::Triage)
+    };
+    if pending && owner.is_some() {
+        let rate_limited = matches!(result, LlmResultKind::RateLimited { .. })
+            || metadata.as_ref().is_some_and(|m| m.rate_limit_retries > 0);
+        state.note_article_model_pressure(request_id, rate_limited);
+    }
     record_llm_result(state, request_id, &result);
     if let Some(run_metadata) = metadata.as_ref() {
         state.record_llm_usage_from_metadata(run_metadata);
     }
 
-    if state
-        .signal_candidate()
-        .url_for_request(request_id)
-        .is_some()
-    {
+    if owner.is_some() {
         note_article_model_result(state, &result);
-        handle_signal_candidate_completion(state, request_id, &result);
-    } else if let Some(article_idx) = state.briefing().find_article_by_request_id(request_id) {
-        note_article_model_result(state, &result);
-        handle_summary_completion(state, article_idx, &result);
-    } else if let Some(article_idx) = state.triage().find_article_by_request_id(request_id) {
-        note_article_model_result(state, &result);
-        handle_triage_completion(state, article_idx, &result);
-        let article = &state.triage().articles()[article_idx];
-        let identity = (article.url.clone(), article.content_hash.clone());
-        super::waves::triage_changed(state, &identity.0, &identity.1);
+    }
+    match owner {
+        Some(RequestOwner::Scoring) => {
+            handle_signal_candidate_completion(state, request_id, &result);
+        }
+        Some(RequestOwner::Summary(article_idx)) => {
+            handle_summary_completion(state, article_idx, &result);
+        }
+        Some(RequestOwner::Triage(article_idx)) => {
+            handle_triage_completion(state, article_idx, &result);
+            let article = &state.triage().articles()[article_idx];
+            let identity = (article.url.clone(), article.content_hash.clone());
+            super::waves::triage_changed(state, &identity.0, &identity.1);
+        }
+        None => {}
     }
 
     Vec::new()

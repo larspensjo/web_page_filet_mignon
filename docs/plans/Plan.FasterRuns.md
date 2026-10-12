@@ -425,6 +425,47 @@ Docs:
   - the bounded rate-limit retry;
   - the halt counting exhausted retries.
 
+**Phase 2 hand-off (done 2026-10-12).**
+
+- Implemented by Codex and reviewed once by Opus. The verdict was Approved, with 2 minor
+  findings and 3 advisory cleanups, all applied:
+  - a request that hit a 429 and then failed for another reason now carries
+    `rate_limit_retries` on its failure, so it counts as a rate-limit signal and is not counted
+    as clean;
+  - the `[llm-run]` and provider-error log lines gain `transient_attempts=` and
+    `rate_limit_retries=`;
+  - the cap change is a named `LlmCapChange` struct;
+  - the owning stage is resolved once per completion;
+  - the `[llm-concurrency]` logs gain `effective_cap=`.
+- Cap-change logging (`[llm-adaptive-cap]`) and the summary fields (minimum effective cap,
+  change count) are produced at the host boundary by `RunTimeline`, which reads read-only
+  `AppState` accessors. The reducer gained no clock and no effect.
+- Not applied, because it conflicts with the plan's spec: jitter on waits that follow a
+  Retry-After hint (only the no-hint path is jittered). This is a possible tuning point if the
+  live run shows synchronized retries.
+- Verified keylessly:
+  - `cargo build` passes.
+  - `cargo test -p harvester_engine -p harvester_core -p harvester_io -p harvester_batch
+    -p harvester_ui_bridge`: 1375 passed, 0 failed, 1 ignored. Before the phase, the engine
+    had 438 tests, core 609, io 169 and batch 98. No test was removed.
+  - `cargo clippy --all-targets -- -D warnings` passes.
+  - `cargo fmt --check` is clean.
+  - Not run: the full workspace `cargo test` (deferred to the close-out quiet window) and the
+    IPC probe (no desktop host change; the plan does not require it for this phase).
+- Reviewer notes for the close-out:
+  - DecisionLog entry 2: say that a rate-limit retry during Stop belongs to the in-flight
+    request, so it is not a "new model request" under 2026-09-27. Also say that the
+    effective cap is runtime adaptation, not frozen configuration.
+  - Recovery counts clean completions from requests sent before a decrease, so after a drop
+    from 10 to 5 the cap can rise to 6 quickly. That matches the spec (slow up, fast down).
+    Watch it in the live run's `[llm-adaptive-cap]` lines.
+  - The process-shutdown drain gives each request 30 s, which a request waiting on a rate
+    limit can exceed. This affects app close only, not run Stop.
+- Still open from Phase 1: rate-limit headroom is still captured only from successful
+  responses (the kit's error contract is unchanged), and Ctrl-C batch runs log no
+  `[run-timing]` line.
+- Next: Phase 3 (desktop default 3 -> 10).
+
 ### Phase 3 - Desktop model budget 3 -> 10 (user decision)
 
 Goal: the critical path shrinks, which gives the biggest single wall-time gain.

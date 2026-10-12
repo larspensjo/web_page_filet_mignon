@@ -310,6 +310,7 @@ pub fn llm_config_with_provider(
         ),
         replay_write_observer: None,
         max_concurrent_requests: llm_concurrency,
+        retry_delays: Default::default(),
     };
     (config, registry)
 }

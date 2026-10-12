@@ -220,8 +220,33 @@ session. Summary settlement saves per-article results and completes without anot
 `update/model_dispatch.rs::dispatch_model_work` schedules admitted triage, summary
 and signal-scoring work after reducer messages. All three stages share
 `llm_max_in_flight`, clamped by `harvester_engine::llm::MAX_LLM_CONCURRENT_REQUESTS`
-(10); the LLM worker uses the same cap. Desktop uses `LLM_MAX_CONCURRENT_REQUESTS`
+(10); the LLM worker's semaphore stays at this configured budget. Desktop uses `LLM_MAX_CONCURRENT_REQUESTS`
 (default 3). Batch uses `--llm-concurrency` (default 10, maximum 10).
+
+The reducer owns an effective cap for new article-model dispatch, reset to the
+configured budget at each run start. A completion returning `RateLimited`, or
+metadata showing any rate-limit retries (including a failed request ending with
+a different provider error), signals pressure. A signal from a request
+issued in the current cap epoch halves the effective cap, with a floor of 1, and
+starts a new epoch at the next request id to be allocated. Older in-flight signals
+cannot halve it again. Ten consecutive article-model completions without a
+rate-limit signal raise the cap by 1, up to the configured budget; any signal resets
+that streak. Requests already in flight above a lowered cap finish normally.
+Stage selection and admission order remain the same in both hosts. The host's
+`RunTimeline` reducer observer logs each change as `[llm-adaptive-cap]`; the
+`[run-timing]` summary reports `min_effective_llm_cap`, `llm_cap_changes`, and
+`rate_limit_retries`. The reducer uses no clock or logging effect for adaptation.
+
+The LLM worker retries rate limits up to three times per request, separately from
+its existing single transient-error retry. Each rate-limit wait uses Retry-After
+capped at 20 seconds, or 2, 4, then 8 seconds with +/-25% jitter when no hint is
+present. The request retains its worker permit and reducer slot during the wait;
+Stop lets that wait and request finish. Exhausted retries return `RateLimited`.
+Each wait is logged as `[llm-retry]` with its request id, attempt and duration, and
+success and provider-error logs include transient attempt and rate-limit retry
+counts. Run metadata retains `rate_limit_retries` on provider failures as well as
+successes. Provider quota exhaustion is never
+retried; the provider kit's generic retry classification remains unchanged.
 
 The scheduler selects scoring, then summaries, then triage, in that fixed priority
 order. Within each stage it preserves admission order. At stage admission, a current
@@ -245,7 +270,8 @@ identity so scoring can validate their provenance.
 
 The 1,000-call session quota halts article-model dispatch for the process lifetime
 and shows a restart warning on later run starts. Provider out-of-credits and three
-consecutive provider rate-limit failures halt the current run; the next explicit
+consecutive provider requests that exhaust their rate-limit retries halt the current run. A recovered
+success resets that consecutive-failure counter; the next explicit
 triage or summaries start clears those halts and their warnings. Each halt fails
 admitted pending entries across all three stages with its reason; in-flight requests
 can finish. Completions from replaced sessions do not create a scheduler halt.

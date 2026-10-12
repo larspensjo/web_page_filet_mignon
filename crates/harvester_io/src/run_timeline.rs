@@ -2,7 +2,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use harvester_core::{AppState, LlmResultKind, Msg, PipelineStage};
+use harvester_core::{AppState, LlmCapChange, LlmResultKind, Msg, PipelineStage};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::{FailureKind, JobId, JobOutcome, JobTiming};
 
@@ -60,6 +60,9 @@ struct RunMeasurements {
     requests: HashMap<u64, (PromptId, Instant)>,
     max_model_in_flight: usize,
     rate_limited: usize,
+    rate_limit_retries: u64,
+    min_effective_llm_cap: usize,
+    cap_changes: u64,
     remaining_requests: Option<u64>,
     remaining_tokens: Option<u64>,
     reducer: BTreeMap<String, Duration>,
@@ -73,12 +76,16 @@ struct Observation {
     halted: bool,
     terminal: bool,
     model_in_flight: usize,
+    effective_llm_cap: usize,
+    cap_changes: u64,
+    last_cap_change: Option<LlmCapChange>,
     waves: Vec<(u64, PipelineStage, usize)>,
 }
 
 impl RunTimeline {
     /// Called after every reducer step, before handing its effects to I/O.
-    /// Returns log lines once, on settlement; repeated terminal observations are inert.
+    /// Returns each adaptive cap change once and timing lines on settlement.
+    /// Repeated terminal observations are inert.
     pub fn observe_reducer(
         &mut self,
         state: &AppState,
@@ -97,6 +104,9 @@ impl RunTimeline {
                 halted: state.provider_dispatch_halted(),
                 terminal: progress.is_terminal(),
                 model_in_flight: state.article_model_requests_in_flight(),
+                effective_llm_cap: state.effective_llm_cap(),
+                cap_changes: state.llm_cap_change_count(),
+                last_cap_change: state.last_llm_cap_change(),
                 waves: state.released_run_waves().collect(),
             },
             kind,
@@ -147,6 +157,9 @@ impl RunTimeline {
                 requests: HashMap::new(),
                 max_model_in_flight: 0,
                 rate_limited: 0,
+                rate_limit_retries: 0,
+                min_effective_llm_cap: observation.effective_llm_cap,
+                cap_changes: 0,
                 remaining_requests: None,
                 remaining_tokens: None,
                 reducer: BTreeMap::new(),
@@ -155,6 +168,24 @@ impl RunTimeline {
             });
         }
         let run = self.active.as_mut().expect("active measurement");
+        let mut lines = Vec::new();
+        run.min_effective_llm_cap = run.min_effective_llm_cap.min(observation.effective_llm_cap);
+        if observation.cap_changes > run.cap_changes {
+            if let Some(LlmCapChange {
+                from,
+                to,
+                reason,
+                request_id,
+            }) = observation.last_cap_change
+            {
+                lines.push(format!(
+                    "[llm-adaptive-cap] run_id={} from={from} to={to} reason={reason} request_id={request_id}",
+                    run.id
+                ));
+                run.min_effective_llm_cap = run.min_effective_llm_cap.min(from).min(to);
+            }
+            run.cap_changes = observation.cap_changes;
+        }
         *run.reducer.entry(kind.to_owned()).or_default() += elapsed;
         run.max_model_in_flight = run.max_model_in_flight.max(observation.model_in_flight);
         run.halted |= observation.halted;
@@ -167,11 +198,12 @@ impl RunTimeline {
             }
         }
         if !observation.terminal {
-            return Vec::new();
+            return lines;
         }
         let run = self.active.take().expect("terminal measurement");
         self.last_terminal = Some(run.id);
-        run.lines(now)
+        lines.extend(run.lines(now));
+        lines
     }
 
     pub fn poll_started(&mut self, now: Instant) {
@@ -270,6 +302,15 @@ impl RunTimeline {
         stage.last_completion = Some(now);
         stage.wall += now.saturating_duration_since(dispatched);
         run.rate_limited += usize::from(matches!(result, LlmResultKind::RateLimited { .. }));
+        // Exhausted rate limits retain the original error contract without metadata.
+        // The worker has spent its fixed rate-limit retry allowance in that case.
+        run.rate_limit_retries += if matches!(result, LlmResultKind::RateLimited { .. }) {
+            u64::from(harvester_engine::llm::handle::MAX_RATE_LIMIT_RETRIES)
+        } else {
+            metadata
+                .as_ref()
+                .map_or(0, |m| u64::from(m.rate_limit_retries))
+        };
         if let Some(headroom) = metadata
             .as_ref()
             .and_then(|m| m.rate_limit_headroom.as_ref())
@@ -324,6 +365,10 @@ impl RunMeasurements {
             self.rate_limited, optional(self.remaining_requests.map(u128::from)), optional(self.remaining_tokens.map(u128::from)),
             self.offset(self.stop), optional(self.stop.map(|s| terminal.saturating_duration_since(s).as_millis())),
         );
+        summary.push_str(&format!(
+            " min_effective_llm_cap={} llm_cap_changes={} rate_limit_retries={}",
+            self.min_effective_llm_cap, self.cap_changes, self.rate_limit_retries
+        ));
         for (name, step) in [
             ("fetch", &self.fetch),
             ("extract", &self.extract),

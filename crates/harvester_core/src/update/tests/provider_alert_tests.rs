@@ -255,3 +255,32 @@ fn three_consecutive_rate_limited_triage_results_stop_triage_run() {
     .is_some());
     assert!(state.model_dispatch_halt_reason().is_none());
 }
+
+#[test]
+fn recovered_success_resets_exhausted_rate_limit_halt_counter() {
+    let (state, ids) = start_summary_run(7, 1);
+    let (state, effects) = deliver(state, ids[0], rate_limited_result());
+    let id = next_summary_request(&effects).unwrap();
+    let (state, effects) = deliver(state, id, rate_limited_result());
+    let id = next_summary_request(&effects).unwrap();
+    let mut metadata = harvester_engine::llm::LlmRunMetadata::stub();
+    metadata.rate_limit_retries = 2;
+    let (state, effects) = update(
+        state,
+        Msg::LlmCompleted {
+            request_id: id,
+            result: success_result("recovered"),
+            metadata: Some(metadata),
+        },
+    );
+    assert!(state.model_dispatch_halt_reason().is_none());
+    let id = next_summary_request(&effects).unwrap();
+    let (state, effects) = deliver(state, id, rate_limited_result());
+    let id = next_summary_request(&effects).unwrap();
+    let (state, _) = deliver(state, id, rate_limited_result());
+    assert!(
+        state.model_dispatch_halt_reason().is_none(),
+        "recovered success reset the counter"
+    );
+    assert_eq!(state.briefing().completed_summary_count(), 1);
+}

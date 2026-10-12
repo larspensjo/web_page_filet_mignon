@@ -4,10 +4,20 @@ use crate::{LlmQuotaLimits, LlmQuotaState, LlmQuotaUsage};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::run_metadata::{CacheStatus, LlmRunMetadata};
 
+/// Latest adaptive cap change, observed and logged at the host boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LlmCapChange {
+    pub from: usize,
+    pub to: usize,
+    pub reason: &'static str,
+    pub request_id: u64,
+}
+
 impl AppState {
     /// Budget shared by triage, summaries and signal scoring.
     pub fn set_llm_max_in_flight(&mut self, limit: usize) {
         self.llm_max_in_flight = limit.clamp(1, harvester_engine::llm::MAX_LLM_CONCURRENT_REQUESTS);
+        self.reset_effective_llm_cap();
         self.log_model_budget();
     }
     fn log_model_budget(&self) {
@@ -18,6 +28,59 @@ impl AppState {
     }
     pub fn llm_max_in_flight(&self) -> usize {
         self.llm_max_in_flight
+    }
+
+    pub fn effective_llm_cap(&self) -> usize {
+        self.effective_llm_cap
+    }
+
+    /// Read-only diagnostics for the host's reducer observer.
+    pub fn llm_cap_change_count(&self) -> u64 {
+        self.llm_cap_change_count
+    }
+
+    /// Latest change for the host's reducer observer.
+    pub fn last_llm_cap_change(&self) -> Option<LlmCapChange> {
+        self.last_llm_cap_change
+    }
+
+    pub(crate) fn reset_effective_llm_cap(&mut self) {
+        self.effective_llm_cap = self.llm_max_in_flight;
+        self.cap_epoch_request_id = self.next_llm_request_id;
+        self.clean_llm_completions = 0;
+        self.llm_cap_change_count = 0;
+        self.last_llm_cap_change = None;
+    }
+
+    pub(crate) fn note_article_model_pressure(&mut self, request_id: u64, rate_limited: bool) {
+        let from = self.effective_llm_cap;
+        let reason = if rate_limited {
+            self.clean_llm_completions = 0;
+            if request_id < self.cap_epoch_request_id {
+                return;
+            }
+            self.effective_llm_cap = (from / 2).max(1);
+            // Older in-flight completions cannot reduce the cap a second time.
+            self.cap_epoch_request_id = self.next_llm_request_id;
+            "rate_limited"
+        } else {
+            self.clean_llm_completions += 1;
+            if self.clean_llm_completions < 10 {
+                return;
+            }
+            self.clean_llm_completions = 0;
+            self.effective_llm_cap = (from + 1).min(self.llm_max_in_flight);
+            "recovered"
+        };
+        if from != self.effective_llm_cap {
+            self.llm_cap_change_count += 1;
+            self.last_llm_cap_change = Some(LlmCapChange {
+                from,
+                to: self.effective_llm_cap,
+                reason,
+                request_id,
+            });
+        }
     }
     pub(crate) fn model_dispatch_halt_reason(&self) -> Option<&str> {
         self.model_dispatch_halt_reason

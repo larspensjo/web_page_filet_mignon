@@ -27,6 +27,7 @@ mod job_access;
 mod job_state;
 mod link_helpers;
 mod llm;
+pub use llm::LlmCapChange;
 pub(crate) use llm::ModelDispatchHalt;
 mod pre_triage_access;
 mod prompt;
@@ -335,6 +336,11 @@ pub struct AppState {
     triage_cache_run_metrics: TriageCacheRunMetrics,
     triage_cache_run_start_logged: bool,
     llm_max_in_flight: usize,
+    effective_llm_cap: usize,
+    cap_epoch_request_id: u64,
+    clean_llm_completions: usize,
+    llm_cap_change_count: u64,
+    last_llm_cap_change: Option<LlmCapChange>,
     model_dispatch_halt_reason: Option<llm::ModelDispatchHalt>,
     /// Session-scoped per-model token usage. Only CacheStatus::Miss runs are counted.
     llm_usage_by_model: BTreeMap<String, (u64, u64)>,
@@ -454,6 +460,11 @@ impl Default for AppState {
             triage_cache_run_metrics: TriageCacheRunMetrics::default(),
             triage_cache_run_start_logged: false,
             llm_max_in_flight: 1,
+            effective_llm_cap: 1,
+            cap_epoch_request_id: 1,
+            clean_llm_completions: 0,
+            llm_cap_change_count: 0,
+            last_llm_cap_change: None,
             model_dispatch_halt_reason: None,
             llm_usage_by_model: BTreeMap::new(),
             llm_quota: crate::LlmQuotaState::default(),

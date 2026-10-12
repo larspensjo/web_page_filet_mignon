@@ -290,16 +290,26 @@ pub fn map_llm_event(event: LlmEvent) -> Msg {
                     },
                     failure_metadata.map(LlmRunMetadata::from),
                 ),
-                Err(LlmCompletionError::ProviderError(LlmError::RateLimited {
-                    retry_after_secs,
-                })) => (
+                Err(LlmCompletionError::ProviderError {
+                    error: LlmError::RateLimited { retry_after_secs },
+                    failure_metadata,
+                }) => (
                     LlmResultKind::RateLimited {
                         reason: match retry_after_secs {
                             Some(secs) => format!("provider rate limited; retry after {secs}s"),
                             None => "provider rate limited".to_string(),
                         },
                     },
-                    None,
+                    failure_metadata.map(LlmRunMetadata::from),
+                ),
+                Err(LlmCompletionError::ProviderError {
+                    error,
+                    failure_metadata,
+                }) => (
+                    LlmResultKind::Failed {
+                        reason: error.to_string(),
+                    },
+                    failure_metadata.map(LlmRunMetadata::from),
                 ),
                 Err(LlmCompletionError::PersistenceFailed {
                     detail,
@@ -340,12 +350,115 @@ mod tests {
     use harvester_engine::llm::QuotaOrigin;
 
     #[test]
+    fn map_llm_event_preserves_rate_limit_retries_on_recovered_success() {
+        let mut metadata = LlmRunMetadata::stub();
+        metadata.rate_limit_retries = 2;
+        let event = LlmEvent::Completed {
+            request_id: 7,
+            result: Ok(harvester_engine::llm::handle::LlmCompletionResult {
+                output_json: "{}".into(),
+                metadata: metadata.clone(),
+            }),
+        };
+        match map_llm_event(event) {
+            Msg::LlmCompleted {
+                result,
+                metadata: Some(mapped),
+                ..
+            } => {
+                assert!(matches!(result, LlmResultKind::Success { .. }));
+                assert_eq!(mapped, metadata);
+                assert_eq!(mapped.rate_limit_retries, 2);
+            }
+            _ => panic!("expected completion with metadata"),
+        }
+    }
+
+    #[test]
+    fn map_llm_event_preserves_rate_limit_retries_on_validation_failure() {
+        let event = LlmEvent::Completed {
+            request_id: 7,
+            result: Err(LlmCompletionError::ValidationFailed {
+                reason: "invalid response".into(),
+                raw_response: "{}".into(),
+                failure_metadata: Some(harvester_engine::llm::LlmFailureMetadata {
+                    rate_limit_retries: 1,
+                    prompt_id: harvester_engine::llm::PromptId::ArticleTriage,
+                    prompt_version: 1,
+                    resolved_model: Some("model".into()),
+                    input_bytes: 100,
+                    wall_ms: Some(50),
+                    timestamp_utc: "2026-10-12T00:00:00Z".into(),
+                }),
+            }),
+        };
+        assert!(matches!(
+            map_llm_event(event),
+            Msg::LlmCompleted {
+                result: LlmResultKind::ValidationFailed { .. },
+                metadata: Some(LlmRunMetadata {
+                    rate_limit_retries: 1,
+                    ..
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn map_llm_event_preserves_retry_metadata_on_provider_failure() {
+        for error in [
+            LlmError::Timeout,
+            LlmError::RateLimited {
+                retry_after_secs: Some(20),
+            },
+        ] {
+            let exhausted = matches!(error, LlmError::RateLimited { .. });
+            let failure_metadata = harvester_engine::llm::LlmFailureMetadata {
+                rate_limit_retries: if exhausted { 3 } else { 1 },
+                prompt_id: harvester_engine::llm::PromptId::ArticleTriage,
+                prompt_version: 1,
+                resolved_model: Some("model".into()),
+                input_bytes: 100,
+                wall_ms: Some(50),
+                timestamp_utc: "2026-10-12T00:00:00Z".into(),
+            };
+            let expected = LlmRunMetadata::from(failure_metadata.clone());
+            let event = LlmEvent::Completed {
+                request_id: 7,
+                result: Err(LlmCompletionError::ProviderError {
+                    error,
+                    failure_metadata: Some(failure_metadata),
+                }),
+            };
+            match map_llm_event(event) {
+                Msg::LlmCompleted {
+                    request_id: 7,
+                    result,
+                    metadata: Some(metadata),
+                } => {
+                    if exhausted {
+                        assert!(matches!(result, LlmResultKind::RateLimited { .. }));
+                    } else {
+                        assert!(matches!(result, LlmResultKind::Failed { .. }));
+                    }
+                    assert_eq!(metadata, expected);
+                }
+                _ => panic!("expected provider failure with metadata"),
+            }
+        }
+    }
+
+    #[test]
     fn map_llm_event_rate_limited_provider_error_maps_to_rate_limited_kind() {
         let event = LlmEvent::Completed {
             request_id: 7,
-            result: Err(LlmCompletionError::ProviderError(LlmError::RateLimited {
-                retry_after_secs: Some(20),
-            })),
+            result: Err(LlmCompletionError::ProviderError {
+                error: LlmError::RateLimited {
+                    retry_after_secs: Some(20),
+                },
+                failure_metadata: None,
+            }),
         };
         match map_llm_event(event) {
             Msg::LlmCompleted { result, .. } => match result {
@@ -382,7 +495,7 @@ mod tests {
 
 fn llm_error_reason(error: LlmCompletionError) -> String {
     match error {
-        LlmCompletionError::ProviderError(err) => err.to_string(),
+        LlmCompletionError::ProviderError { error, .. } => error.to_string(),
         LlmCompletionError::QuotaExhausted { description, .. } => description,
         LlmCompletionError::PromptNotFound { prompt_id } => {
             format!("prompt {:?} not found", prompt_id)

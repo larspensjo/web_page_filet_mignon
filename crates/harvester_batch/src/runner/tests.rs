@@ -120,6 +120,7 @@ fn fake_full_cycle_runner(
         session_id: "fake-full-cycle".into(),
         replay_write_observer: None,
         max_concurrent_requests: 1,
+        retry_delays: Default::default(),
     };
     let (msg_tx, msg_rx) = mpsc::channel();
     let runner = EffectRunner::new_with_llm(

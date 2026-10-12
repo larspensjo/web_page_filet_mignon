@@ -8,6 +8,9 @@ fn observation(id: u64, terminal: bool) -> Observation {
         halted: false,
         terminal,
         model_in_flight: 0,
+        effective_llm_cap: 3,
+        cap_changes: 0,
+        last_cap_change: None,
         waves: Vec::new(),
     }
 }
@@ -725,4 +728,245 @@ fn reducer_observation_reads_two_new_waves_from_the_real_ledger() {
     assert!(!lines.is_empty(), "stopped reducer run must settle");
     has(&lines[0], "host=batch");
     has(&lines[1], "releases=1:30:4,2:30:3");
+}
+
+#[test]
+fn cap_changes_are_detected_once_and_summarized_through_terminal() {
+    let start = Instant::now();
+    let mut timeline = RunTimeline::default();
+    observe(&mut timeline, observation(1, false), "start", 0, start);
+    let mut reduced = observation(1, false);
+    reduced.effective_llm_cap = 1;
+    reduced.cap_changes = 1;
+    reduced.last_cap_change = Some(LlmCapChange {
+        from: 3,
+        to: 1,
+        reason: "rate_limited",
+        request_id: 7,
+    });
+    let lines = observe(&mut timeline, reduced, "LlmCompleted", 0, at(start, 10));
+    assert_eq!(
+        lines,
+        vec!["[llm-adaptive-cap] run_id=1 from=3 to=1 reason=rate_limited request_id=7"]
+    );
+    let mut unchanged = observation(1, false);
+    unchanged.effective_llm_cap = 1;
+    unchanged.cap_changes = 1;
+    unchanged.last_cap_change = Some(LlmCapChange {
+        from: 3,
+        to: 1,
+        reason: "rate_limited",
+        request_id: 7,
+    });
+    assert!(observe(&mut timeline, unchanged, "Tick", 0, at(start, 20)).is_empty());
+    let mut terminal = observation(1, true);
+    terminal.effective_llm_cap = 2;
+    terminal.cap_changes = 2;
+    terminal.last_cap_change = Some(LlmCapChange {
+        from: 1,
+        to: 2,
+        reason: "recovered",
+        request_id: 20,
+    });
+    let lines = observe(&mut timeline, terminal, "LlmCompleted", 0, at(start, 30));
+    assert_eq!(
+        lines[0],
+        "[llm-adaptive-cap] run_id=1 from=1 to=2 reason=recovered request_id=20"
+    );
+    has(&lines[1], "min_effective_llm_cap=1");
+    has(&lines[1], "llm_cap_changes=2");
+    has(&lines[1], "rate_limit_retries=0");
+    assert!(observe(
+        &mut timeline,
+        observation(1, true),
+        "Tick",
+        0,
+        at(start, 40)
+    )
+    .is_empty());
+    let lines = observe(
+        &mut timeline,
+        observation(2, true),
+        "start",
+        0,
+        at(start, 50),
+    );
+    has(&lines[0], "min_effective_llm_cap=3");
+    has(&lines[0], "llm_cap_changes=0");
+}
+
+#[test]
+fn timing_summary_counts_retries_only_for_owned_requests() {
+    let start = Instant::now();
+    let mut timeline = RunTimeline::default();
+    observe(&mut timeline, observation(1, false), "start", 0, start);
+    timeline.llm_dispatched(7, PromptId::ArticleTriage, at(start, 5));
+    let mut metadata = LlmRunMetadata::stub();
+    metadata.rate_limit_retries = 2;
+    let mut message = Msg::LlmCompleted {
+        request_id: 999,
+        result: LlmResultKind::Success {
+            output_json: "{}".into(),
+            input_tokens: 0,
+            output_tokens: 0,
+            prompt_version: 1,
+            resolved_model: "model".into(),
+        },
+        metadata: Some(metadata),
+    };
+    timeline.llm_completed(&message, at(start, 10));
+    if let Msg::LlmCompleted { request_id, .. } = &mut message {
+        *request_id = 7;
+    }
+    timeline.llm_completed(&message, at(start, 15));
+    timeline.llm_completed(&message, at(start, 20));
+    timeline.llm_dispatched(8, PromptId::ArticleTriage, at(start, 20));
+    timeline.llm_completed(
+        &Msg::LlmCompleted {
+            request_id: 8,
+            result: LlmResultKind::RateLimited {
+                reason: "exhausted".into(),
+            },
+            metadata: None,
+        },
+        at(start, 21),
+    );
+    let lines = observe(
+        &mut timeline,
+        observation(1, true),
+        "finish",
+        0,
+        at(start, 25),
+    );
+    has(&lines[0], "rate_limit_retries=5");
+    has(&lines[0], "rate_limited=1");
+}
+
+#[test]
+fn timing_summary_counts_retries_on_failed_provider_completion() {
+    let start = Instant::now();
+    let mut timeline = RunTimeline::default();
+    observe(&mut timeline, observation(1, false), "start", 0, start);
+    timeline.llm_dispatched(7, PromptId::ArticleTriage, at(start, 5));
+    let message =
+        super::super::effect_helpers::map_llm_event(harvester_engine::llm::LlmEvent::Completed {
+            request_id: 7,
+            result: Err(harvester_engine::llm::LlmCompletionError::ProviderError {
+                error: harvester_engine::llm::LlmError::Timeout,
+                failure_metadata: Some(harvester_engine::llm::LlmFailureMetadata {
+                    rate_limit_retries: 1,
+                    prompt_id: PromptId::ArticleTriage,
+                    prompt_version: 1,
+                    resolved_model: Some("model".into()),
+                    input_bytes: 100,
+                    wall_ms: Some(50),
+                    timestamp_utc: "2026-10-12T00:00:00Z".into(),
+                }),
+            }),
+        });
+    timeline.llm_completed(&message, at(start, 15));
+    let lines = observe(
+        &mut timeline,
+        observation(1, true),
+        "finish",
+        0,
+        at(start, 25),
+    );
+    has(&lines[0], "rate_limit_retries=1");
+    has(&lines[0], "rate_limited=0");
+}
+
+#[test]
+fn reducer_observer_reads_real_adaptive_cap_changes() {
+    use harvester_core::{update, Effect, LoadedArticle, PipelineRunScope};
+    let start = Instant::now();
+    let mut state = AppState::new();
+    state.set_llm_max_in_flight(3);
+    let prompts = [
+        PromptId::ArticleTriage,
+        PromptId::ArticleSummary,
+        PromptId::ArticleSignalCandidate,
+    ];
+    state = update(
+        state,
+        Msg::LlmMetadataLoaded {
+            active_versions: prompts.into_iter().map(|id| (id, 1)).collect(),
+            effective_models: prompts.into_iter().map(|id| (id, "model".into())).collect(),
+        },
+    )
+    .0;
+    state = update(state, Msg::PromptTemplateFilesLoaded).0;
+    state = update(
+        state,
+        Msg::PromptContextsLoaded {
+            contexts: Default::default(),
+        },
+    )
+    .0;
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: PipelineRunScope::Resume,
+        },
+    );
+    let mut timeline = RunTimeline::default();
+    assert!(timeline
+        .observe_reducer(&state, "start", Duration::ZERO, start, "batch")
+        .is_empty());
+    let (state, effects) =
+        harvester_core::fixture_support::complete_processing_configuration(state, effects, 100_000);
+    let request_id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+            _ => None,
+        })
+        .unwrap();
+    let articles = vec![LoadedArticle {
+        url: "https://example.com/one".into(),
+        source_title: None,
+        prepared_text: "Detailed report. ".repeat(40),
+        content_hash: "hash".into(),
+        fetched_utc: None,
+    }];
+    let (state, effects) = update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
+        },
+    );
+    let id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::RequestLlmCompletion { request_id, .. } => Some(*request_id),
+            _ => None,
+        })
+        .unwrap();
+    let (state, _) = update(
+        state,
+        Msg::LlmCompleted {
+            request_id: id,
+            result: LlmResultKind::RateLimited {
+                reason: "exhausted".into(),
+            },
+            metadata: None,
+        },
+    );
+    let lines = timeline.observe_reducer(
+        &state,
+        "LlmCompleted",
+        Duration::ZERO,
+        at(start, 10),
+        "batch",
+    );
+    assert!(lines.iter().any(|line| line
+        == &format!(
+            "[llm-adaptive-cap] run_id=1 from=3 to=1 reason=rate_limited request_id={id}"
+        )));
+    assert_eq!(state.effective_llm_cap(), 1);
+    assert_eq!(state.llm_cap_change_count(), 1);
+    assert!(timeline
+        .observe_reducer(&state, "Tick", Duration::ZERO, at(start, 20), "batch")
+        .is_empty());
 }

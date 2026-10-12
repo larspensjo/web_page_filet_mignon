@@ -34,6 +34,9 @@ pub enum CacheStatus {
 /// Uniform metadata for a successful (or validation-failed) LLM run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LlmRunMetadata {
+    /// Number of bounded provider rate-limit retries for this request.
+    #[serde(default)]
+    pub rate_limit_retries: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate_limit_headroom: Option<Box<openai_provider_kit::RateLimitHeadroom>>,
     pub prompt_id: PromptId,
@@ -84,6 +87,7 @@ impl LlmRunMetadata {
     pub fn new(init: LlmRunMetadataInit) -> Self {
         Self {
             rate_limit_headroom: None,
+            rate_limit_retries: 0,
             prompt_id: init.prompt_id,
             prompt_version: init.prompt_version,
             resolved_model: init.resolved_model,
@@ -142,6 +146,8 @@ impl LlmRunMetadata {
 /// available (e.g. `ValidationFailed`, post-call `QuotaExhausted`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LlmFailureMetadata {
+    #[serde(default)]
+    pub rate_limit_retries: u32,
     pub prompt_id: PromptId,
     pub prompt_version: PromptVersion,
     /// `None` if the model could not be resolved before the failure.
@@ -164,6 +170,7 @@ impl From<LlmFailureMetadata> for LlmRunMetadata {
     fn from(f: LlmFailureMetadata) -> Self {
         Self {
             rate_limit_headroom: None,
+            rate_limit_retries: f.rate_limit_retries,
             prompt_id: f.prompt_id,
             prompt_version: f.prompt_version,
             resolved_model: f.resolved_model.unwrap_or_default(),

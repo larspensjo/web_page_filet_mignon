@@ -97,6 +97,7 @@ pub(super) fn begin_run_if_needed(state: &mut AppState) {
         return;
     }
     let run_id = state.allocate_run_id();
+    state.reset_effective_llm_cap();
     let signal = state.signal_candidate();
     let progress = RunProgress::new(
         run_id,

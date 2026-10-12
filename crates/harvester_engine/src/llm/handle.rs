@@ -28,6 +28,8 @@ use crate::persist::PersistError;
 /// Configuration for the LLM worker + handle.
 pub type ReplayWriteObserver = Arc<dyn Fn(&Path, u64, Duration) + Send + Sync>;
 
+pub const MAX_RATE_LIMIT_RETRIES: u32 = 3;
+
 #[derive(Clone)]
 pub struct LlmConfig {
     pub provider: Arc<dyn crate::llm::provider::LlmProvider>,
@@ -46,6 +48,36 @@ pub struct LlmConfig {
     pub replay_write_observer: Option<ReplayWriteObserver>,
     /// Maximum number of concurrent LLM requests. Defaults to 1 (serial). Max enforced at 10.
     pub max_concurrent_requests: usize,
+    pub retry_delays: LlmRetryDelays,
+}
+
+/// Worker retry delays; injectable without changing either retry budget.
+#[derive(Clone, Debug)]
+pub struct LlmRetryDelays {
+    pub transient: Duration,
+    pub rate_limit_backoff: [Duration; 3],
+    pub rate_limit_max: Duration,
+}
+
+impl Default for LlmRetryDelays {
+    fn default() -> Self {
+        Self {
+            transient: Duration::from_secs(2),
+            rate_limit_backoff: [2, 4, 8].map(Duration::from_secs),
+            rate_limit_max: Duration::from_secs(20),
+        }
+    }
+}
+
+impl LlmRetryDelays {
+    fn rate_limit_wait(&self, retry: usize, retry_after_secs: Option<u64>) -> Duration {
+        match retry_after_secs {
+            Some(secs) => Duration::from_secs(secs).min(self.rate_limit_max),
+            None => self.rate_limit_backoff[retry]
+                .mul_f64(0.75 + fastrand::f64() * 0.5)
+                .min(self.rate_limit_max),
+        }
+    }
 }
 
 impl LlmConfig {
@@ -220,7 +252,10 @@ pub fn prepare_completion(
 /// Typed error categories surfaced by the worker.
 #[derive(Debug)]
 pub enum LlmCompletionError {
-    ProviderError(LlmError),
+    ProviderError {
+        error: LlmError,
+        failure_metadata: Option<LlmFailureMetadata>,
+    },
     ValidationFailed {
         reason: String,
         raw_response: String,
@@ -463,51 +498,58 @@ async fn handle_completion_concurrent(
         model.model_name()
     );
 
-    let mut attempt = 1u32;
+    let mut transient_attempt = 1u32;
+    let mut rate_limit_retries = 0u32;
     let run_result = loop {
-        match config.provider.complete(&request).await {
-            Ok(resp) => {
-                if attempt > 1 {
-                    engine_info!(
-                        "[llm-retry] request_id={} succeeded on attempt={}",
-                        request_id,
-                        attempt
-                    );
-                }
-                break Ok(resp);
-            }
-            Err(e) if e.is_retryable() && attempt < MAX_ATTEMPTS => {
-                engine_warn!(
-                    "[llm-retry] request_id={} attempt={} error={}",
-                    request_id,
-                    attempt,
-                    e
-                );
-                tokio::time::sleep(RETRY_DELAY).await;
-                attempt += 1;
-            }
-            Err(e) => {
-                if attempt > 1 {
+        // Transient retries retain their independent, per-request allowance.
+        let result = loop {
+            match config.provider.complete(&request).await {
+                Err(e) if e.is_retryable() && transient_attempt < MAX_ATTEMPTS => {
                     engine_warn!(
-                        "[llm-retry] request_id={} exhausted after {} attempts",
+                        "[llm-retry] request_id={} attempt={} error={}",
                         request_id,
-                        attempt
+                        transient_attempt,
+                        e
                     );
+                    tokio::time::sleep(config.retry_delays.transient).await;
+                    transient_attempt += 1;
                 }
-                break Err(e);
+                result => break result,
             }
+        };
+        match result {
+            Err(LlmError::RateLimited { retry_after_secs })
+                if rate_limit_retries < MAX_RATE_LIMIT_RETRIES =>
+            {
+                let wait = config
+                    .retry_delays
+                    .rate_limit_wait(rate_limit_retries as usize, retry_after_secs);
+                rate_limit_retries += 1;
+                engine_warn!(
+                    "[llm-retry] request_id={} reason=rate_limited attempt={} wait_ms={}",
+                    request_id,
+                    rate_limit_retries,
+                    wait.as_millis()
+                );
+                // The request owns its permit through the wait, including during Stop drain.
+                tokio::time::sleep(wait).await;
+            }
+            result => break result,
         }
     };
     let wall_ms = start_at.elapsed().as_millis() as u64;
 
     if let Err(err) = run_result {
         engine_warn!(
-            "[llm-worker] request_id={} provider error={}",
+            "[llm-worker] request_id={} provider error={} transient_attempts={} rate_limit_retries={}",
             request_id,
-            err
+            err,
+            transient_attempt,
+            rate_limit_retries
         );
         quota_tracker.lock().unwrap().release_call();
         let failure_metadata = LlmFailureMetadata {
+            rate_limit_retries,
             prompt_id,
             prompt_version: version,
             resolved_model: Some(model.model_name().to_string()),
@@ -552,6 +594,7 @@ async fn handle_completion_concurrent(
                 failure
             );
             let failure_metadata = LlmFailureMetadata {
+                rate_limit_retries,
                 prompt_id,
                 prompt_version: version,
                 resolved_model: Some(response.model_id().model_name().to_string()),
@@ -630,6 +673,7 @@ async fn handle_completion_concurrent(
                     err
                 );
                 let failure_metadata = LlmFailureMetadata {
+                    rate_limit_retries,
                     prompt_id,
                     prompt_version: version,
                     resolved_model: Some(response.model_id().model_name().to_string()),
@@ -665,12 +709,14 @@ async fn handle_completion_concurrent(
                 timestamp_utc: timestamp_utc.clone(),
             });
             metadata.rate_limit_headroom = response.rate_limit_headroom().cloned().map(Box::new);
+            metadata.rate_limit_retries = rate_limit_retries;
             let headroom = metadata.rate_limit_headroom.as_deref();
             engine_info!(
-                "[llm-run] request_id={} prompt_id={:?} version={} model={} input_bytes={} input_tokens={} output_tokens={} cached_input_tokens={} cost_microdollars={} wall_ms={} parse_ok=true cache_status=miss remaining_requests={} remaining_tokens={} limit_requests={} limit_tokens={} reset_requests={} reset_tokens={}",
+                "[llm-run] request_id={} prompt_id={:?} version={} model={} input_bytes={} input_tokens={} output_tokens={} cached_input_tokens={} cost_microdollars={} wall_ms={} parse_ok=true cache_status=miss transient_attempts={} rate_limit_retries={} remaining_requests={} remaining_tokens={} limit_requests={} limit_tokens={} reset_requests={} reset_tokens={}",
                 request_id, metadata.prompt_id, metadata.prompt_version, metadata.resolved_model,
                 metadata.input_bytes, metadata.input_tokens, metadata.output_tokens,
                 metadata.cached_input_tokens, metadata.cost_microdollars, metadata.wall_ms,
+                transient_attempt, metadata.rate_limit_retries,
                 headroom_field(headroom.and_then(|h| h.remaining_requests)),
                 headroom_field(headroom.and_then(|h| h.remaining_tokens)),
                 headroom_field(headroom.and_then(|h| h.limit_requests)),
@@ -707,6 +753,7 @@ async fn handle_completion_concurrent(
                     err
                 );
                 let failure_metadata = LlmFailureMetadata {
+                    rate_limit_retries,
                     prompt_id,
                     prompt_version: version,
                     resolved_model: Some(response.model_id().model_name().to_string()),
@@ -727,6 +774,7 @@ async fn handle_completion_concurrent(
             }
 
             let failure_metadata = LlmFailureMetadata {
+                rate_limit_retries,
                 prompt_id,
                 prompt_version: version,
                 resolved_model: Some(response.model_id().model_name().to_string()),
@@ -794,7 +842,10 @@ fn map_provider_failure(err: LlmError, failure_metadata: LlmFailureMetadata) -> 
             origin: QuotaOrigin::Provider,
             failure_metadata: Some(failure_metadata),
         },
-        other => LlmCompletionError::ProviderError(other),
+        other => LlmCompletionError::ProviderError {
+            error: other,
+            failure_metadata: Some(failure_metadata),
+        },
     }
 }
 
@@ -888,7 +939,6 @@ fn provider_kind_to_str(kind: ProviderKind) -> &'static str {
 const LLM_TASK_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 const LLM_RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_ATTEMPTS: u32 = 2; // 1 initial + 1 retry
-const RETRY_DELAY: Duration = Duration::from_secs(2);
 
 #[cfg(test)]
 mod tests {
@@ -898,12 +948,34 @@ mod tests {
 
     fn stub_failure_metadata() -> LlmFailureMetadata {
         LlmFailureMetadata {
+            rate_limit_retries: 0,
             prompt_id: PromptId::ArticleTriage,
             prompt_version: 1,
             resolved_model: Some(OPENAI_MODEL_GPT_4O_MINI.to_string()),
             input_bytes: 100,
             wall_ms: Some(50),
             timestamp_utc: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn rate_limit_delays_use_capped_hints_and_jittered_backoff() {
+        let delays = LlmRetryDelays::default();
+        for retry in 0..3 {
+            assert_eq!(
+                delays.rate_limit_wait(retry, Some(999)),
+                Duration::from_secs(20)
+            );
+            assert_eq!(
+                delays.rate_limit_wait(retry, Some(3)),
+                Duration::from_secs(3)
+            );
+            assert_eq!(delays.rate_limit_wait(retry, Some(0)), Duration::ZERO);
+            let base = Duration::from_secs([2, 4, 8][retry]);
+            for _ in 0..100 {
+                let wait = delays.rate_limit_wait(retry, None);
+                assert!(wait >= base.mul_f64(0.75) && wait <= base.mul_f64(1.25));
+            }
         }
     }
 
@@ -985,6 +1057,7 @@ mod tests {
                 session_id: "test-session".to_string(),
                 replay_write_observer: None,
                 max_concurrent_requests: 1,
+                retry_delays: Default::default(),
             }
         }
     }
@@ -1153,7 +1226,10 @@ mod tests {
         );
         assert!(matches!(
             mapped,
-            LlmCompletionError::ProviderError(LlmError::RateLimited { .. })
+            LlmCompletionError::ProviderError {
+                error: LlmError::RateLimited { .. },
+                ..
+            }
         ));
     }
 
@@ -1166,6 +1242,6 @@ mod tests {
             },
             stub_failure_metadata(),
         );
-        assert!(matches!(mapped, LlmCompletionError::ProviderError(_)));
+        assert!(matches!(mapped, LlmCompletionError::ProviderError { .. }));
     }
 }

@@ -33,7 +33,7 @@ pub use dto::{
 };
 pub use handle::{
     prepare_completion, LlmCommand, LlmCompletionCommand, LlmCompletionError, LlmCompletionResult,
-    LlmConfig, LlmEvent, LlmHandle, PreparedCompletion, QuotaOrigin,
+    LlmConfig, LlmEvent, LlmHandle, LlmRetryDelays, PreparedCompletion, QuotaOrigin,
 };
 pub use mock_provider::{BlockingMockProvider, MockLlmProvider};
 pub use pricing::{ModelPricing, PricingRegistry};

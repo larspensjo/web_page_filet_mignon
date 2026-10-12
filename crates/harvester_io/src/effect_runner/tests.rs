@@ -673,6 +673,7 @@ fn load_articles_for_triage_respects_since_utc_filter() {
 fn make_failure_metadata() -> harvester_engine::llm::run_metadata::LlmFailureMetadata {
     use harvester_engine::llm::run_metadata::LlmFailureMetadata;
     LlmFailureMetadata {
+        rate_limit_retries: 0,
         prompt_id: PromptId::ArticleTriage,
         prompt_version: 1,
         resolved_model: Some(OPENAI_MODEL_GPT_4O_MINI.to_string()),

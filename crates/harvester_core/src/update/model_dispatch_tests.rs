@@ -527,3 +527,287 @@ fn halted_dispatch_does_not_invalidate_unfinished_work_on_idle_messages() {
         assert_eq!(state.unfinished_revisions(), revision);
     }
 }
+
+fn clean_triage_result() -> LlmResultKind {
+    LlmResultKind::Success {
+        output_json: r#"{"category":"news","priority":1,"tags":[],"rationale":"low priority"}"#
+            .into(),
+        input_tokens: 1,
+        output_tokens: 1,
+        prompt_version: 1,
+        resolved_model: "model".into(),
+    }
+}
+
+fn recovered_completion(state: AppState, id: u64) -> (AppState, Vec<Effect>) {
+    let mut metadata = harvester_engine::llm::LlmRunMetadata::stub();
+    metadata.rate_limit_retries = 2;
+    crate::update(
+        state,
+        Msg::LlmCompleted {
+            request_id: id,
+            result: clean_triage_result(),
+            metadata: Some(metadata),
+        },
+    )
+}
+
+#[test]
+fn adaptive_cap_halves_on_exhausted_rate_limit_and_recovered_success() {
+    for recovered in [false, true] {
+        let mut state = state_with_work(&["one", "two", "three", "four", "five"], &[], &[]);
+        state.set_llm_max_in_flight(5);
+        let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
+        let id = requests(&effects)[0].0;
+        let (state, effects) = if recovered {
+            recovered_completion(state, id)
+        } else {
+            completion(
+                state,
+                id,
+                LlmResultKind::RateLimited {
+                    reason: "provider rate limited".into(),
+                },
+            )
+        };
+        assert_eq!(state.effective_llm_cap(), 2);
+        assert_eq!(state.llm_max_in_flight(), 5);
+        assert_eq!(state.llm_cap_change_count(), 1);
+        assert_eq!(
+            state.last_llm_cap_change(),
+            Some(crate::LlmCapChange {
+                from: 5,
+                to: 2,
+                reason: "rate_limited",
+                request_id: id
+            })
+        );
+        assert_eq!(state.article_model_requests_in_flight(), 4);
+        assert!(requests(&effects).is_empty());
+        assert_eq!(state.triage().in_progress_count(), 4);
+        assert_eq!(state.triage().failed_count(), usize::from(!recovered));
+    }
+}
+
+#[test]
+fn failed_completion_with_rate_limit_retry_halves_cap_and_resets_clean_streak() {
+    let names: Vec<_> = (0..35).map(|i| format!("article-{i}")).collect();
+    let refs: Vec<_> = names.iter().map(String::as_str).collect();
+    let mut state = state_with_work(&refs, &[], &[]);
+    state.set_llm_max_in_flight(4);
+    let (mut state, _) = crate::update(state, Msg::PipelineRunAdvance);
+    // A failure following a rate-limit retry must break an existing clean streak.
+    for _ in 0..9 {
+        let id = state.pending_llm_request_ids().next().unwrap();
+        (state, _) = completion(state, id, clean_triage_result());
+    }
+    let id = state.pending_llm_request_ids().next().unwrap();
+    let mut metadata = harvester_engine::llm::LlmRunMetadata::stub_with(
+        false,
+        None,
+        harvester_engine::llm::CacheStatus::Miss,
+    );
+    metadata.rate_limit_retries = 1;
+    let (mut state, effects) = crate::update(
+        state,
+        Msg::LlmCompleted {
+            request_id: id,
+            result: LlmResultKind::Failed {
+                reason: "request timed out".into(),
+            },
+            metadata: Some(metadata),
+        },
+    );
+    assert_eq!(state.effective_llm_cap(), 2);
+    assert_eq!(state.llm_cap_change_count(), 1);
+    assert_eq!(state.triage().failed_count(), 1);
+    assert_eq!(state.article_model_requests_in_flight(), 3);
+    assert!(requests(&effects).is_empty());
+    assert!(!state.provider_dispatch_halted());
+    for _ in 0..9 {
+        let id = state.pending_llm_request_ids().next().unwrap();
+        (state, _) = completion(state, id, clean_triage_result());
+        assert_eq!(state.effective_llm_cap(), 2);
+    }
+    let id = state.pending_llm_request_ids().next().unwrap();
+    (state, _) = completion(state, id, clean_triage_result());
+    assert_eq!(state.effective_llm_cap(), 3);
+}
+
+#[test]
+fn older_in_flight_signal_does_not_halve_again_and_new_epoch_can_halve() {
+    let names: Vec<_> = (0..20).map(|i| format!("article-{i}")).collect();
+    let refs: Vec<_> = names.iter().map(String::as_str).collect();
+    let mut state = state_with_work(&refs, &[], &[]);
+    state.set_llm_max_in_flight(10);
+    let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
+    let issued = requests(&effects);
+    let (state, _) = recovered_completion(state, issued[0].0);
+    assert_eq!(state.effective_llm_cap(), 5);
+    let (mut state, _) = recovered_completion(state, issued[1].0);
+    assert_eq!(state.effective_llm_cap(), 5);
+    assert_eq!(state.llm_cap_change_count(), 1);
+    let mut new_request = None;
+    for old in &issued[2..] {
+        let (next, effects) = completion(state, old.0, clean_triage_result());
+        state = next;
+        new_request = new_request.or_else(|| requests(&effects).first().map(|r| r.0));
+    }
+    let (state, _) = recovered_completion(state, new_request.expect("current-epoch request"));
+    assert_eq!(state.effective_llm_cap(), 2);
+    assert_eq!(state.llm_cap_change_count(), 2);
+}
+
+#[test]
+fn adaptive_cap_floor_is_one_and_ten_clean_completions_recover_up_to_budget() {
+    let names: Vec<_> = (0..45).map(|i| format!("article-{i}")).collect();
+    let refs: Vec<_> = names.iter().map(String::as_str).collect();
+    let mut state = state_with_work(&refs, &[], &[]);
+    state.set_llm_max_in_flight(3);
+    let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
+    let (mut state, _) = recovered_completion(state, requests(&effects)[0].0);
+    assert_eq!(state.effective_llm_cap(), 1);
+    // Drain older requests, then signal once under the new cap, still at the floor.
+    for _ in 0..2 {
+        let id = state.pending_llm_request_ids().next().unwrap();
+        (state, _) = completion(state, id, clean_triage_result());
+    }
+    let id = state.pending_llm_request_ids().next().unwrap();
+    (state, _) = recovered_completion(state, id);
+    assert_eq!(state.effective_llm_cap(), 1);
+    assert_eq!(state.llm_cap_change_count(), 1);
+    for clean in 1..=35 {
+        let id = state.pending_llm_request_ids().next().unwrap();
+        (state, _) = completion(state, id, clean_triage_result());
+        assert_eq!(
+            state.effective_llm_cap(),
+            (1 + clean / 10).min(3),
+            "completion {clean}"
+        );
+    }
+    assert_eq!(state.llm_cap_change_count(), 3);
+    assert!(matches!(
+        state.last_llm_cap_change(),
+        Some(crate::LlmCapChange {
+            from: 2,
+            to: 3,
+            reason: "recovered",
+            ..
+        })
+    ));
+}
+
+#[test]
+fn rate_limit_signal_breaks_consecutive_clean_recovery_streak() {
+    let names: Vec<_> = (0..30).map(|i| format!("article-{i}")).collect();
+    let refs: Vec<_> = names.iter().map(String::as_str).collect();
+    let mut state = state_with_work(&refs, &[], &[]);
+    state.set_llm_max_in_flight(2);
+    let (mut state, effects) = crate::update(state, Msg::PipelineRunAdvance);
+    (state, _) = recovered_completion(state, requests(&effects)[0].0);
+    for _ in 0..8 {
+        let id = state.pending_llm_request_ids().next().unwrap();
+        (state, _) = completion(state, id, clean_triage_result());
+    }
+    let id = state.pending_llm_request_ids().next().unwrap();
+    (state, _) = recovered_completion(state, id);
+    for _ in 0..9 {
+        let id = state.pending_llm_request_ids().next().unwrap();
+        (state, _) = completion(state, id, clean_triage_result());
+        assert_eq!(state.effective_llm_cap(), 1);
+    }
+    let id = state.pending_llm_request_ids().next().unwrap();
+    (state, _) = completion(state, id, clean_triage_result());
+    assert_eq!(state.effective_llm_cap(), 2);
+}
+
+#[test]
+fn adaptive_cap_resets_when_next_run_starts() {
+    let mut state = state_with_work(&["one"], &[], &[]);
+    state.set_llm_max_in_flight(3);
+    let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
+    let (mut state, _) = recovered_completion(state, requests(&effects)[0].0);
+    assert_eq!(state.effective_llm_cap(), 1);
+    for _ in 0..5 {
+        if state.run_progress().unwrap().is_terminal() {
+            break;
+        }
+        state = crate::update(state, Msg::PipelineRunAdvance).0;
+    }
+    assert!(state.run_progress().unwrap().is_terminal());
+    let (state, _) = crate::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
+    assert_eq!(state.effective_llm_cap(), 3);
+    assert_eq!(state.llm_cap_change_count(), 0);
+    assert_eq!(state.last_llm_cap_change(), None);
+}
+
+#[test]
+fn lowered_cap_freed_slot_still_selects_scoring_before_summary_and_triage() {
+    let mut state = state_with_work(&["one", "two", "three", "four"], &[], &[]);
+    state.set_llm_max_in_flight(3);
+    let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
+    let issued = requests(&effects);
+    let (mut state, _) = recovered_completion(state, issued[0].0);
+    admit_score(&mut state, "score");
+    let mut summaries = BriefingSession::new_loading();
+    summaries.set_articles(vec![article("summary")]);
+    summaries.transition_to_summarizing();
+    state.set_briefing(summaries);
+    let (state, effects) = completion(state, issued[1].0, clean_triage_result());
+    assert!(requests(&effects).is_empty(), "still at lowered cap");
+    let (state, effects) = completion(state, issued[2].0, clean_triage_result());
+    assert_eq!(state.effective_llm_cap(), 1);
+    assert_eq!(requests(&effects).len(), 1);
+    assert_eq!(requests(&effects)[0].1, PromptId::ArticleSignalCandidate);
+    assert_eq!(state.briefing().pending_count(), 1);
+    assert_eq!(state.triage().pending_count(), 1);
+}
+
+#[test]
+fn stop_while_lowered_withdraws_pending_work_and_drains_all_in_flight() {
+    let mut state = state_with_work(&["one", "two", "three", "four", "five"], &[], &[]);
+    state.set_llm_max_in_flight(3);
+    let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
+    let issued = requests(&effects);
+    let (mut state, _) = recovered_completion(state, issued[0].0);
+    state.start_session();
+    let (mut state, effects) = crate::update(state, Msg::StopFinishClicked);
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, Effect::StopFinish { .. })));
+    assert_eq!(state.effective_llm_cap(), 1);
+    assert_eq!(
+        state.run_state(),
+        crate::RunState::Stopping { in_flight: 2 }
+    );
+    assert_eq!(state.triage().pending_count(), 0);
+    assert_eq!(state.triage().in_progress_count(), 2);
+    for old in &issued[1..] {
+        let (next, effects) = completion(state, old.0, clean_triage_result());
+        assert!(requests(&effects).is_empty());
+        state = next;
+    }
+    assert!(state.run_progress().unwrap().is_terminal());
+    assert_eq!(state.run_state(), crate::RunState::Idle);
+    assert_eq!(state.triage().completed_count(), 3);
+    assert_eq!(state.triage().failed_count(), 0);
+}
+
+#[test]
+fn unowned_and_duplicate_completions_do_not_change_adaptive_cap() {
+    let mut state = state_with_work(&["one", "two", "three", "four", "five"], &[], &[]);
+    state.set_llm_max_in_flight(5);
+    let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
+    let (state, _) = recovered_completion(state, 9999);
+    assert_eq!(state.effective_llm_cap(), 5);
+    let id = requests(&effects)[0].0;
+    let (state, _) = recovered_completion(state, id);
+    let (state, _) = recovered_completion(state, id);
+    assert_eq!(state.effective_llm_cap(), 2);
+    assert_eq!(state.llm_cap_change_count(), 1);
+}
