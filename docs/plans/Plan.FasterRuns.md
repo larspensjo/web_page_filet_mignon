@@ -8,6 +8,16 @@ The three open questions were settled by the orchestrating assistant.
 This plan is ephemeral: durable documents (Architecture, DecisionLog, code comments) must
 name behaviours, never the phase numbers used here.
 
+**Status (2026-10-13): paused after Phase 3, by the user's decision.**
+
+- Phases 1-3 are committed and pushed.
+- Live result: 137 s, against about 214 s before. Downloads are now the critical path.
+- Phases 4-6 (parallel downloads) are deferred. They are estimated to bring a run to 50-65 s.
+- Phase 7 is dropped.
+- To resume, start at Phase 4 and read "Checkpoint after Phase 3" first. The Phase 8 close-out
+  (DecisionLog entries, EngineeringDiary, FutureIdeas statuses, full workspace test) is still
+  owed for the work already landed.
+
 ## Goal
 
 A typical desktop Full run with about 90 new articles finishes in markedly less wall time
@@ -566,6 +576,13 @@ remains a prerequisite of Phase 6 if parallel downloads proceed.
     estimate, not a measurement.
   - Drop or defer Phase 7. Its measured share is under about 10 s in total, and part of it
     overlaps other work.
+
+**Checkpoint decision (user, 2026-10-13, relayed by the orchestrating assistant).**
+
+- The current speed is acceptable for now.
+- Phases 4-6 are deferred, not cancelled. They can resume later from this plan as written.
+- Phase 7 is dropped.
+- The plan is paused here.
 
 ### Phase 4 - Corpus marker written once per run (required before parallel downloads)
 
