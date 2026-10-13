@@ -537,6 +537,36 @@ lines and decide which of Phases 4-7 proceed, in what form, or whether they are 
 Record the decision and the numbers it rests on in this plan before starting Phase 4. Phase 4
 remains a prerequisite of Phase 6 if parallel downloads proceed.
 
+**Checkpoint run result (desktop, 2026-10-13 04:08:49 to 04:11:06, run_id=1, budget 10).**
+
+| Measure | Baseline (budget 3) | This run (budget 10) |
+|---------|---------------------|----------------------|
+| Wall time | about 214 s | 137 s |
+| Downloads | 89 fetches in about 72 s | 122 fetches (108 ok, 14 failed), last completion at 119 s |
+| Per-article wall time | about 2.4 s | about 1.3 s |
+| Model requests | 224 | 299 (triage 101, summary 99, scoring 99), 0 failures |
+| Model tail after the last download | about 150 s | 18 s |
+
+- **Downloads are now the critical path.** Max downloads in flight was 1, the summed fetch
+  time was 112 s, and the longest queue wait was 85 s. Polling ended at 33 s, so downloads ran
+  about 86 s past the end of polling. Model stages kept pace and finished 18 s after the last
+  download.
+- **Model budget was healthy:** max in flight 10, no rate-limited results, no rate-limit
+  retries, no adaptive cap change (minimum effective cap 10), and minimum remaining provider
+  headroom 9984 requests and about 9.96M tokens.
+- **Problems:** none attributable to this plan. The 14 download failures were 12 HTTP 403s, one
+  site 429 (basenor.com, after 3 attempts) and one network error, which is the usual mix for
+  these sources. No ERROR lines appeared, and no model item failed or halted.
+- **Host costs are small:** reducer time on `JobDone` was 1.8 s, on `FetchOutcomeClassified`
+  1.9 s and on `LlmCompleted` 1.0 s, and the `EnqueueUrl` hand-off was 4.6 s in total.
+- **Recommendation (assistant; awaiting the user's decision):**
+  - Proceed with Phases 4, 5 and 6 (parallel downloads). The estimated run is about 50 to
+    65 s: polling (33 s) plus a short download tail plus the about 9 s triage, summary and
+    scoring chain. That saves another 70 to 85 s, roughly halving today's 137 s. This is an
+    estimate, not a measurement.
+  - Drop or defer Phase 7. Its measured share is under about 10 s in total, and part of it
+    overlaps other work.
+
 ### Phase 4 - Corpus marker written once per run (required before parallel downloads)
 
 Goal: no job writes `harvester-corpus.json`, so concurrent jobs never race on one file, and a
