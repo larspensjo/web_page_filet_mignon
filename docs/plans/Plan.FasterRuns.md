@@ -14,9 +14,11 @@ name behaviours, never the phase numbers used here.
 - Live result: 137 s, against about 214 s before. Downloads are now the critical path.
 - Phases 4-6 (parallel downloads) are deferred. They are estimated to bring a run to 50-65 s.
 - Phase 7 is dropped.
-- To resume, start at Phase 4 and read "Checkpoint after Phase 3" first. The Phase 8 close-out
-  (DecisionLog entries, EngineeringDiary, FutureIdeas statuses, full workspace test) is still
-  owed for the work already landed.
+- To resume, start at Phase 4 and read "Checkpoint after Phase 3" first. Close-out
+  documentation for Phases 1-3 is done: DecisionLog entry, diary entry and FutureIdeas
+  statuses, dated 2026-10-13. The full workspace `cargo test` was not run for this docs-only
+  close-out and runs when Phases 4-6 resume. On resumption, Phase 8 must still add the
+  parallel-downloads DecisionLog entry and the remaining diary and FutureIdeas updates.
 
 ## Goal
 

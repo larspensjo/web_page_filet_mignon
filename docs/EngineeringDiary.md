@@ -2805,3 +2805,40 @@ Prevention: Retain regression coverage for poisoned poll/download forwarding and
 Follow-up: Capture 429 response headroom during rate-limit retry work: the current public `LlmError::RateLimited { retry_after_secs }` has no additive metadata slot. Interrupted batch runs still exit on Ctrl-C without a terminal timing summary; shutdown behaviour is unchanged.
 Verification: `cargo build --offline`, the requested six-crate offline test suite (1,383 passed, two existing ignored), both offline all-target Clippy checks with warnings denied, and `cargo fmt` passed. The subsequent added real-state settlement test and extended ignored-Stop test passed with all 14 timeline tests. Three default local download benchmark runs reported wall_ms=679/680/677, max_concurrency=1, failures=0, attempts=12 and bytes=98304. These are synthetic sequential baselines, not live-run throughput evidence. No launcher, live provider, IPC probe or full workspace test was run.
 Refs: crates/harvester_engine/examples/download_bench.rs, crates/harvester_engine/src/engine/timing_tests.rs, crates/harvester_io/src/run_timeline/tests.rs, crates/harvester_io/src/effect_runner/tests.rs, crates/harvester_batch/src/runner/tests.rs
+
+## 2026-10-13 - Faster model throughput with measured run timing and rate-limit adaptation
+Type: Implementation
+Context: Model stages dominated desktop run time; measurement and rate-limit safeguards
+preceded raising the desktop default budget from 3 to 10, matching the command-line host.
+Change: Added per-job timing, provider headroom and a shared `RunTimeline` in `harvester_io`.
+Both hosts log `[run-timing]` and `[run-timing-waves]` in `engine.log`; the reducer gains no
+clock. Worker-side rate-limit retry permits at most three retries, honours Retry-After up
+to 20 s, otherwise waits 2/4/8 s with jitter, and keeps the in-flight request alive during
+Stop. The reducer-owned effective cap halves on pressure (floor 1), rises by 1 after ten
+consecutive clean completions and resets to the configured budget each run. Halting counts only
+exhausted retries; stage priority and once-per-stage admission remain unchanged.
+Measurements: The 2026-10-13 desktop checkpoint took 137 s versus about 214 s before,
+with more new articles (108 versus about 89). Downloads are now the critical path: one at a time,
+112 s summed fetch time and the last download at 119 s. The model tail was 18 s versus
+about 150 s; 299 model requests had zero failures, no model rate limits or retries and
+no cap changes. Synthetic `replay_bench` at 2500 ms model latency fell from 83.2 s to
+33.1 s as concurrency rose from 3 to 10; it measures model-stage scaling only.
+Follow-up: The owner deferred parallel downloads with a per-site cap on 2026-10-13;
+the estimated resulting run time is 50-65 s, unverified. Per-download host-cost work
+(double runtime snapshots, the 20 ms engine-event poll and host-loop `EnqueueUrl` DNS)
+was dropped: reducer `JobDone` took 1.8 s, `FetchOutcomeClassified` 1.9 s and `EnqueueUrl`
+hand-off 4.6 s per run, under about 10 s total, partly overlapping other work.
+Lessons Learned: Measure before optimizing: the measurements moved the critical path
+from model stages to downloads. Reducer-owned admission preserves stage priority where
+a worker-side gate would not.
+Verification: The implementation hand-offs record passing keyless builds, relevant tests,
+Clippy and formatting, plus a passing desktop IPC probe after the budget change. This
+documentation close-out was checked against architecture and code; no builds or tests
+were run. Full workspace `cargo test` remains for when parallel-download work resumes.
+Refs: commits c5cf29d, 89b7aa1, d4f14de; docs/plans/Plan.FasterRuns.md;
+crates/harvester_io/src/run_timeline.rs, crates/harvester_io/src/effect_runner/mod.rs,
+crates/harvester_io/src/host_bootstrap.rs, crates/harvester_engine/src/engine.rs,
+crates/harvester_engine/src/llm/handle.rs, crates/harvester_core/src/state/llm.rs,
+crates/harvester_core/src/update/model_dispatch.rs,
+crates/harvester_core/src/update/llm_completed.rs,
+crates/harvester_batch/examples/replay_bench.rs

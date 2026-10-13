@@ -1089,7 +1089,7 @@ SuccessCriteria:
 ### RetryPolicy
 
 #### [FI-LLM-RetryPolicy-0001] Provider retry budget with backoff
-Status: Candidate
+Status: Partially Implemented
 TopLevel: LLM
 SubLevel: RetryPolicy
 Priority: P2
@@ -1106,6 +1106,7 @@ SuccessCriteria:
 - Retries follow a bounded backoff schedule with jitter.
 - Provider retry-after hints are respected when available.
 - Retry budget is enforced per run and recorded in logs.
+Notes: Rate-limit retries honour Retry-After capped at 20 s, with at most three retries per request; there is no per-run retry budget (2026-10-13).
 
 ### Streaming
 
@@ -1172,7 +1173,7 @@ SuccessCriteria:
 ### RequestScheduling
 
 #### [FI-Networking-RequestScheduling-0001] Per-host concurrency caps for fetch scheduling
-Status: Candidate
+Status: Deferred
 TopLevel: Networking
 SubLevel: RequestScheduling
 Priority: P2
@@ -1189,6 +1190,7 @@ SuccessCriteria:
 - Scheduler enforces a configurable maximum in-flight count per host.
 - Effective throughput remains bounded by both global and per-host caps.
 - Metrics/logs expose queueing caused by per-host caps.
+Notes: Parallel downloads with a per-site cap were planned in Plan.FasterRuns.md and deferred by the owner on 2026-10-13 after the checkpoint run. Estimated resulting run time: 50-65 s, unverified.
 
 ## Observability
 
@@ -1362,7 +1364,7 @@ SuccessCriteria:
 ### IoThroughput
 
 #### [FI-Performance-IoThroughput-0003] Bounded worker pools for non-LLM IO effects
-Status: Candidate
+Status: Deferred
 TopLevel: Performance
 SubLevel: IoThroughput
 Priority: P2
@@ -1379,6 +1381,7 @@ SuccessCriteria:
 - Non-LLM IO effects are dispatched through a bounded worker pool with a configurable concurrency limit.
 - Thread spawning per effect is eliminated in favor of pool reuse.
 - Pool saturation is observable via logging or metrics.
+Notes: Parallel downloads with a per-site cap were planned in Plan.FasterRuns.md and deferred by the owner on 2026-10-13 after the checkpoint run. Estimated resulting run time: 50-65 s, unverified; feed fetches and file writes remain outside that planned change.
 
 ### LlmProcessing
 
@@ -1403,7 +1406,7 @@ SuccessCriteria:
 
 
 #### [FI-Performance-LlmProcessing-0002] Adaptive concurrency cap from provider pressure
-Status: Candidate
+Status: Implemented
 TopLevel: Performance
 SubLevel: LlmProcessing
 Priority: P2
@@ -1420,6 +1423,7 @@ SuccessCriteria:
 - Concurrency cap decreases automatically after repeated rate-limit failures.
 - Cap restores gradually toward configured maximum after successful requests.
 - Adaptive cap changes are logged with before/after values.
+Notes: Implemented with a reducer-owned adaptive cap; stage priority is preserved (2026-10-13).
 
 #### [FI-Performance-LlmProcessing-0003] Queue-aware model-stage priority
 Status: Candidate
@@ -1458,6 +1462,7 @@ Rationale: Improves overall poll latency when many sources are configured.
 SuccessCriteria:
 - Polling N sources uses a configurable concurrency limit.
 - Poll completion and guard signaling remain correct under parallel execution.
+Notes: RSS parallel polling was evaluated and deferred: gain of 3 s or less and a per-feed seen-set race. Brave stays sequential pending knowledge of its rate limit (2026-10-13; Plan.FasterRuns.md).
 
 ## Security
 

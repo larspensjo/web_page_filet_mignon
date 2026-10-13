@@ -386,3 +386,28 @@ Decision: An article file the exporter cannot parse is skipped and logged, stays
 Context: This refines 2026-10-03 "Saved current-key results refine the archive coverage snapshot". Tolerance over refusal applies to malformed article files as well as unavailable representatives.
 Consequences: Archive export and window metadata scanning share the parse-and-log rule. Missing or malformed fetch dates in an otherwise parseable article remain inside the window; a malformed date alone is not a parse failure. The coverage invariant and export schema 2 remain unchanged.
 Refs: docs/ArchiveExportFormat.md; 2026-10-03 "Saved current-key results refine the archive coverage snapshot"
+
+## 2026-10-13 - The desktop shares the command-line model budget and slows itself under rate limits
+Decision: The desktop defaults to 10 concurrent model requests, matching the command-line
+host (user decision, 2026-10-12). The reducer owns an adaptive effective cap beneath the
+configured budget: a rate-limit signal from a request dispatched under the current cap
+halves it, floor 1; older in-flight signals cannot halve it again. Ten consecutive clean completions
+raise it by 1 up to the budget, and each run resets it to that budget. A signal includes
+retries even when the request eventually succeeds or fails for another reason.
+The worker allows at most three rate-limit retries per request, using Retry-After capped
+at 20 s, or 2/4/8 s with +/-25% jitter without a hint. Stop does not shorten the wait.
+The run halts after three consecutive requests exhaust those retries; a recovered success
+resets the counter.
+Context: The owner via the orchestrator settled the retry and adaptation policy before the
+budget increase. This refines 2026-09-27 "Pipeline stages overlap in waves under one request
+budget": the effective cap is runtime adaptation, while configured values remain frozen
+per run. Under 2026-09-27 "Stop halts new work and drains; export waits only for the run",
+a rate-limit retry during Stop belongs to the in-flight request and is not a new model request.
+Consequences: Waiting requests retain their worker permit and reducer slot; requests above
+a lowered cap finish normally. Scoring > summary > triage priority and once-per-stage
+admission per identity per run are unchanged. Reducer ownership preserves stage priority;
+a worker-side gate would not. Wave size remains four times the configured budget, so the
+desktop's waves grow from 12 to 40 members; wave tuning is separate work.
+Refs: docs/Architecture.md; docs/plans/Plan.FasterRuns.md;
+2026-09-27 "Pipeline stages overlap in waves under one request budget";
+2026-09-27 "Stop halts new work and drains; export waits only for the run"
