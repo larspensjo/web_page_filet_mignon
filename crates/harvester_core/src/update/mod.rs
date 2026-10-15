@@ -26,8 +26,12 @@ mod tests;
 /// Pure update function: applies a message to state and returns any effects.
 pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
     state.record_startup_reply(&msg);
-    let view_change_requested =
-        matches!(&msg, Msg::JobSelected { .. } | Msg::JobListModeSet { .. });
+    let view_change_requested = matches!(
+        &msg,
+        Msg::JobSelected { .. }
+            | Msg::JobListModeSet { .. }
+            | Msg::BriefingCheckpointSaveSucceeded { .. }
+    );
     let previous_view_selection = (state.job_list_mode(), state.selected_job_id());
     let run_was_active = state.run_progress_is_active();
     let stop_requested = matches!(&msg, Msg::StopFinishClicked)

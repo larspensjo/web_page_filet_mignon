@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use chrono::{DateTime, Utc};
-use engine_logging::engine_warn;
+use engine_logging::{engine_info, engine_warn};
 
 use crate::archive_url_key;
 use crate::corpus_manifest::write_corpus_manifest;
@@ -106,6 +107,43 @@ pub(crate) struct DocMeta {
     filename: String,
 }
 
+/// Records the last reached boundary even when an export returns early or unwinds.
+struct ExportTrace {
+    path: PathBuf,
+    started: Instant,
+    phase: &'static str,
+    last_file: Option<PathBuf>,
+    completed: bool,
+}
+
+impl ExportTrace {
+    fn phase(&mut self, phase: &'static str) {
+        self.phase = phase;
+        self.last_file = None;
+        engine_info!(
+            "[archive-export] phase={} path={} elapsed_ms={}",
+            phase,
+            self.path.display(),
+            self.started.elapsed().as_millis()
+        );
+    }
+}
+
+impl Drop for ExportTrace {
+    fn drop(&mut self) {
+        if !self.completed {
+            engine_warn!(
+                "[archive-export] interrupted phase={} path={} last_file={:?} panicking={} elapsed_ms={}",
+                self.phase,
+                self.path.display(),
+                self.last_file,
+                std::thread::panicking(),
+                self.started.elapsed().as_millis()
+            );
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn build_triage_archive(
     output_dir: &Path,
@@ -118,12 +156,36 @@ pub fn build_triage_archive(
     priority_snapshot: &HashMap<String, u8>,
     folds: Option<&ArchiveFoldReport>,
 ) -> Result<ExportSummary, ExportError> {
+    let mut trace = ExportTrace {
+        path: output_dir.join(basename),
+        started: Instant::now(),
+        phase: "prepare-directory",
+        last_file: None,
+        completed: false,
+    };
+    trace.phase("prepare-directory");
     ensure_output_dir(output_dir)?;
+    trace.phase("write-manifest");
     write_corpus_manifest(output_dir)?;
+    trace.phase("collect-files");
     let entries = ordered_archive_window_paths(output_dir, basename)?;
+    let file_count = entries.len();
+    engine_info!(
+        "[archive-export] files={} path={}",
+        file_count,
+        trace.path.display()
+    );
 
+    trace.phase("read-articles");
     let mut docs_by_url: HashMap<String, DocMeta> = HashMap::new();
-    for path in entries {
+    for (index, path) in entries.into_iter().enumerate() {
+        trace.last_file = Some(path.clone());
+        if index % 1_000 == 0 {
+            engine_info!(
+                "[archive-export] phase=read-articles scanned={} total={} current_file={} path={} elapsed_ms={}",
+                index, file_count, path.display(), trace.path.display(), trace.started.elapsed().as_millis()
+            );
+        }
         let Some((_, meta)) = read_archive_window_doc(output_dir, &path)? else {
             continue;
         };
@@ -134,6 +196,7 @@ pub fn build_triage_archive(
         docs_by_url.entry(normalized).or_insert(meta);
     }
 
+    trace.phase("select-documents");
     let window_count = docs_by_url.len();
     let window_titles: HashMap<_, _> = docs_by_url
         .iter()
@@ -215,6 +278,15 @@ pub fn build_triage_archive(
         [0; 6]
     };
 
+    engine_info!(
+        "[archive-export] selected={} requested={} window_count={} summaries={} path={}",
+        docs.len(),
+        ordered_urls.len(),
+        window_count,
+        summaries.len(),
+        trace.path.display()
+    );
+    trace.phase("render-documents");
     let mut buffer = String::new();
     let mut index_rows = Vec::new();
     let mut parsed_fetched = Vec::new();
@@ -272,7 +344,21 @@ pub fn build_triage_archive(
         folds.map(|_| unexported_folded),
     );
 
+    trace.phase("write-archive");
+    engine_info!(
+        "[archive-export] bytes={} path={}",
+        buffer.len(),
+        trace.path.display()
+    );
     let output_path = write_export_file(output_dir, basename, &buffer)?;
+    trace.completed = true;
+    engine_info!(
+        "[archive-export] completed docs={} bytes={} path={} elapsed_ms={}",
+        docs.len(),
+        buffer.len(),
+        output_path.display(),
+        trace.started.elapsed().as_millis()
+    );
 
     Ok(ExportSummary {
         doc_count: docs.len(),

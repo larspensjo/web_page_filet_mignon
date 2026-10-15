@@ -87,6 +87,15 @@ are gated by this state; a rejected submit reports that export is unavailable wh
 a run is in progress. Desktop snapshots expose `archive_enabled` and `run_state`
 (`Idle`, `Active`, or `Stopping { in_flight }`) as IPC fields.
 
+After an archive export requests a new checkpoint, its matching successful checkpoint
+write switches the desktop job list to Since checkpoint and persists that mode. This
+shows the articles remaining since the archive rather than retaining the Last 24h
+list. Failed exports, failed or superseded checkpoint writes, manual checkpoint changes,
+and exports without a new checkpoint do not switch the list. Export diagnostics record
+submission, effect hand-off, worker start, scan/render/write boundaries, result delivery,
+and checkpoint writes. Scan progress is bounded to one entry per 1,000 files; early
+returns and unwinding record the last export phase and article path.
+
 The desktop's primary Run action requests Full (poll, download and process). Process
 unfinished requests Resume without fetching and is enabled only when AI is available
 and the reducer's stored unfinished-work summary is known and nonzero. The view also

@@ -2842,3 +2842,27 @@ crates/harvester_engine/src/llm/handle.rs, crates/harvester_core/src/state/llm.r
 crates/harvester_core/src/update/model_dispatch.rs,
 crates/harvester_core/src/update/llm_completed.rs,
 crates/harvester_batch/examples/replay_bench.rs
+
+## 2026-10-15 - Archive diagnostics and visible completion through the list filter
+Type: Bug Fix
+Context: An export accepted 157 selected articles but produced neither a new archive nor
+a checkpoint, with no completion or failure in the log. The owner waited over a minute
+before closing the app. A separate corpus-only export and the owner's retry with
+diagnostics succeeded; the original intermittent failure remains unconfirmed.
+Change: Added bounded export phase/progress logs, worker and result-delivery logs, and
+checkpoint write logs. Early export returns and unwinding report the phase and last
+article path. After an archive's matching checkpoint save succeeds, select and persist
+the Since checkpoint list mode, so a Last 24h view no longer obscures completion.
+Lessons Learned: Dismissing the export dialog only submits work; unchanged list contents
+do not establish export success or failure. Record boundaries across both file export
+and checkpoint persistence before attributing a silent failure to app shutdown.
+Prevention: Reducer regressions cover successful empty-list projection and persisted mode,
+plus export failure, checkpoint failure, superseded saves and checkpoint-free exports.
+Verification: Keyless offline default and desktop builds passed, along with 120 core
+archive tests, 28 exporter tests, two I/O archive tests, the desktop list integration
+test, both all-target Clippy checks with warnings denied, and formatting. The desktop
+executable was rebuilt for the owner's retry; no live API call or launcher was run.
+The owner subsequently confirmed a successful export and deferred further investigation
+until the failure recurs.
+Refs: crates/harvester_core/src/update/tests/archive_tests.rs;
+crates/harvester_engine/src/export.rs; crates/harvester_io/src/effect_runner/dispatch.rs

@@ -62,7 +62,7 @@ pub(super) fn handle_checkpoint_set(state: &mut AppState, since: Option<String>)
     if since.is_some() && parsed.is_none() {
         return vec![];
     }
-    let save_id = state.begin_briefing_checkpoint_save(parsed);
+    let save_id = state.begin_briefing_checkpoint_save(parsed, false);
     state.mark_dirty();
     vec![Effect::SaveBriefingCheckpoint {
         save_id,

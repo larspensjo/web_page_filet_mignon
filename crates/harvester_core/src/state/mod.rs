@@ -74,6 +74,7 @@ struct PendingBriefingCheckpointSave {
     save_id: u64,
     previous_since_utc: Option<chrono::DateTime<chrono::Utc>>,
     pending_since_utc: Option<chrono::DateTime<chrono::Utc>>,
+    show_since_archive_on_success: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

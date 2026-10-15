@@ -62,6 +62,7 @@ impl AppState {
     pub(crate) fn begin_briefing_checkpoint_save(
         &mut self,
         pending_since_utc: Option<DateTime<Utc>>,
+        show_since_archive_on_success: bool,
     ) -> u64 {
         let save_id = self.allocate_next_briefing_checkpoint_save_id();
         // A newer user-driven checkpoint change replaces any older pending save.
@@ -70,6 +71,7 @@ impl AppState {
             save_id,
             previous_since_utc: self.briefing_since_utc,
             pending_since_utc,
+            show_since_archive_on_success,
         });
         self.briefing_since_utc = pending_since_utc;
         self.rebuild_saved_results();
@@ -81,6 +83,10 @@ impl AppState {
     pub(crate) fn finish_briefing_checkpoint_save_success(&mut self, save_id: u64) -> bool {
         match self.pending_briefing_checkpoint_save.as_ref() {
             Some(pending) if pending.save_id == save_id => {
+                if pending.show_since_archive_on_success {
+                    self.set_job_list_mode(crate::JobListMode::SinceCheckpoint);
+                    self.pending_selected_article_url = None;
+                }
                 self.pending_briefing_checkpoint_save = None;
                 self.briefing_checkpoint_status_message = None;
                 true

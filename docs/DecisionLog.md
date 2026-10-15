@@ -411,3 +411,14 @@ desktop's waves grow from 12 to 40 members; wave tuning is separate work.
 Refs: docs/Architecture.md; docs/plans/Plan.FasterRuns.md;
 2026-09-27 "Pipeline stages overlap in waves under one request budget";
 2026-09-27 "Stop halts new work and drains; export waits only for the run"
+
+## 2026-10-15 - A completed archive checkpoint selects the since-archive view
+Decision: After an export requests a new checkpoint, switch the desktop list to
+Since checkpoint when that checkpoint's matching save succeeds, and persist the mode.
+Context: Retaining Last 24h after archiving made a successful export appear to have
+done nothing. The owner requested the since-archive view so the just-archived list clears.
+Consequences: Export or checkpoint failures, superseded save acknowledgements, manual
+checkpoint changes, and exports without a new checkpoint preserve the current mode.
+The view shows actual remaining articles rather than forcing an empty list.
+Refs: crates/harvester_core/src/state/briefing_access.rs;
+crates/harvester_core/src/update/tests/archive_tests.rs; docs/Architecture.md

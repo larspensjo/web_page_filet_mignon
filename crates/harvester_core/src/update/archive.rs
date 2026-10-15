@@ -142,6 +142,10 @@ pub(super) fn handle_dialog_submitted(
     use_summaries: bool,
     use_signal_candidates: bool,
 ) -> Vec<Effect> {
+    engine_info!(
+        "[archive-dialog] submit received request_id={} current_request_id={} basename={} set_checkpoint={} use_summaries={} use_signal_candidates={}",
+        request_id, state.archive_request_id(), basename, set_checkpoint, use_summaries, use_signal_candidates
+    );
     if !state.export_available() {
         engine_warn!(
             "[archive-gate] action=submit request_id={} run_id={} run_state={:?}",
@@ -246,6 +250,10 @@ pub(super) fn handle_dialog_submitted(
     };
     let annotations = build_annotation_map(state, &annotated_urls);
     let priority_snapshot = build_priority_snapshot(state);
+    engine_info!(
+        "[archive-dialog] export effect ready request_id={} basename={} urls={} summaries={} annotations={} priorities={} fold_groups={}",
+        request_id, basename, ordered_urls.len(), summaries.len(), annotations.len(), priority_snapshot.len(), folds.len()
+    );
     let mut effects = vec![Effect::ArchiveRequested {
         request_id,
         basename,
@@ -330,6 +338,10 @@ pub(super) fn handle_export_completed(
     request_id: u64,
     requested_checkpoint: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Vec<Effect> {
+    engine_info!(
+        "[archive-dialog] completion received request_id={} current_request_id={} requested_checkpoint={:?}",
+        request_id, state.archive_request_id(), requested_checkpoint
+    );
     if request_id != state.archive_request_id() {
         return Vec::new();
     }
@@ -337,7 +349,13 @@ pub(super) fn handle_export_completed(
     state.clear_pinned_archive_corpus();
     state.clear_pinned_signal_candidate_selection();
     if let Some(checkpoint) = requested_checkpoint {
-        let save_id = state.begin_briefing_checkpoint_save(Some(checkpoint));
+        let save_id = state.begin_briefing_checkpoint_save(Some(checkpoint), true);
+        engine_info!(
+            "[archive-dialog] checkpoint save requested request_id={} save_id={} since_utc={}",
+            request_id,
+            save_id,
+            checkpoint
+        );
         state.mark_dirty();
         vec![Effect::SaveBriefingCheckpoint {
             save_id,

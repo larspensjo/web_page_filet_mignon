@@ -124,7 +124,18 @@ impl EffectRunner {
             } => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.paths.output_dir.clone();
+                engine_info!(
+                    "[archive-dialog] export queued request_id={} path={} urls={} use_summaries={} summaries={} fold_groups={} requested_checkpoint={:?}",
+                    request_id, output_dir.join(&basename).display(), ordered_urls.len(), use_summaries,
+                    summaries.len(), folds.len(), requested_checkpoint
+                );
                 thread::spawn(move || {
+                    let started = std::time::Instant::now();
+                    engine_info!(
+                        "[archive-dialog] worker started request_id={} path={}",
+                        request_id,
+                        output_dir.join(&basename).display()
+                    );
                     match build_triage_archive(
                         &output_dir,
                         &basename,
@@ -167,12 +178,19 @@ impl EffectRunner {
                                     summary.output_path.display()
                                 );
                             }
-                            let _ = msg_tx.send(Msg::ArchiveExportCompleted {
-                                request_id,
-                                path: summary.output_path,
-                                doc_count: summary.doc_count,
-                                requested_checkpoint,
-                            });
+                            if msg_tx
+                                .send(Msg::ArchiveExportCompleted {
+                                    request_id,
+                                    path: summary.output_path,
+                                    doc_count: summary.doc_count,
+                                    requested_checkpoint,
+                                })
+                                .is_err()
+                            {
+                                engine_warn!("[archive-dialog] completion delivery failed request_id={}; reducer receiver closed", request_id);
+                            } else {
+                                engine_info!("[archive-dialog] completion delivered request_id={} elapsed_ms={}", request_id, started.elapsed().as_millis());
+                            }
                         }
                         Err(err) => {
                             engine_warn!(
@@ -181,11 +199,16 @@ impl EffectRunner {
                                 basename,
                                 err
                             );
-                            let _ = msg_tx.send(Msg::ArchiveExportFailed {
-                                request_id,
-                                basename,
-                                reason: err.to_string(),
-                            });
+                            if msg_tx
+                                .send(Msg::ArchiveExportFailed {
+                                    request_id,
+                                    basename,
+                                    reason: err.to_string(),
+                                })
+                                .is_err()
+                            {
+                                engine_warn!("[archive-dialog] failure delivery failed request_id={}; reducer receiver closed", request_id);
+                            }
                         }
                     }
                 });
@@ -422,9 +445,25 @@ impl EffectRunner {
                 let path = self.paths.briefing_checkpoint_path.clone();
                 thread::spawn(move || {
                     let s = since_utc.map(|dt| dt.to_rfc3339());
+                    engine_info!(
+                        "[briefing-checkpoint] write started save_id={} path={} since_utc={:?}",
+                        save_id,
+                        path.display(),
+                        s
+                    );
                     match crate::save_briefing_checkpoint(&path, s.as_deref()) {
                         Ok(()) => {
-                            let _ = msg_tx.send(Msg::BriefingCheckpointSaveSucceeded { save_id });
+                            engine_info!(
+                                "[briefing-checkpoint] write completed save_id={} path={}",
+                                save_id,
+                                path.display()
+                            );
+                            if msg_tx
+                                .send(Msg::BriefingCheckpointSaveSucceeded { save_id })
+                                .is_err()
+                            {
+                                engine_warn!("[briefing-checkpoint] completion delivery failed save_id={}; reducer receiver closed", save_id);
+                            }
                         }
                         Err(e) => {
                             engine_error!(
