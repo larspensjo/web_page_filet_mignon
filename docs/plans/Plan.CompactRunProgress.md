@@ -668,6 +668,37 @@ Documentation only. No build or test is needed beyond the final gate already run
 Verification: documentation-only. Read-through for accuracy against the shipped behaviour.
 Confirm that no durable document cites this plan's phase numbers.
 
+#### Phase 3 status and plan close-out (2026-10-18): complete
+
+- **Documents updated:**
+  - `VisualDesignSpec.md`: five bullets under Desktop run surface and one restraint line
+    under Status Indicators;
+  - `Architecture.md`: a paragraph after the stage-bar paragraph;
+  - `DecisionLog.md`: entry "2026-10-18 - Desktop run progress is a compact glance by
+    default";
+  - `EngineeringDiary.md`: an implementation entry with lessons;
+  - `FutureIdeas.md`: candidate `FI-Performance-SnapshotDelivery-0001` with a new
+    `SnapshotDelivery` taxonomy row.
+
+  None of them cites this plan's phase numbers.
+- **IPC probe comparison (the item owed since Phase 1): done.** It ran on 2026-10-18 on the
+  Phase 2 tree, passed every gate and exited 0. The report is saved as
+  `.local/probe/ipc-report.compact-phase2.json` and compared with
+  `ipc-report.compact-baseline.json` (2026-10-17, pre-change tree):
+
+  | Case | Gated | Slow frames, baseline → now | Latency p95, baseline → now | Envelope p95 |
+  |---|---|---|---|---|
+  | typical-scope | yes | 0.07 % → 0.00 % | 15 ms → 13 ms | 82 809 B, unchanged |
+  | capped-no-checkpoint | yes | 0.00 % → 0.08 % | 24 ms → 33 ms | 219 721 B, unchanged |
+
+  The gated cases are flat. The capped-case latency moved within the 24–42 ms spread of the
+  earlier Phase 1 runs, and envelopes are byte-identical, so the probe still measures the full
+  table and feed.
+
+  The ungated populated-results case read 17.5 % slow frames. Its earlier runs ranged from
+  0.66 % to 34 % on this machine, so it is noise and not gated.
+- **Plan complete.** All three phases are implemented, verified and user-approved.
+
 ## Documentation obligations (summary)
 
 | Document | Change | Phase |

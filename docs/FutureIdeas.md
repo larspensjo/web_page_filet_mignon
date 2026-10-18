@@ -45,6 +45,7 @@ Maintained manually in this repository.
 | Performance | IoThroughput     | Non-LLM IO effect concurrency and pooling        |
 | Performance | LlmProcessing    | Throughput for LLM workloads                     |
 | Performance | Polling          | Parallel source polling and throughput           |
+| Performance | SnapshotDelivery | Desktop snapshot payload size and delivery shape |
 | Security  | KeyManagement       | Secure API key handling                          |
 | Security  | PolicyConfig        | Policy and quota configuration                   |
 | Security  | SourceTrust         | Trust tiers for URL policies                     |
@@ -1463,6 +1464,26 @@ SuccessCriteria:
 - Polling N sources uses a configurable concurrency limit.
 - Poll completion and guard signaling remain correct under parallel execution.
 Notes: RSS parallel polling was evaluated and deferred: gain of 3 s or less and a per-feed seen-set race. Brave stays sequential pending knowledge of its rate limit (2026-10-13; Plan.FasterRuns.md).
+
+### SnapshotDelivery
+
+#### [FI-Performance-SnapshotDelivery-0001] Send the activity feed only while it is shown, or as deltas
+Status: Candidate
+TopLevel: Performance
+SubLevel: SnapshotDelivery
+Priority: P3
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.CompactRunProgress.md
+- SourceSection: Settled by the orchestrator (DecisionLog, FutureIdeas backlog item)
+- Captured: 2026-10-18
+Tags: [desktop, ipc, snapshot, activity-feed, performance]
+Summary: Stop sending the full 50-entry activity feed on every run snapshot. Send it only while the run details are expanded, or send only new entries.
+Rationale: The desktop activity feed holds 50 entries (DecisionLog 2026-09-08), which anticipated a different delivery shape if needed. Desktop run progress is now a compact glance by default (DecisionLog 2026-10-18), so the feed is usually not on screen but is still carried in every snapshot at up to 20 Hz.
+SuccessCriteria:
+- The IPC probe measures a smaller per-envelope payload during collapsed runs.
+- The expanded activity feed shows the same entries, in the same order, as today.
 
 ## Security
 

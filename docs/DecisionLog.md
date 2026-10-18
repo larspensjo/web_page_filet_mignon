@@ -422,3 +422,31 @@ checkpoint changes, and exports without a new checkpoint preserve the current mo
 The view shows actual remaining articles rather than forcing an empty list.
 Refs: crates/harvester_core/src/state/briefing_access.rs;
 crates/harvester_core/src/update/tests/archive_tests.rs; docs/Architecture.md
+
+## 2026-10-18 - Desktop run progress is a compact glance by default
+Decision: While a run is active the desktop Run panel shows six text-free hairline stage
+bars in its header row, in stage-table order, with a chevron; the block and chevron are one
+disclosure button that expands the stage table and activity feed inline. Bars keep the
+2026-10-03 remaining-work meaning and scales and are empty while Stopping. Each compact
+track carries state so a zero-width fill still informs: warning when the stage has failures
+or is Failed, an accent tint while Active, dim while Pending with no work; Loading articles
+is a track-only bar under the same rule. The table rows and the compact tracks use one
+shared state rule. The expanded or compact choice is frontend-local session state, never
+persisted; it carries over between runs and each launch starts compact. The IPC probe page
+starts expanded so its gate keeps measuring the full table and feed.
+Context: The full table and 50-entry feed pushed the workspace down during every run; the
+owner wanted a calm default with the detail one click away. Fill colour alone could not
+show failures or activity when remaining work is zero.
+Consequences: The 50-entry activity feed is still sent on every snapshot although it is
+now rendered only on demand; this is on record as justification for the different
+delivery shape anticipated by 2026-09-08, which remains separate work. Starting a run no
+longer changes the panel height; notices still add rows. Core, snapshot IPC and the
+command-line progress block are unchanged. Compact bars are decorative; the full view's
+meters remain the accessible per-stage values. This refines 2026-10-03 in presentation
+only: the Loading row still has no remaining-work bar.
+Refs: frontend/src/components/RunSurface.tsx, frontend/src/ipc/probeMode.ts,
+docs/visual_design/VisualDesignSpec.md, docs/Architecture.md; 2026-09-07 "Run progress is
+accumulated in the reducer"; 2026-09-08 "Desktop activity feed holds 50 entries";
+2026-09-09 "Desktop runs never navigate the user"; 2026-10-03 "Desktop stage bars show
+remaining work this run actually does"; 2026-10-04 "The command-line host is kept with a
+compact progress block"

@@ -2866,3 +2866,30 @@ The owner subsequently confirmed a successful export and deferred further invest
 until the failure recurs.
 Refs: crates/harvester_core/src/update/tests/archive_tests.rs;
 crates/harvester_engine/src/export.rs; crates/harvester_io/src/effect_runner/dispatch.rs
+
+## 2026-10-18 - Compact run glance with a disclosure for run details
+Type: Implementation
+Context: The desktop Run panel's stage table and 50-entry activity feed pushed the
+workspace down for the whole run. The owner wanted a calm one-row default with the
+detail one click away.
+Change: During a run the panel header shows six decorative hairline bars and a chevron
+inside one disclosure button. The bars use the table's remaining-work percentages and
+the shared stage-state rule for their track colour, and Loading is a track-only bar.
+The details region stays mounted as an empty `hidden` element while collapsed. The ETA
+clock runs only while expanded and refreshes in a layout effect on expansion. A shared
+probe-mode helper starts the probe page expanded.
+Lessons Learned: Compact markup must not reuse the full view's `data-stage` and
+`.stage-*` hooks. It sits earlier in DOM order, so first-match test helpers would
+silently bind to it. The probe page must keep the heavy view on by default, pinned by an
+App test, or the frame gate quietly measures less while still passing. A disclosure that
+keeps a stable empty `hidden` region lets `aria-controls` resolve without rendering the
+hidden content. When a track colour encodes state, the table and the compact bars need
+one rule. `--muted` must still apply to a zero-total Pending stage in warning, so the
+rule is split into a precedence function plus a shared muted predicate.
+Verification: Frontend check (162 tests), build and format passed. Every baseline
+RunSurface test title remains. The keyless IPC probe passed, with gated cases flat
+against the pre-change baseline and identical envelope sizes. The owner approved the
+compact glance and its tints by eye.
+Refs: frontend/src/components/RunSurface.tsx, frontend/src/components/RunSurface.test.tsx,
+frontend/src/ipc/probeMode.ts, frontend/src/App.test.tsx, frontend/src/styles/workspace.css;
+commits 59f9780, ad8c1bc

@@ -180,6 +180,19 @@ Buttons should clearly express priority and intent.
   done (Loading articles keeps its full count).
 - On article rows, the bar compares queue sizes on one shared scale while the text gives that
   stage's own “N of M to do” fraction. They carry different information by design.
+- During a run the panel shows, by default, a compact block of six hairline bars in stage-table
+  order with a chevron beside it, in place of a “Running” label. It has no text and no tooltip,
+  and it keeps the header row height at both wide and narrow widths.
+- Compact bar length is the same remaining new work, on the same scales as the table, and is
+  empty while Stopping.
+- Each compact track carries the stage's state, so an empty fill still informs. Failures or
+  Failed give a warning tint, Active gives a subtle accent tint, and Pending with no work is dim.
+  Loading articles is a track-only bar under the same rule.
+- The block and chevron are one disclosure button (“Show run details” / “Hide run details”)
+  that expands the stage table and activity feed inline, pushing the panes down. The compact
+  bars are decorative; the table's meters remain the accessible per-stage values.
+- The expanded or compact choice lasts for the app session and carries over between runs.
+  Each launch starts compact.
 - A large reprocess notice is muted run-surface text, not a modal or confirmation step.
 - The existing `ai_unavailable_message` is visible below the Run controls. API-key and ordinary AI-unavailable notices use muted status text. A saved-result store refusal uses the reserved warning red, names its file, explains the reason and recovery action, and leaves intake available.
 
@@ -271,6 +284,8 @@ Use:
   selection shows its estimated tokens. A positive backlog reads “still processing” while
   Active or Stopping and “unfinished” while Idle, except during loading or unavailability.
 - The LLM-call budget keeps its existing escalation to Accent Primary and Accent Warning.
+- The compact run glance follows the same restraint: state shows as tinted tracks, with no
+  glow and no animation.
 
 Avoid:
 

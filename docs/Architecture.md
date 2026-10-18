@@ -117,6 +117,15 @@ this run's new work as `N done`, and statuses are plain labels; Loading articles
 its full count. Bars and counts are derived from the current snapshot without
 render-held progress. ETAs use new-work settlements and elapsed time.
 
+During a run the desktop shows these bars by default as a compact, text-free glance in
+the Run panel header. The full stage table and the activity feed are a frontend-local
+disclosure: the expanded or compact choice is session view state and never reaches the
+core. While collapsed, the table and feed are not rendered. In the compact glance,
+Loading articles is a track-only bar, and each track's colour comes from the stage's
+state (failures, active or pending with no work). The full table above is unchanged. The
+core, the snapshot and activity-feed delivery are unchanged, and the IPC probe page
+starts expanded so its gate keeps measuring the full table and feed.
+
 `RunProgress` accumulates this run's admitted totals, including items later marked
 reused. Each model stage also carries a `reused` count for this run's items settled
 without a model request at admission; it is always less than or equal to completed. An item
