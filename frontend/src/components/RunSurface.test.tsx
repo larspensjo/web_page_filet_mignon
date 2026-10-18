@@ -25,6 +25,7 @@ import {
 	newWork,
 	presentStageRows,
 	RunSurface,
+	stageTrackState,
 } from "./RunSurface";
 
 vi.mock("../ipc/intent", () => ({ dispatchIntent: vi.fn() }));
@@ -85,6 +86,14 @@ function stageRow(stage: StageName): HTMLElement {
 	const row = document.querySelector<HTMLElement>(`[data-stage="${stage}"]`);
 	expect(row).not.toBeNull();
 	return row as HTMLElement;
+}
+
+function glanceBar(stage: StageName): HTMLElement {
+	const bar = document.querySelector<HTMLElement>(
+		`.run-glance-bar[data-glance-stage="${stage}"]`,
+	);
+	expect(bar).not.toBeNull();
+	return bar as HTMLElement;
 }
 
 function meterPercent(meter: HTMLElement): number {
@@ -325,6 +334,19 @@ describe("RunSurface", () => {
 		expect(meter).toHaveAttribute("aria-valuenow", "0");
 		expect(meter).toHaveAttribute("aria-valuemax", "0");
 		expect(meterPercent(meter)).toBe(0);
+	});
+
+	it("keeps zero-total Pending rows muted and warning when failures override the compact track", () => {
+		const stages = makeStages({
+			Triaging: { status: "Pending", total: 0, failed: 1 },
+		});
+		renderExpanded(<RunSurface view={viewWithStages(stages)} />);
+
+		expect(stageRow("Triaging")).toHaveClass(
+			"stage-row--muted",
+			"stage-row--warning",
+		);
+		expect(glanceBar("Triaging")).toHaveAttribute("data-track", "warning");
 	});
 
 	it("shows the owner's run end state using only new work", () => {
@@ -1509,5 +1531,89 @@ describe("RunSurface", () => {
 		expect(screen.getByText(nextActivity[0].url)).toBeVisible();
 		for (const entry of firstActivity)
 			expect(screen.queryByText(entry.url)).not.toBeInTheDocument();
+	});
+
+	it.each([
+		["Failed without failures", { status: "Failed", failed: 0 }, "warning"],
+		["Active with failures", { status: "Active", failed: 1 }, "warning"],
+		["Active with an empty queue", { status: "Active" }, "active"],
+		["zero-total Pending", { status: "Pending", total: 0 }, "muted"],
+		["Pending with work", { status: "Pending", total: 1 }, "neutral"],
+		["Done without failures", { status: "Done" }, "neutral"],
+	] as const)("assigns the %s track state", (_name, override, expected) => {
+		const stage = makeStages({ Triaging: override }).find(
+			(candidate) => candidate.stage === "Triaging",
+		);
+		expect(stage).toBeDefined();
+		expect(stageTrackState(stage as StageProgress)).toBe(expected);
+	});
+
+	it("shows warning tracks for failed stages with zero remaining work", () => {
+		render(<RunSurface view={viewWithStages(ownerRunEndStages())} />);
+
+		for (const name of ["ScanningSources", "DownloadingArticles"] as const) {
+			expect(glanceBar(name)).toHaveAttribute("data-track", "warning");
+			expect(meterPercent(glanceBar(name))).toBe(0);
+		}
+		for (const name of ["Triaging", "Summarizing", "ScoringSignals"] as const)
+			expect(glanceBar(name)).toHaveAttribute("data-track", "neutral");
+	});
+
+	it("shows an active track for an all-reused model stage with zero fill", () => {
+		const stages = makeStages({
+			Summarizing: {
+				status: "Active",
+				total: 118,
+				reused: 118,
+				completed: 118,
+			},
+		});
+		render(<RunSurface view={viewWithStages(stages)} />);
+
+		const bar = glanceBar("Summarizing");
+		expect(bar).toHaveAttribute("data-track", "active");
+		expect(meterPercent(bar)).toBe(0);
+	});
+
+	it.each([
+		["Active", { status: "Active" }, "active"],
+		["Failed", { status: "Failed", failed: 1 }, "warning"],
+		["Pending", { status: "Pending", total: 0 }, "muted"],
+	] as const)(
+		"uses a %s track for the track-only Loading bar",
+		(_name, override, expected) => {
+			const stages = makeStages({ LoadingArticles: override });
+			render(<RunSurface view={viewWithStages(stages)} />);
+
+			const bar = glanceBar("LoadingArticles");
+			expect(bar).toHaveAttribute("data-track", expected);
+			expect(bar).toHaveClass(`run-glance-bar--${expected}`);
+			expect(bar.style.getPropertyValue("--stage-progress")).toBe("");
+		},
+	);
+
+	it("keeps compact track states while Stopping empties every fill", () => {
+		const stages = stopping.view.run_progress.stages.map((stage) =>
+			stage.stage === "ScoringSignals"
+				? { ...stage, status: "Failed" as const, failed: 1 }
+				: stage,
+		);
+		const view = {
+			...stopping.view,
+			run_progress: { ...stopping.view.run_progress, stages },
+		};
+		render(<RunSurface view={view} />);
+
+		expect(glanceBar("Triaging")).toHaveAttribute("data-track", "active");
+		expect(glanceBar("ScoringSignals")).toHaveAttribute(
+			"data-track",
+			"warning",
+		);
+		const bars = document.querySelectorAll<HTMLElement>(".run-glance-bar");
+		expect(bars).toHaveLength(6);
+		for (const bar of bars)
+			expect(bar.style.getPropertyValue("--stage-progress")).toBe(
+				bar.dataset.glanceStage === "LoadingArticles" ? "" : "0%",
+			);
 	});
 });

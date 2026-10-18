@@ -86,6 +86,19 @@
 }
 
 .run-glance {
+	--run-glance-track-neutral: var(--surface-overlay);
+	--run-glance-track-active: color-mix(
+		in srgb,
+		var(--accent-primary) 30%,
+		var(--surface-overlay)
+	);
+	--run-glance-track-warning: color-mix(
+		in srgb,
+		var(--accent-warning) 45%,
+		var(--surface-overlay)
+	);
+	--run-glance-track-muted: var(--border-subtle);
+
 	display: flex;
 	flex-direction: column;
 	gap: 3px;
@@ -96,8 +109,20 @@
 	position: relative;
 	height: 2px;
 	border-radius: var(--radius-inline);
-	background: var(--surface-overlay);
+	background: var(--run-glance-track-neutral);
 	overflow: hidden;
+}
+
+.run-glance-bar--active {
+	background: var(--run-glance-track-active);
+}
+
+.run-glance-bar--warning {
+	background: var(--run-glance-track-warning);
+}
+
+.run-glance-bar--muted {
+	background: var(--run-glance-track-muted);
 }
 
 .run-glance-bar::before {
@@ -107,6 +132,14 @@
 	border-radius: inherit;
 	background: var(--accent-primary);
 	content: "";
+}
+
+.run-glance-bar--warning::before {
+	background: var(--accent-warning);
+}
+
+.run-glance-bar--muted::before {
+	background: var(--text-disabled);
 }
 
 .run-glance-chevron {

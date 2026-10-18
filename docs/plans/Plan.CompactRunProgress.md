@@ -553,6 +553,43 @@ Verification:
 
   If the tints need tuning, change only the local custom properties.
 
+#### Phase 2 status (2026-10-18): implemented, verified, user-tested
+
+- **Implemented** as specified above:
+  - `stageTrackState(stage)` is exported. A small exported `isMutedStage(stage)` holds the
+    single Pending-with-total-0 rule. Both `stageTrackState` and the `StageList` `--muted` row
+    class use it, so the table and the compact block cannot drift apart.
+  - Compact bars carry `data-track` and a `run-glance-bar--{state}` class, and Loading is
+    track-only.
+  - The track colours live in one block of local custom properties on `.run-glance`: active is
+    Accent Primary at 30 % and warning is Accent Warning at 45 %, both `color-mix()` over Surface
+    Overlay; muted is Border Subtle. No global tokens changed.
+- **Review:** approved. Two minor findings were applied: the shared muted helper, and a
+  regression test for a Pending, zero-total stage with failures. That stage gets both the
+  `--muted` and `--warning` row classes and a warning track.
+- **Automated checks (2026-10-18):**
+  - `npm run check` passes: tsc, biome, and vitest with 8 files and 162 tests.
+  - `npm run build` passes, and `npm run fmt` made no changes.
+  - Baseline audit: every one of the 40 Phase 1 `RunSurface.test.tsx` titles remains and no
+    test lines were removed. `App.test.tsx` is unchanged.
+- **IPC probe:** not run in this phase, which does not require it. The probe comparison owed
+  since Phase 1 is still outstanding; run it once before or at close-out if a display and the GUI
+  lock are available.
+- **User test (Lars, 2026-10-18):** he tested Phase 2 in the desktop app and approved it ("I
+  tested phase 2 of the Harvester, approved"), relayed by the orchestrator. This is the by-eye
+  tint verdict. The tints are unchanged from the values above.
+
+#### Handoff to Phase 3 (for a fresh session)
+
+- Start from `main` after the Phase 2 commit.
+- Phase 3 is documentation-only. Follow the Phase 3 list below, with the DecisionLog draft
+  dated on the implementation day.
+- Describe the shipped tints in behaviour terms in the documents: accent tint while Active,
+  warning tint for failures or Failed, dim for Pending with no work. Do not cite these
+  percentages or phase numbers.
+- Close-out still owes the IPC probe comparison noted under the Phase 1 status. Record it as
+  run, or as not run with the reason.
+
 ### Phase 3 - Documentation and close-out
 
 Documentation only. No build or test is needed beyond the final gate already run in Phase 2.

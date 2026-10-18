@@ -35,6 +35,19 @@ export type StageRowPresentation = {
 	} | null;
 };
 
+export function isMutedStage(stage: StageProgress): boolean {
+	return stage.status === "Pending" && stage.total === 0;
+}
+
+export function stageTrackState(
+	stage: StageProgress,
+): "warning" | "active" | "muted" | "neutral" {
+	if (stage.failed > 0 || stage.status === "Failed") return "warning";
+	if (stage.status === "Active") return "active";
+	if (isMutedStage(stage)) return "muted";
+	return "neutral";
+}
+
 /** Return the admitted and completed work this run actually performs at a stage. */
 export function newWork(stage: StageProgress): { total: number; done: number } {
 	return {
@@ -225,13 +238,12 @@ function StageList({
 	return (
 		<ol className="stage-list" aria-label="Pipeline stages">
 			{rows.map(({ stage, countText, bar }) => {
-				const muted = stage.status === "Pending" && stage.total === 0;
+				const trackState = stageTrackState(stage);
+				const muted = isMutedStage(stage);
 				return (
 					<li
 						className={`stage-row${muted ? " stage-row--muted" : ""}${
-							stage.failed > 0 || stage.status === "Failed"
-								? " stage-row--warning"
-								: ""
+							trackState === "warning" ? " stage-row--warning" : ""
 						}`}
 						data-stage={stage.stage}
 						data-status={stage.status}
@@ -313,20 +325,24 @@ export function RunSurface({
 							onClick={() => setDetailsExpanded((expanded) => !expanded)}
 						>
 							<span className="run-glance" aria-hidden="true">
-								{rows.map(({ stage, bar }) => (
-									<span
-										className="run-glance-bar"
-										data-glance-stage={stage.stage}
-										key={stage.stage}
-										style={
-											bar
-												? ({
-														"--stage-progress": `${bar.percent}%`,
-													} as CSSProperties)
-												: undefined
-										}
-									/>
-								))}
+								{rows.map(({ stage, bar }) => {
+									const trackState = stageTrackState(stage);
+									return (
+										<span
+											className={`run-glance-bar run-glance-bar--${trackState}`}
+											data-glance-stage={stage.stage}
+											data-track={trackState}
+											key={stage.stage}
+											style={
+												bar
+													? ({
+															"--stage-progress": `${bar.percent}%`,
+														} as CSSProperties)
+													: undefined
+											}
+										/>
+									);
+								})}
 							</span>
 							<ChevronDown
 								className="run-glance-chevron"
