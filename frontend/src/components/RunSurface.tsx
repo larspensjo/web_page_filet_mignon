@@ -1,4 +1,5 @@
-import { type CSSProperties, useEffect, useState } from "react";
+import { ChevronDown } from "lucide-react";
+import { type CSSProperties, useId, useLayoutEffect, useState } from "react";
 import { dispatchIntent } from "../ipc/intent";
 import type {
 	ActivityEntry,
@@ -152,7 +153,7 @@ function statusLabel(status: StageProgress["status"]): string {
 
 function useEtaNow(runActive: boolean): Date {
 	const [nowMs, setNowMs] = useState(() => Date.now());
-	useEffect(() => {
+	useLayoutEffect(() => {
 		if (!runActive) return;
 		setNowMs(Date.now());
 		const timer = window.setInterval(
@@ -211,11 +212,11 @@ function stageStatus(
 }
 
 function StageList({
-	stages,
+	rows,
 	stageEtas,
 	isStopping,
 }: {
-	stages: StageProgress[];
+	rows: StageRowPresentation[];
 	stageEtas: ActiveStageEta[];
 	isStopping: boolean;
 }) {
@@ -223,7 +224,7 @@ function StageList({
 
 	return (
 		<ol className="stage-list" aria-label="Pipeline stages">
-			{presentStageRows(stages, isStopping).map(({ stage, countText, bar }) => {
+			{rows.map(({ stage, countText, bar }) => {
 				const muted = stage.status === "Pending" && stage.total === 0;
 				return (
 					<li
@@ -265,14 +266,25 @@ function StageList({
 	);
 }
 
-export function RunSurface({ view }: { view: RunView }) {
+export function RunSurface({
+	view,
+	initialDetailsExpanded,
+}: {
+	view: RunView;
+	initialDetailsExpanded?: boolean;
+}) {
+	const [detailsExpanded, setDetailsExpanded] = useState(
+		initialDetailsExpanded ?? false,
+	);
+	const detailsId = useId();
 	const { run_progress: progress, run_completion_notice: notice } = view;
-	const now = useEtaNow(progress.run_active);
+	const now = useEtaNow(progress.run_active && detailsExpanded);
 	const canStop = stopEnabled(view.stop_finish_button);
 	const isStopping =
 		typeof view.run_state === "object" && "Stopping" in view.run_state;
+	const rows = presentStageRows(progress.stages, isStopping);
 	const stageEtas =
-		progress.run_active && !isStopping
+		progress.run_active && detailsExpanded && !isStopping
 			? estimateActiveStageEtas(progress.stages, now)
 			: [];
 	const unfinishedCount =
@@ -290,7 +302,38 @@ export function RunSurface({ view }: { view: RunView }) {
 				<div className="run-summary">
 					<h2 id="run-surface-heading">Run</h2>
 					{progress.run_active ? (
-						<span className="run-state">Running</span>
+						<button
+							type="button"
+							className="run-glance-toggle"
+							aria-expanded={detailsExpanded}
+							aria-controls={detailsId}
+							aria-label={
+								detailsExpanded ? "Hide run details" : "Show run details"
+							}
+							onClick={() => setDetailsExpanded((expanded) => !expanded)}
+						>
+							<span className="run-glance" aria-hidden="true">
+								{rows.map(({ stage, bar }) => (
+									<span
+										className="run-glance-bar"
+										data-glance-stage={stage.stage}
+										key={stage.stage}
+										style={
+											bar
+												? ({
+														"--stage-progress": `${bar.percent}%`,
+													} as CSSProperties)
+												: undefined
+										}
+									/>
+								))}
+							</span>
+							<ChevronDown
+								className="run-glance-chevron"
+								size={14}
+								aria-hidden="true"
+							/>
+						</button>
 					) : (
 						<span className="run-state">
 							Idle · {view.job_count} articles ·{" "}
@@ -362,13 +405,17 @@ export function RunSurface({ view }: { view: RunView }) {
 			)}
 
 			{progress.run_active && (
-				<div className="run-details">
-					<StageList
-						stages={progress.stages}
-						stageEtas={stageEtas}
-						isStopping={isStopping}
-					/>
-					<ActivityFeed activity={progress.activity} />
+				<div className="run-details" id={detailsId} hidden={!detailsExpanded}>
+					{detailsExpanded && (
+						<>
+							<StageList
+								rows={rows}
+								stageEtas={stageEtas}
+								isStopping={isStopping}
+							/>
+							<ActivityFeed activity={progress.activity} />
+						</>
+					)}
 				</div>
 			)}
 		</section>

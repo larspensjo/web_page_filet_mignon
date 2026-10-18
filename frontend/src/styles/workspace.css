@@ -71,6 +71,52 @@
 	white-space: nowrap;
 }
 
+.run-glance-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-compact);
+	padding: 4px var(--space-compact);
+	border-radius: var(--radius-standard);
+	background: transparent;
+	color: var(--text-secondary);
+}
+
+.run-glance-toggle:hover {
+	background: var(--surface-raised);
+}
+
+.run-glance {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	width: 46px;
+}
+
+.run-glance-bar {
+	position: relative;
+	height: 2px;
+	border-radius: var(--radius-inline);
+	background: var(--surface-overlay);
+	overflow: hidden;
+}
+
+.run-glance-bar::before {
+	position: absolute;
+	inset: 0 auto 0 0;
+	width: var(--stage-progress, 0%);
+	border-radius: inherit;
+	background: var(--accent-primary);
+	content: "";
+}
+
+.run-glance-chevron {
+	flex: 0 0 auto;
+}
+
+.run-glance-toggle[aria-expanded="true"] .run-glance-chevron {
+	transform: rotate(180deg);
+}
+
 .run-actions {
 	flex-wrap: wrap;
 	justify-content: flex-end;
@@ -123,6 +169,10 @@
 
 .run-reprocess-notice--warning {
 	color: var(--accent-warning);
+}
+
+.run-details[hidden] {
+	display: none;
 }
 
 .run-details {
@@ -569,6 +619,14 @@
 }
 
 @media (max-width: 50rem) {
+	.run-glance-toggle {
+		padding-block: 0;
+	}
+
+	.run-glance {
+		gap: 2px;
+	}
+
 	.workspace {
 		grid-template-columns: minmax(0, 1fr);
 	}

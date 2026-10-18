@@ -7,6 +7,7 @@ import { RunSurface } from "./components/RunSurface";
 import { StatusMeters } from "./components/StatusMeters";
 import { JOBS_SEARCH_DEBOUNCE_MS } from "./constants";
 import { dispatchIntent } from "./ipc/intent";
+import { isProbePage } from "./ipc/probeMode";
 import { IPC_SCHEMA_VERSION } from "./ipc/schemaVersion";
 import type { ArchiveDialogRequest, JobListMode } from "./ipc/types";
 import { useUiCommand } from "./ipc/uiCommand";
@@ -165,7 +166,12 @@ export function App() {
 					</div>
 				</div>
 			</header>
-			{snapshot && <RunSurface view={snapshot.view} />}
+			{snapshot && (
+				<RunSurface
+					view={snapshot.view}
+					initialDetailsExpanded={isProbePage()}
+				/>
+			)}
 			<div className="workspace">
 				<JobList
 					list={list}

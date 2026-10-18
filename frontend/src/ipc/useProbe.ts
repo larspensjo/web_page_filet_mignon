@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect } from "react";
+import { isProbePage } from "./probeMode";
 import { probeAcknowledgedEvent } from "./useSnapshot";
 
 type ProbeFinished = { finalGeneration: number };
@@ -8,7 +9,7 @@ type ProbeFinished = { finalGeneration: number };
 export function useProbe() {
 	useEffect(() => {
 		const query = new URLSearchParams(window.location.search);
-		if (!query.has("probe")) return;
+		if (!isProbePage()) return;
 		const durationMs = Number(query.get("durationMs"));
 		if (!Number.isFinite(durationMs) || durationMs <= 0) return;
 		let frames = 0;

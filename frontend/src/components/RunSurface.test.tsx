@@ -16,6 +16,7 @@ import {
 	screen,
 	within,
 } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dispatchIntent } from "../ipc/intent";
 import type { SnapshotEnvelope, StageProgress } from "../ipc/types";
@@ -65,6 +66,19 @@ function viewWithStages(stages: StageProgress[]): SnapshotEnvelope["view"] {
 		run_state: "Active",
 		run_progress: { ...inProgress.view.run_progress, stages },
 	};
+}
+
+function expandDetails() {
+	fireEvent.click(screen.getByRole("button", { name: "Show run details" }));
+	expect(
+		screen.getByRole("button", { name: "Hide run details" }),
+	).toHaveAttribute("aria-expanded", "true");
+}
+
+function renderExpanded(view: ReactElement) {
+	const result = render(view);
+	expandDetails();
+	return result;
 }
 
 function stageRow(stage: StageName): HTMLElement {
@@ -152,7 +166,7 @@ describe("RunSurface", () => {
 	});
 
 	it("renders the six projected stages, failure counts and waiting stages", () => {
-		render(<RunSurface view={inProgress.view} />);
+		renderExpanded(<RunSurface view={inProgress.view} />);
 
 		expect(screen.getByText("Scanning sources")).toBeInTheDocument();
 		expect(screen.getByText("Triaging")).toBeInTheDocument();
@@ -175,7 +189,7 @@ describe("RunSurface", () => {
 		const stages = makeStages({
 			Triaging: { status: "Active", total: 69, completed: 61 },
 		});
-		render(<RunSurface view={viewWithStages(stages)} />);
+		renderExpanded(<RunSurface view={viewWithStages(stages)} />);
 		const meter = screen.getByRole("meter", { name: "Triaging work to do" });
 		expect(
 			within(stageRow("Triaging")).getByText("8 of 69 to do"),
@@ -200,7 +214,9 @@ describe("RunSurface", () => {
 			DownloadingArticles: { status: "Done", total: 69, completed: 69 },
 			Summarizing: { status: "Active", total: 22, completed: 15, failed: 3 },
 		});
-		const { rerender } = render(<RunSurface view={viewWithStages(stages)} />);
+		const { rerender } = renderExpanded(
+			<RunSurface view={viewWithStages(stages)} />,
+		);
 		const meter = screen.getByRole("meter", { name: "Summarizing work to do" });
 		expect(
 			within(stageRow("Summarizing")).getByText("4 of 22 to do · 3 failed"),
@@ -255,7 +271,7 @@ describe("RunSurface", () => {
 			ScanningSources: { status: "Active", total: 12, completed: 8 },
 			DownloadingArticles: { total: 69 },
 		});
-		render(<RunSurface view={viewWithStages(stages)} />);
+		renderExpanded(<RunSurface view={viewWithStages(stages)} />);
 		const meter = screen.getByRole("meter", {
 			name: "Scanning sources work to do",
 		});
@@ -271,7 +287,9 @@ describe("RunSurface", () => {
 		const stages = makeStages({
 			LoadingArticles: { total: 69, completed: 69 },
 		});
-		const { rerender } = render(<RunSurface view={viewWithStages(stages)} />);
+		const { rerender } = renderExpanded(
+			<RunSurface view={viewWithStages(stages)} />,
+		);
 		const assertLoading = (count: string) => {
 			const row = stageRow("LoadingArticles");
 			expect(within(row).getByText(count)).toBeVisible();
@@ -299,7 +317,7 @@ describe("RunSurface", () => {
 	});
 
 	it("shows zero-total Pending rows as muted with empty meters and 0 to do", () => {
-		render(<RunSurface view={viewWithStages(makeStages())} />);
+		renderExpanded(<RunSurface view={viewWithStages(makeStages())} />);
 		const row = stageRow("Triaging");
 		expect(row).toHaveClass("stage-row--muted");
 		expect(within(row).getByText("0 to do")).toBeVisible();
@@ -311,7 +329,7 @@ describe("RunSurface", () => {
 
 	it("shows the owner's run end state using only new work", () => {
 		const stages = ownerRunEndStages();
-		render(<RunSurface view={viewWithStages(stages)} />);
+		renderExpanded(<RunSurface view={viewWithStages(stages)} />);
 		const expectedRows = [
 			["ScanningSources", "0 of 28 to do · 1 failed", 0],
 			["DownloadingArticles", "0 of 25 to do · 2 failed", 0],
@@ -360,7 +378,7 @@ describe("RunSurface", () => {
 				completed: 118,
 			},
 		});
-		render(<RunSurface view={viewWithStages(stages)} />);
+		renderExpanded(<RunSurface view={viewWithStages(stages)} />);
 		const row = stageRow("Summarizing");
 		const meter = within(row).getByRole("meter");
 		expect(row.querySelector(".stage-count")).toHaveTextContent(/^0 to do$/);
@@ -373,7 +391,7 @@ describe("RunSurface", () => {
 	it("counts only new work while Stopping", () => {
 		const stages = ownerRunEndStages();
 		const view = viewWithStages(stages);
-		render(
+		renderExpanded(
 			<RunSurface
 				view={{ ...view, run_state: { Stopping: { in_flight: 1 } } }}
 			/>,
@@ -412,7 +430,9 @@ describe("RunSurface", () => {
 		expect(estimateActiveStageEtas(stages, "2023-11-14T22:14:00Z")).toEqual([
 			{ stage: "Triaging", seconds: 50 },
 		]);
-		const { rerender } = render(<RunSurface view={viewWithStages(stages)} />);
+		const { rerender } = renderExpanded(
+			<RunSurface view={viewWithStages(stages)} />,
+		);
 		expect(
 			stageRow("Triaging").querySelector(".stage-status"),
 		).toHaveTextContent("about 50 sec left");
@@ -444,7 +464,9 @@ describe("RunSurface", () => {
 			done: 0,
 		});
 
-		const { rerender } = render(<RunSurface view={viewWithStages(stages)} />);
+		const { rerender } = renderExpanded(
+			<RunSurface view={viewWithStages(stages)} />,
+		);
 		expect(
 			stageRow("Triaging").querySelector(".stage-count"),
 		).toHaveTextContent("4 of 4 to do");
@@ -466,7 +488,7 @@ describe("RunSurface", () => {
 	});
 
 	it("renders exact new-work counts from the reused-results fixture", () => {
-		render(<RunSurface view={reusedResults.view} />);
+		renderExpanded(<RunSurface view={reusedResults.view} />);
 		const expectedRows = [
 			["ScanningSources", "0 to do", 0],
 			["DownloadingArticles", "0 to do", 0],
@@ -619,7 +641,7 @@ describe("RunSurface", () => {
 						: null,
 				}),
 			);
-		const { rerender, unmount } = render(
+		const { rerender, unmount } = renderExpanded(
 			<RunSurface view={viewWithStages(pressed)} />,
 		);
 		let ownerEndOutput: ReturnType<typeof captureRows> = [];
@@ -646,7 +668,7 @@ describe("RunSurface", () => {
 			}
 		}
 		unmount();
-		render(<RunSurface view={viewWithStages(ownerEnd)} />);
+		renderExpanded(<RunSurface view={viewWithStages(ownerEnd)} />);
 		assertRows(steps[2].rows);
 		expect(captureRows()).toEqual(ownerEndOutput);
 	});
@@ -655,7 +677,7 @@ describe("RunSurface", () => {
 		const stages = makeStages({
 			Triaging: { total: 4, completed: 3, failed: 2 },
 		});
-		render(<RunSurface view={viewWithStages(stages)} />);
+		renderExpanded(<RunSurface view={viewWithStages(stages)} />);
 		const meter = screen.getByRole("meter", { name: "Triaging work to do" });
 		expect(meter).toHaveAttribute("aria-valuenow", "0");
 		expect(meter).toHaveAttribute("aria-valuetext", "0 of 4 to do · 2 failed");
@@ -668,7 +690,7 @@ describe("RunSurface", () => {
 	});
 
 	it("empties all Stopping meters and shows done counts as in-flight work drains", () => {
-		const { rerender } = render(<RunSurface view={stopping.view} />);
+		const { rerender } = renderExpanded(<RunSurface view={stopping.view} />);
 		const assertStopping = (stages: StageProgress[]) => {
 			expect(screen.getAllByRole("meter")).toHaveLength(5);
 			for (const meter of screen.getAllByRole("meter")) {
@@ -710,7 +732,7 @@ describe("RunSurface", () => {
 	it("uses plain stage statuses only while Stopping and preserves Active ETAs and fallbacks", () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date("2023-11-14T22:13:50Z"));
-		const { rerender } = render(<RunSurface view={stopping.view} />);
+		const { rerender } = renderExpanded(<RunSurface view={stopping.view} />);
 		expect(
 			stageRow("Triaging").querySelector(".stage-status"),
 		).toHaveTextContent(/^In progress$/);
@@ -789,7 +811,7 @@ describe("RunSurface", () => {
 			ScoringSignals: { status: "Failed", total: 1 },
 		});
 		const view = viewWithStages(stages);
-		const { rerender } = render(<RunSurface view={view} />);
+		const { rerender } = renderExpanded(<RunSurface view={view} />);
 		for (const run_state of [
 			"Active",
 			{ Stopping: { in_flight: 1 } },
@@ -939,7 +961,7 @@ describe("RunSurface", () => {
 				}
 			});
 		};
-		const { rerender, unmount } = render(
+		const { rerender, unmount } = renderExpanded(
 			<RunSurface view={viewWithStages(pressed)} />,
 		);
 		for (const step of steps) {
@@ -973,7 +995,7 @@ describe("RunSurface", () => {
 			}
 		}
 		unmount();
-		render(<RunSurface view={viewWithStages(regrowth)} />);
+		renderExpanded(<RunSurface view={viewWithStages(regrowth)} />);
 		assertRows(regrowth, regrowthRows);
 	});
 
@@ -993,6 +1015,9 @@ describe("RunSurface", () => {
 		expect(
 			screen.queryByRole("list", { name: "Pipeline stages" }),
 		).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: "Show run details" }),
+		).not.toBeInTheDocument();
 	});
 
 	it("replaces the activity feed on successive snapshots without accumulating history", () => {
@@ -1010,7 +1035,7 @@ describe("RunSurface", () => {
 				activity: firstActivity,
 			},
 		};
-		const { rerender } = render(<RunSurface view={firstView} />);
+		const { rerender } = renderExpanded(<RunSurface view={firstView} />);
 		expect(document.querySelectorAll(".activity-entry")).toHaveLength(2);
 
 		const secondActivity = [
@@ -1101,7 +1126,7 @@ describe("RunSurface", () => {
 	});
 
 	it("renders concurrent active rows and withholds ETAs while totals are open", () => {
-		render(<RunSurface view={overlapping.view} />);
+		renderExpanded(<RunSurface view={overlapping.view} />);
 		const openTotalRows = overlapping.view.run_progress.stages.filter(
 			(stage) => stage.status === "Active" && !stage.total_is_final,
 		);
@@ -1128,7 +1153,7 @@ describe("RunSurface", () => {
 	});
 
 	it("renders the reducer reprocess notice as a muted status", () => {
-		render(<RunSurface view={reprocess.view} />);
+		renderExpanded(<RunSurface view={reprocess.view} />);
 		expect(
 			document.querySelector('.stage-row[data-stage="ScanningSources"]'),
 		).toHaveClass("stage-row--muted");
@@ -1191,7 +1216,7 @@ describe("RunSurface", () => {
 			...inProgress.view,
 			run_progress: { ...inProgress.view.run_progress, stages },
 		};
-		render(<RunSurface view={view} />);
+		renderExpanded(<RunSurface view={view} />);
 		expect(
 			document.querySelector('[data-stage="Triaging"] .stage-status'),
 		).toHaveTextContent("about 10 sec left");
@@ -1218,7 +1243,7 @@ describe("RunSurface", () => {
 			run_progress: { ...inProgress.view.run_progress, stages },
 		};
 
-		render(<RunSurface view={view} />);
+		renderExpanded(<RunSurface view={view} />);
 
 		expect(
 			document.querySelector('[data-stage="Triaging"] .stage-status'),
@@ -1238,8 +1263,251 @@ describe("RunSurface", () => {
 			run_progress: { ...inProgress.view.run_progress, stages },
 		};
 
-		render(<RunSurface view={view} />);
+		renderExpanded(<RunSurface view={view} />);
 
 		expect(screen.getByText("Finishing…")).toBeInTheDocument();
+	});
+	it("starts compact by default during a run with six decorative bars", () => {
+		render(<RunSurface view={inProgress.view} />);
+		const toggle = screen.getByRole("button", { name: "Show run details" });
+		expect(toggle).toHaveAttribute("aria-expanded", "false");
+		expect(toggle.textContent).toBe("");
+		expect(toggle).not.toHaveAttribute("title");
+		for (const text of ["Scanning sources", "Done", "Estimating…", "Running"])
+			expect(screen.queryByText(text)).not.toBeInTheDocument();
+		expect(
+			document.querySelectorAll(".stage-count, .stage-status"),
+		).toHaveLength(0);
+		expect(screen.queryAllByRole("meter")).toHaveLength(0);
+		expect(
+			screen.queryByRole("list", { name: "Pipeline stages" }),
+		).not.toBeInTheDocument();
+		expect(document.querySelector(".activity-feed")).toBeNull();
+		const glance = toggle.querySelector(".run-glance");
+		expect(glance).toHaveAttribute("aria-hidden", "true");
+		const bars = Array.from(toggle.querySelectorAll("span.run-glance-bar"));
+		expect(bars.map((bar) => bar.getAttribute("data-glance-stage"))).toEqual([
+			"ScanningSources",
+			"DownloadingArticles",
+			"LoadingArticles",
+			"Triaging",
+			"Summarizing",
+			"ScoringSignals",
+		]);
+		for (const bar of bars) {
+			expect(bar.parentElement).toBe(glance);
+			expect(bar.textContent).toBe("");
+			expect(bar).not.toHaveAttribute("role");
+			expect(bar).not.toHaveAttribute("title");
+			expect(bar).not.toHaveAttribute("data-stage");
+			expect(bar).not.toHaveClass("stage-row");
+			expect(bar).not.toHaveClass("stage-bar");
+			expect(bar).not.toHaveClass("stage-bar-slot");
+		}
+		expect(toggle.querySelector(".run-glance-chevron")).toHaveAttribute(
+			"aria-hidden",
+			"true",
+		);
+		const details = document.getElementById(
+			toggle.getAttribute("aria-controls") as string,
+		);
+		expect(details).toHaveClass("run-details");
+		expect(details).toHaveAttribute("hidden");
+		expect(details).toBeEmptyDOMElement();
+	});
+
+	it("expands and collapses the stage table and activity feed with one disclosure", () => {
+		render(<RunSurface view={inProgress.view} />);
+		const toggle = screen.getByRole("button", { name: "Show run details" });
+		expect(toggle.tagName).toBe("BUTTON");
+		expect(toggle).toHaveAttribute("type", "button");
+		toggle.focus();
+		expect(toggle).toHaveFocus();
+		const details = document.getElementById(
+			toggle.getAttribute("aria-controls") as string,
+		);
+		expandDetails();
+		expect(toggle).toHaveAccessibleName("Hide run details");
+		expect(toggle.textContent).toBe("");
+		expect(screen.queryByText("Running")).not.toBeInTheDocument();
+		expect(details).not.toHaveAttribute("hidden");
+		expect(document.querySelectorAll(".stage-row")).toHaveLength(6);
+		expect(screen.getAllByRole("meter")).toHaveLength(5);
+		expect(document.querySelectorAll(".activity-entry")).toHaveLength(
+			inProgress.view.run_progress.activity.length,
+		);
+		expect(document.querySelector(".activity-feed")).toBeInTheDocument();
+		fireEvent.click(screen.getByRole("button", { name: "Hide run details" }));
+		expect(toggle).toHaveAccessibleName("Show run details");
+		expect(toggle).toHaveAttribute("aria-expanded", "false");
+		expect(
+			document.getElementById(toggle.getAttribute("aria-controls") as string),
+		).toBe(details);
+		expect(details).toHaveAttribute("hidden");
+		expect(details).toBeEmptyDOMElement();
+		expect(
+			screen.queryByRole("list", { name: "Pipeline stages" }),
+		).not.toBeInTheDocument();
+		expect(screen.queryAllByRole("meter")).toHaveLength(0);
+		expect(
+			document.querySelectorAll(".stage-row, .activity-feed"),
+		).toHaveLength(0);
+	});
+
+	it("uses the shared remaining-work percentages for compact fills and leaves Loading empty", () => {
+		const stages = ownerRunEndStages();
+		render(<RunSurface view={viewWithStages(stages)} />);
+		const bars = Array.from(
+			document.querySelectorAll<HTMLElement>(".run-glance-bar"),
+		);
+		const expected = [0, 0, null, 19.4, 16.1, 0];
+		const rows = presentStageRows(stages, false);
+		bars.forEach((bar, index) => {
+			const percent = expected[index];
+			if (percent === null) {
+				expect(bar.style.getPropertyValue("--stage-progress")).toBe("");
+			} else {
+				expect(meterPercent(bar)).toBeCloseTo(percent, 1);
+				expect(meterPercent(bar)).toBe(rows[index].bar?.percent);
+			}
+		});
+	});
+
+	it("keeps the compact disclosure while Stopping with every fill empty", () => {
+		render(<RunSurface view={stopping.view} />);
+		expect(
+			screen.getByRole("button", { name: "Show run details" }),
+		).toHaveAttribute("aria-expanded", "false");
+		expect(screen.getByRole("button", { name: "Stopping…" })).toBeDisabled();
+		const bars = document.querySelectorAll<HTMLElement>(".run-glance-bar");
+		expect(bars).toHaveLength(6);
+		for (const bar of bars)
+			expect(bar.style.getPropertyValue("--stage-progress")).toBe(
+				bar.dataset.glanceStage === "LoadingArticles" ? "" : "0%",
+			);
+	});
+
+	it("keeps the disclosure choice between runs and resets it on a fresh mount", () => {
+		const { rerender, unmount } = renderExpanded(
+			<RunSurface view={inProgress.view} />,
+		);
+		rerender(<RunSurface view={finished.view} />);
+		expect(
+			screen.queryByRole("button", { name: /run details/ }),
+		).not.toBeInTheDocument();
+		rerender(<RunSurface view={inProgress.view} />);
+		expect(
+			screen.getByRole("button", { name: "Hide run details" }),
+		).toHaveAttribute("aria-expanded", "true");
+		expect(
+			screen.getByRole("list", { name: "Pipeline stages" }),
+		).toBeInTheDocument();
+		unmount();
+		render(<RunSurface view={inProgress.view} />);
+		expect(
+			screen.getByRole("button", { name: "Show run details" }),
+		).toHaveAttribute("aria-expanded", "false");
+		expect(
+			screen.queryByRole("list", { name: "Pipeline stages" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("starts expanded with initialDetailsExpanded and still allows collapse", () => {
+		render(<RunSurface view={inProgress.view} initialDetailsExpanded />);
+		const toggle = screen.getByRole("button", { name: "Hide run details" });
+		expect(toggle).toHaveAttribute("aria-expanded", "true");
+		expect(
+			screen.getByRole("list", { name: "Pipeline stages" }),
+		).toBeInTheDocument();
+		fireEvent.click(toggle);
+		expect(toggle).toHaveAccessibleName("Show run details");
+		expect(toggle).toHaveAttribute("aria-expanded", "false");
+		expect(
+			screen.queryByRole("list", { name: "Pipeline stages" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("keeps reprocess and completion notices visible with compact details", () => {
+		const { rerender } = render(<RunSurface view={reprocess.view} />);
+		expect(screen.getByRole("status")).toHaveTextContent(
+			"This run is reprocessing 151 unfinished articles (up to 453 model calls).",
+		);
+		expect(
+			screen.getByRole("button", { name: "Show run details" }),
+		).toHaveAttribute("aria-expanded", "false");
+		expect(document.querySelector(".run-details")).toBeEmptyDOMElement();
+		rerender(
+			<RunSurface
+				view={{
+					...inProgress.view,
+					run_completion_notice: finished.view.run_completion_notice,
+				}}
+			/>,
+		);
+		expect(screen.getByRole("status")).toHaveTextContent(
+			"Run finished - 1 article scored",
+		);
+		expect(screen.getByRole("button", { name: "Dismiss" })).toBeVisible();
+		expect(
+			screen.getByRole("button", { name: "Show run details" }),
+		).toHaveAttribute("aria-expanded", "false");
+		expect(document.querySelector(".run-details")).toBeEmptyDOMElement();
+	});
+
+	it("shows current activity and refreshed ETA after a collapsed stretch", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2023-11-14T22:13:30Z"));
+		const stages = makeStages({
+			Triaging: {
+				status: "Active",
+				total: 4,
+				completed: 2,
+				total_is_final: true,
+				started_at_utc: "2023-11-14T22:13:20Z",
+			},
+		});
+		const view = viewWithStages(stages);
+		const firstActivity = [1, 2].map((seq) => ({
+			seq,
+			url: `https://fixture.invalid/old/${seq}`,
+			title: null,
+			stage: "Triaging" as const,
+			outcome: "Succeeded" as const,
+		}));
+		const { rerender } = render(
+			<RunSurface
+				view={{
+					...view,
+					run_progress: { ...view.run_progress, activity: firstActivity },
+				}}
+			/>,
+		);
+		expandDetails();
+		expect(
+			stageRow("Triaging").querySelector(".stage-status"),
+		).toHaveTextContent("about 10 sec left");
+		expect(document.querySelectorAll(".activity-entry")).toHaveLength(2);
+		fireEvent.click(screen.getByRole("button", { name: "Hide run details" }));
+		const nextActivity = [
+			{ ...firstActivity[0], seq: 3, url: "https://fixture.invalid/current/3" },
+		];
+		rerender(
+			<RunSurface
+				view={{
+					...view,
+					run_progress: { ...view.run_progress, activity: nextActivity },
+				}}
+			/>,
+		);
+		act(() => vi.advanceTimersByTime(5_500));
+		expect(document.querySelector(".run-details")).toBeEmptyDOMElement();
+		expandDetails();
+		expect(
+			stageRow("Triaging").querySelector(".stage-status"),
+		).toHaveTextContent("about 16 sec left");
+		expect(document.querySelectorAll(".activity-entry")).toHaveLength(1);
+		expect(screen.getByText(nextActivity[0].url)).toBeVisible();
+		for (const entry of firstActivity)
+			expect(screen.queryByText(entry.url)).not.toBeInTheDocument();
 	});
 });

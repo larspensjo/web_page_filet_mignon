@@ -445,6 +445,50 @@ Verification:
   - the block reads as six bars and the chevron flips;
   - Tab reaches the toggle and Enter or Space toggles it.
 
+#### Phase 1 status (2026-10-18): implemented, verified, user-tested
+
+- **Implemented** as specified above. Two small deviations, both deliberate:
+  - toggle hover uses Surface Raised, not Surface Overlay, because Surface Overlay is already
+    the compact track colour;
+  - `useEtaNow` uses `useLayoutEffect` instead of `useEffect`, so expanding after a collapsed
+    stretch shows the refreshed ETA on the first painted frame (new test 8).
+- **Automated checks (2026-10-18):** `npm run check` (tsc, biome, vitest: 8 files,
+  149 tests passed), `npm run build` and `npm run fmt` (no changes) all pass.
+- **Baseline audit:** every baseline `it(` title remains. `RunSurface.test.tsx` went from 32
+  to 40 (8 new tests), and `App.test.tsx` from 51 to 53 (the two probe and non-probe tests).
+  The new `probeMode.test.ts` has 3 tests.
+- **IPC probe:** no probe numbers (baseline or post-change) are on record from the session
+  that implemented this phase. The committing session did not run it. Treat the probe
+  comparison as outstanding. Phase 2 does not need it, but run it once before close-out if a
+  display and the GUI lock are available.
+- **User test (Lars, 2026-10-18):** he ran the desktop app with the compact Run progress strip
+  and judged that it "looks really good". This is a by-eye approval of Phase 1. The record
+  does not say whether he also checked the narrow width or keyboard toggling.
+
+#### Handoff to Phase 2 (for a fresh session)
+
+- Start from `main` after the Phase 1 commit. The tree should be clean apart from your own
+  work.
+- **Where things are in `frontend/src/components/RunSurface.tsx`:**
+  - The compact bars are rendered in `RunSurface` inside the `.run-glance-toggle` button, one
+    `span.run-glance-bar[data-glance-stage]` per row from the shared `rows`.
+  - The muted predicate is still inline in `StageList`
+    (`stage.status === "Pending" && stage.total === 0`), and so is the warning predicate on
+    the row class. Phase 2 lifts both into the exported `stageTrackState(stage)`. Keep the row
+    classes' exact meaning.
+  - Loading currently renders an empty bar with no `--stage-progress`. Phase 2 makes it a
+    track-only bar that follows the track-state rule.
+- **CSS** lives in `frontend/src/styles/workspace.css` under `.run-glance*`. Today the track
+  is `--surface-overlay` and the fill is `--accent-primary`. Put the per-state tint
+  percentages in one block of local custom properties on `.run-glance`, and do not add
+  global tokens (`tokens.test.ts` pins them).
+- **Tests:** helpers `expandDetails()` and `renderExpanded()` already exist in
+  `RunSurface.test.tsx`. Pin the new baseline (40 / 53 / 149 total) before changing
+  anything, and add the Phase 2 tests listed below.
+- **Gate:** the standard frontend gate plus the baseline audit. Then ask Lars for the by-eye
+  tint verdict listed under Phase 2 verification. Leave changes uncommitted until he or the
+  orchestrator authorises a commit.
+
 ### Phase 2 - Track state on compact bars
 
 Goal: each compact bar's track shows the stage's state, so failures and activity are visible

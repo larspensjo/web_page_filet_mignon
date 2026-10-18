@@ -56,6 +56,7 @@ const reviewFixtures = [
 	["export unavailable during run", exportUnavailable],
 	["reprocess notice", reprocessNotice],
 ] as const;
+const originalUrl = window.location.href;
 let snapshot: SnapshotEnvelope | null = corpus;
 let bodyResponses = new Map<string, BodyResponse | null>();
 
@@ -1054,6 +1055,7 @@ describe("job list", () => {
 describe("modals and chrome", () => {
 	afterEach(() => {
 		cleanup();
+		window.history.replaceState(null, "", originalUrl);
 		vi.useRealTimers();
 	});
 	beforeEach(() => {
@@ -1291,5 +1293,27 @@ describe("modals and chrome", () => {
 		expect(
 			screen.queryByRole("button", { name: /from archive/ }),
 		).not.toBeInTheDocument();
+	});
+	it("starts the running panel compact outside probe mode", async () => {
+		snapshot = overlappingActiveStages as unknown as SnapshotEnvelope;
+		await renderLoaded();
+		expect(
+			await screen.findByRole("button", { name: "Show run details" }),
+		).toHaveAttribute("aria-expanded", "false");
+		expect(
+			screen.queryByRole("list", { name: "Pipeline stages" }),
+		).not.toBeInTheDocument();
+	});
+
+	it("starts the running panel expanded on the probe page", async () => {
+		window.history.replaceState(null, "", "/?probe=1");
+		snapshot = overlappingActiveStages as unknown as SnapshotEnvelope;
+		await renderLoaded();
+		expect(
+			await screen.findByRole("button", { name: "Hide run details" }),
+		).toHaveAttribute("aria-expanded", "true");
+		expect(
+			screen.getByRole("list", { name: "Pipeline stages" }),
+		).toBeInTheDocument();
 	});
 });
