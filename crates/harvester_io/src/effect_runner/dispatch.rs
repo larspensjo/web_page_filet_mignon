@@ -65,6 +65,9 @@ impl EffectRunner {
             Effect::StartSession => {
                 self.engine.resume();
             }
+            Effect::ResetDownloadQuota => {
+                self.engine.reset_run_quota();
+            }
             Effect::StopFinish { policy } => {
                 let immediate = matches!(policy, StopPolicy::Immediate);
                 self.engine.stop(immediate);

@@ -255,9 +255,10 @@ fn missing_api_key_blocks_triage_and_briefing_actions() {
             scope: crate::PipelineRunScope::Resume,
         },
     );
-    assert!(
-        triage_effects.is_empty(),
-        "blocked triage must dispatch nothing"
+    assert_eq!(
+        triage_effects,
+        vec![Effect::ResetDownloadQuota],
+        "blocked triage must dispatch nothing beyond the run's quota reset"
     );
     assert_eq!(
         state.pre_triage().resolved_included_urls(),
@@ -270,9 +271,10 @@ fn missing_api_key_blocks_triage_and_briefing_actions() {
             scope: crate::PipelineRunScope::Resume,
         },
     );
-    assert!(
-        summary_effects.is_empty(),
-        "blocked summary preparation must dispatch nothing"
+    assert_eq!(
+        summary_effects,
+        vec![Effect::ResetDownloadQuota],
+        "blocked summary preparation must dispatch nothing beyond the run's quota reset"
     );
 }
 

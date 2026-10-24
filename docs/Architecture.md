@@ -286,6 +286,9 @@ their original request until it settles. A same-digest admission is refused.
 Successful summary sessions retain their cache
 identity so scoring can validate their provenance.
 
+The download engine caps each pipeline run at 500 started URLs. Starting a new run
+emits `ResetDownloadQuota`, so the cap never accumulates across runs in a long-lived app.
+
 The 1,000-call session quota halts article-model dispatch for the process lifetime
 and shows a restart warning on later run starts. Provider out-of-credits and three
 consecutive provider requests that exhaust their rate-limit retries halt the current run. A recovered

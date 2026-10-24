@@ -133,8 +133,10 @@ pub(super) fn handle_pipeline_requested(
         }
         return Vec::new();
     }
+    let mut effects = Vec::new();
     if !state.run_progress_is_active() {
         begin_run_if_needed(state);
+        effects.push(Effect::ResetDownloadQuota);
     }
     let polling = state.is_poll_in_progress() || state.batch_observation().jobs_in_flight > 0;
     let scope = if scope == crate::PipelineRunScope::Resume && polling {
@@ -153,7 +155,6 @@ pub(super) fn handle_pipeline_requested(
         previous,
     ));
     state.set_pipeline_run_phase(PipelineRunPhase::Requested);
-    let mut effects = Vec::new();
     if scope == crate::PipelineRunScope::Full {
         let pending_urls = state.take_pending_intake_urls();
         if !pending_urls.is_empty() {

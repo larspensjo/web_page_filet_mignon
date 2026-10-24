@@ -70,7 +70,7 @@ pub use import::{
 pub use links::{ConversionOutput, ExtractedLink, LinkExtractingConverter, LinkKind};
 pub use path_policy::is_confined_to;
 pub use persist::{ensure_output_dir, AtomicFileWriter, PersistError};
-pub use quota::{QuotaTracker, SessionQuotas};
+pub use quota::{QuotaTracker, RunQuotas};
 pub use source_config::{
     BraveNewsSourceConfig, SourceConfig, SourceId, SourceIdError, SourceKind, SourceRegistry,
     SourceRegistryValidationError, SourceType,

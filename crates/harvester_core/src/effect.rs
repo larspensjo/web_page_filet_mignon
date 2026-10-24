@@ -74,6 +74,9 @@ pub enum Effect {
     },
     FlushResults,
     StartSession,
+    /// A new pipeline run began; the download engine starts its per-run URL
+    /// allowance from zero.
+    ResetDownloadQuota,
     StopFinish {
         policy: StopPolicy,
     },

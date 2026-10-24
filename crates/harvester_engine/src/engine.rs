@@ -16,7 +16,7 @@ use crate::decode::decode_html;
 use crate::fetch::{ChannelProgressSink, FetchSettings, Fetcher, ProgressSink, ReqwestFetcher};
 use crate::frontmatter::build_markdown_document;
 use crate::persist::{AtomicFileWriter, PersistError};
-use crate::quota::{QuotaTracker, SessionQuotas};
+use crate::quota::{QuotaTracker, RunQuotas};
 use crate::token::TokenCounter;
 use crate::url_policy::UrlPolicy;
 use crate::{
@@ -39,7 +39,7 @@ fn truncate_url_for_log(url: &str) -> String {
 pub struct EngineConfig {
     pub fetch_settings: FetchSettings,
     pub url_policy: UrlPolicy,
-    pub session_quotas: SessionQuotas,
+    pub run_quotas: RunQuotas,
     pub output_dir: PathBuf,
     pub extraction_pipeline: Arc<ExtractionPipeline>,
     pub token_counter: Arc<dyn TokenCounter>,
@@ -56,7 +56,7 @@ impl EngineConfig {
         Self {
             fetch_settings: FetchSettings::default(),
             url_policy: UrlPolicy::default(),
-            session_quotas: SessionQuotas::default(),
+            run_quotas: RunQuotas::default(),
             output_dir,
             extraction_pipeline: Arc::new(ExtractionPipeline::new(ExtractionPolicy::default())),
             token_counter: Arc::new(crate::WhitespaceTokenCounter),
@@ -79,6 +79,7 @@ enum EngineCommand {
         immediate: bool,
     },
     Resume,
+    ResetRunQuota,
 }
 
 #[derive(Clone)]
@@ -115,6 +116,12 @@ impl EngineHandle {
         let _ = self.cmd_tx.send(EngineCommand::Resume);
     }
 
+    /// Start a new run's download allowance. URLs enqueued after this call
+    /// count against the fresh run quota.
+    pub fn reset_run_quota(&self) {
+        let _ = self.cmd_tx.send(EngineCommand::ResetRunQuota);
+    }
+
     pub fn try_recv(&self) -> Option<EngineEvent> {
         if let Ok(rx) = self.event_rx.lock() {
             rx.try_recv().ok()
@@ -137,7 +144,7 @@ fn worker_loop(
     let mut queue: VecDeque<(JobId, String, Instant)> = VecDeque::new();
     let mut accept_new = true;
     let mut cancel_token = CancellationToken::new();
-    let mut quota_tracker = QuotaTracker::new(config.session_quotas.clone());
+    let mut quota_tracker = QuotaTracker::new(config.run_quotas.clone());
 
     loop {
         while let Ok(cmd) = cmd_rx.try_recv() {
@@ -188,6 +195,7 @@ fn worker_loop(
                     cancel_token = CancellationToken::new();
                     accept_new = true;
                 }
+                EngineCommand::ResetRunQuota => reset_run_quota(&mut quota_tracker),
             }
         }
 
@@ -210,7 +218,7 @@ fn worker_loop(
             let event_tx = event_tx.clone();
             let config = config.clone();
             let child_token = cancel_token.child_token();
-            let job_result = runtime.block_on(async move {
+            let _ = runtime.block_on(async move {
                 run_job(
                     job_id,
                     url,
@@ -222,12 +230,6 @@ fn worker_loop(
                 )
                 .await
             });
-            match job_result {
-                Ok((bytes_written, tokens)) => {
-                    quota_tracker.record_job(bytes_written, tokens as u64)
-                }
-                Err(_) => quota_tracker.record_job(0, 0),
-            };
         } else {
             // Block until next command arrives.
             match cmd_rx.recv() {
@@ -279,12 +281,21 @@ fn worker_loop(
                             cancel_token = CancellationToken::new();
                             accept_new = true;
                         }
+                        EngineCommand::ResetRunQuota => reset_run_quota(&mut quota_tracker),
                     }
                 }
                 Err(_) => break,
             }
         }
     }
+}
+
+fn reset_run_quota(quota_tracker: &mut QuotaTracker) {
+    engine_info!(
+        "[download-quota] run quota reset previous_urls={}",
+        quota_tracker.urls_started()
+    );
+    quota_tracker.reset();
 }
 
 async fn run_job(

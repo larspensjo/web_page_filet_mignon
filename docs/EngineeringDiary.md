@@ -2893,3 +2893,11 @@ compact glance and its tints by eye.
 Refs: frontend/src/components/RunSurface.tsx, frontend/src/components/RunSurface.test.tsx,
 frontend/src/ipc/probeMode.ts, frontend/src/App.test.tsx, frontend/src/styles/workspace.css;
 commits 59f9780, ad8c1bc
+
+## 2026-10-24 - Reset the download URL cap at each run start
+Type: Bug Fix
+Context: A long-running desktop session failed 52 downloads with "quota exceeded: max urls per session (500) reached". The engine worker's URL counter lived as long as the process, so it summed all runs since launch.
+Change: Renamed `SessionQuotas` to `RunQuotas` (`max_urls_per_run`), added `QuotaTracker::reset` and an `EngineCommand::ResetRunQuota` reached through `EngineHandle::reset_run_quota`. `handle_pipeline_requested` emits `Effect::ResetDownloadQuota` ahead of the run's other effects when it begins a new run; the effect runner forwards it to the engine. The engine logs `[download-quota] run quota reset previous_urls=N`. Removed the never-enforced byte and token limits.
+Lessons Learned: "Session" in a long-lived desktop host means process lifetime unless something resets it; a quota needs an explicit boundary that matches its purpose. Here the boundary was already in the reducer (run begin), so the reset goes through an effect, not engine-side guessing such as idle detection.
+Prevention: `reset_starts_a_new_run_allowance` (tracker), `run_quota_reset_admits_urls_after_exhaustion` (engine end to end), and `unarmed_full_run_settles_and_next_full_polls_again` now pins one reset per new run and none for a request during an active run.
+Refs: crates/harvester_engine/src/quota.rs, crates/harvester_engine/src/engine.rs, crates/harvester_engine/tests/quota.rs, crates/harvester_engine/tests/job_timing.rs, crates/harvester_core/src/update/pipeline_run.rs, crates/harvester_core/src/update/pipeline_run/tests.rs

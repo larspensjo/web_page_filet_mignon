@@ -450,3 +450,9 @@ accumulated in the reducer"; 2026-09-08 "Desktop activity feed holds 50 entries"
 2026-09-09 "Desktop runs never navigate the user"; 2026-10-03 "Desktop stage bars show
 remaining work this run actually does"; 2026-10-04 "The command-line host is kept with a
 compact progress block"
+
+## 2026-10-24 - The download URL cap applies per pipeline run
+Decision: The download engine's 500-URL cap counts URLs started in the current pipeline run, not since the process started. The reducer emits `ResetDownloadQuota` when a run request begins a new run, before any of that run's downloads are enqueued; requests that join an active run do not reset it. Downloads started outside a run count toward the most recent run's allowance. The byte and token "session" limits, which were tracked but never enforced, are removed.
+Context: The desktop app stays open for days. The cap reached 500 across several runs and failed every later download with "max urls per session (500) reached" until restart. The cap exists to stop a runaway run, not to limit daily volume.
+Consequences: A single run still stops downloading after 500 URLs. The LLM session quotas (calls, tokens, cost) are unchanged and still last for the process lifetime; changing them is a separate decision.
+Refs: crates/harvester_engine/src/quota.rs, crates/harvester_engine/src/engine.rs, crates/harvester_core/src/update/pipeline_run.rs, crates/harvester_io/src/effect_runner/dispatch.rs; Architecture.md "The 1,000-call session quota"

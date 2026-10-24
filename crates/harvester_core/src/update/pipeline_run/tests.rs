@@ -112,8 +112,21 @@ fn unarmed_full_run_settles_and_next_full_polls_again() {
             scope: crate::PipelineRunScope::Full,
         },
     );
-    assert_eq!(effects, vec![Effect::PollAllSources]);
+    assert_eq!(
+        effects,
+        vec![Effect::ResetDownloadQuota, Effect::PollAllSources]
+    );
     assert!(!state.pipeline_run_armed());
+    let (state, effects) = crate::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
+    assert!(
+        effects.is_empty(),
+        "a request during an active run must not reset the download quota"
+    );
     let (mut state, _) = crate::update(state, Msg::AllSourcesPollEnded);
     for _ in 0..20 {
         if state.run_progress().unwrap().terminal {
@@ -129,7 +142,10 @@ fn unarmed_full_run_settles_and_next_full_polls_again() {
             scope: crate::PipelineRunScope::Full,
         },
     );
-    assert_eq!(effects, vec![Effect::PollAllSources]);
+    assert_eq!(
+        effects,
+        vec![Effect::ResetDownloadQuota, Effect::PollAllSources]
+    );
     assert!(!state.run_progress().unwrap().terminal);
 }
 
@@ -902,7 +918,10 @@ fn poll_only_run_becomes_terminal_when_source_poll_settles() {
             scope: crate::PipelineRunScope::Full,
         },
     );
-    assert_eq!(effects, vec![Effect::PollAllSources]);
+    assert_eq!(
+        effects,
+        vec![Effect::ResetDownloadQuota, Effect::PollAllSources]
+    );
     let state = crate::update::test_support::update(state, Msg::PollStarted { total: 1 }).0;
     let state = crate::update::test_support::update(
         state,

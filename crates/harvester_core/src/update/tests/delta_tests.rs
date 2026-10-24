@@ -380,10 +380,13 @@ fn resume_run_loads_the_current_window_before_triage() {
     );
     assert!(matches!(
         effects.as_slice(),
-        [Effect::LoadProcessingConfiguration {
-            require_triage_context: true,
-            ..
-        }]
+        [
+            Effect::ResetDownloadQuota,
+            Effect::LoadProcessingConfiguration {
+                require_triage_context: true,
+                ..
+            }
+        ]
     ));
     assert!(state.pipeline_run_armed());
     let (state, _) = reduce(
@@ -478,10 +481,13 @@ fn resume_run_triages_and_summarizes_the_current_window() {
     );
     assert!(matches!(
         effects.as_slice(),
-        [Effect::LoadProcessingConfiguration {
-            require_triage_context: true,
-            ..
-        }]
+        [
+            Effect::ResetDownloadQuota,
+            Effect::LoadProcessingConfiguration {
+                require_triage_context: true,
+                ..
+            }
+        ]
     ));
     let (state, effects) = config(state, &effects, 1_000);
     let (request_id, ordered_urls) = effects

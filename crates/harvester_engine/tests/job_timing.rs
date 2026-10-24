@@ -62,7 +62,7 @@ async fn engine_reports_retry_attempts_and_fetch_wall_time_on_failure() {
 async fn quota_and_rejected_enqueue_completions_carry_unstarted_timings() {
     let output = tempfile::tempdir().unwrap();
     let mut config = EngineConfig::default_with_output(output.path().into());
-    config.session_quotas.max_urls_per_session = Some(0);
+    config.run_quotas.max_urls_per_run = Some(0);
     let engine = EngineHandle::new(config);
     engine.enqueue(1, "https://example.com/article");
     let (result, timing, _) = completed(&engine).await;
@@ -119,4 +119,24 @@ async fn queued_cancellation_keeps_queue_wait_and_does_not_make_a_request() {
     assert!(timing.queue_wait > Duration::ZERO);
     assert!(timing.total >= timing.queue_wait);
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn run_quota_reset_admits_urls_after_exhaustion() {
+    let output = tempfile::tempdir().unwrap();
+    let mut config = EngineConfig::default_with_output(output.path().into());
+    config.run_quotas.max_urls_per_run = Some(1);
+    let engine = EngineHandle::new(config);
+    // Private addresses fail the default URL policy without network access,
+    // but still count as started URLs.
+    engine.enqueue(1, "https://127.0.0.1/first");
+    let (result, _, _) = completed(&engine).await;
+    assert!(!matches!(result, Err(FailureKind::QuotaExceeded { .. })));
+    engine.enqueue(2, "https://127.0.0.1/second");
+    let (result, _, _) = completed(&engine).await;
+    assert!(matches!(result, Err(FailureKind::QuotaExceeded { .. })));
+    engine.reset_run_quota();
+    engine.enqueue(3, "https://127.0.0.1/third");
+    let (result, _, _) = completed(&engine).await;
+    assert!(!matches!(result, Err(FailureKind::QuotaExceeded { .. })));
 }
