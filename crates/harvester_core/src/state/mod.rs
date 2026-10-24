@@ -68,6 +68,8 @@ pub const MAX_EXTRACTED_LINKS: usize = 5_000;
 const CHECKPOINT_SAVING_STATUS_MESSAGE: &str = "Checkpoint saving...";
 pub(crate) const EXPORT_UNAVAILABLE_STATUS_MESSAGE: &str =
     "Export is unavailable while a run is in progress";
+pub(crate) const ARCHIVE_EXPORTING_STATUS_MESSAGE: &str = "Exporting archive...";
+pub(crate) const ARCHIVE_EXPORT_FAILED_STATUS_PREFIX: &str = "Archive export failed: ";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingBriefingCheckpointSave {
@@ -297,6 +299,8 @@ pub struct AppState {
     next_job_id: JobId,
     next_llm_request_id: u64,
     archive_request_id: u64,
+    /// Request id of the export the IO worker is writing; transient, never persisted.
+    archive_export_in_flight: Option<u64>,
     next_briefing_checkpoint_save_id: u64,
     pinned_archive_corpus: Option<crate::working_corpus::CurrentWorkingCorpus>,
     pinned_full_archive_selection: Option<crate::signal_candidate::FullArchiveSelection>,
@@ -422,6 +426,7 @@ impl Default for AppState {
             next_job_id: 1,
             next_llm_request_id: 1,
             archive_request_id: 0,
+            archive_export_in_flight: None,
             next_briefing_checkpoint_save_id: 1,
             pinned_archive_corpus: None,
             pinned_full_archive_selection: None,

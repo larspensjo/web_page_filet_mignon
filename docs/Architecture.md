@@ -77,9 +77,12 @@ Resume creates a fresh cancellation token before the new run's first enqueue, so
 another Full run can poll and download without restarting. Withdrawn and never-started identities remain
 unfinished under their current keys.
 
-Archive availability is owned by core and depends only on run state: it is disabled
-while a run is Active or Stopping, and enabled while Idle, including immediately
-after restart without a run, regardless of failed or unfinished articles.
+Archive availability is owned by core and depends on run state and on whether an
+export is already being written: it is disabled while a run is Active or Stopping or
+while an export is in flight, and enabled while Idle, including immediately
+after restart without a run, regardless of failed or unfinished articles. While an
+export is in flight the checkpoint status line reads "Exporting archive..."; a failed
+export leaves "Archive export failed: <reason>" there until the next archive open.
 Saved current-key results supply the dialog, selection, annotations and priority
 snapshot; a completed live triage session is not required. Both opening the archive
 dialog and submitting an export

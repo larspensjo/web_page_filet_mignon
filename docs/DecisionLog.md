@@ -456,3 +456,9 @@ Decision: The download engine's 500-URL cap counts URLs started in the current p
 Context: The desktop app stays open for days. The cap reached 500 across several runs and failed every later download with "max urls per session (500) reached" until restart. The cap exists to stop a runaway run, not to limit daily volume.
 Consequences: A single run still stops downloading after 500 URLs. The LLM session quotas (calls, tokens, cost) are unchanged and still last for the process lifetime; changing them is a separate decision.
 Refs: crates/harvester_engine/src/quota.rs, crates/harvester_engine/src/engine.rs, crates/harvester_core/src/update/pipeline_run.rs, crates/harvester_io/src/effect_runner/dispatch.rs; Architecture.md "The 1,000-call session quota"
+
+## 2026-10-24 - One archive export at a time, with visible progress
+Decision: Core tracks the export the IO worker is writing. Until its completion or failure message arrives, `archive_enabled` is false, opening the archive dialog is ignored, and the checkpoint status line reads "Exporting archive...". A failed export shows "Archive export failed: <reason>" in that line until the next archive open. The flag is transient and not persisted.
+Context: An export scans every article file in the output folder. On 2026-10-24 the first read of each of about 13,900 files cost about 6 ms, so the scan took about 90 seconds while the desktop showed nothing. The dialog closed on submit and the Archive button stayed enabled, so the user started a second, competing export and then closed the app.
+Consequences: This refines 2026-09-27 "Stop halts new work and drains; export waits only for the run": export also waits for an earlier export to finish. Unfinished or failed articles still never block it. No IPC field was added, so IPC 15 is unchanged.
+Refs: crates/harvester_core/src/update/archive.rs, crates/harvester_core/src/state/batch.rs, crates/harvester_core/src/state/view_builder.rs, docs/Architecture.md

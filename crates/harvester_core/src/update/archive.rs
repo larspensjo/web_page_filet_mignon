@@ -11,7 +11,15 @@ pub(super) fn handle_archive_clicked(state: &mut AppState) -> Vec<Effect> {
         );
         return Vec::new();
     }
+    if let Some(in_flight) = state.archive_export_in_flight() {
+        engine_warn!(
+            "[archive-gate] action=open reason=export-in-flight in_flight_request_id={}",
+            in_flight
+        );
+        return Vec::new();
+    }
     clear_export_unavailable_status(state);
+    clear_export_failed_status(state);
     let request_id = state.allocate_next_archive_request_id();
     let corpus = state.archive_corpus(); // triage-only; pre-triage excluded
     let corpus_count = corpus.count();
@@ -254,6 +262,7 @@ pub(super) fn handle_dialog_submitted(
         "[archive-dialog] export effect ready request_id={} basename={} urls={} summaries={} annotations={} priorities={} fold_groups={}",
         request_id, basename, ordered_urls.len(), summaries.len(), annotations.len(), priority_snapshot.len(), folds.len()
     );
+    state.begin_archive_export(request_id);
     let mut effects = vec![Effect::ArchiveRequested {
         request_id,
         basename,
@@ -286,6 +295,17 @@ pub(super) fn handle_dialog_submitted(
 fn clear_export_unavailable_status(state: &mut AppState) {
     if state.briefing_checkpoint_status_message()
         == Some(crate::state::EXPORT_UNAVAILABLE_STATUS_MESSAGE)
+    {
+        state.set_briefing_checkpoint_status_message(None);
+    }
+}
+
+fn clear_export_failed_status(state: &mut AppState) {
+    if state
+        .briefing_checkpoint_status_message()
+        .is_some_and(|message| {
+            message.starts_with(crate::state::ARCHIVE_EXPORT_FAILED_STATUS_PREFIX)
+        })
     {
         state.set_briefing_checkpoint_status_message(None);
     }
@@ -342,6 +362,7 @@ pub(super) fn handle_export_completed(
         "[archive-dialog] completion received request_id={} current_request_id={} requested_checkpoint={:?}",
         request_id, state.archive_request_id(), requested_checkpoint
     );
+    state.finish_archive_export(request_id);
     if request_id != state.archive_request_id() {
         return Vec::new();
     }
@@ -372,6 +393,12 @@ pub(super) fn handle_export_failed(
     basename: String,
     reason: String,
 ) -> Vec<Effect> {
+    if state.finish_archive_export(request_id) {
+        state.set_briefing_checkpoint_status_message(Some(format!(
+            "{}{reason}",
+            crate::state::ARCHIVE_EXPORT_FAILED_STATUS_PREFIX
+        )));
+    }
     if request_id != state.archive_request_id() {
         return Vec::new();
     }

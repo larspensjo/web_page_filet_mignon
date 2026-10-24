@@ -212,6 +212,24 @@ impl AppState {
         self.archive_request_id
     }
 
+    pub fn archive_export_in_flight(&self) -> Option<u64> {
+        self.archive_export_in_flight
+    }
+
+    pub(crate) fn begin_archive_export(&mut self, request_id: u64) {
+        self.archive_export_in_flight = Some(request_id);
+    }
+
+    /// Clears the in-flight export only when `request_id` is the one being written.
+    pub(crate) fn finish_archive_export(&mut self, request_id: u64) -> bool {
+        if self.archive_export_in_flight == Some(request_id) {
+            self.archive_export_in_flight = None;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Pin a corpus snapshot for the current archive dialog session.
     ///
     /// Called when the archive dialog is opened so that both the open and submit

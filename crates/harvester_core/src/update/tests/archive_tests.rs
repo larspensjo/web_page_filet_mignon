@@ -556,6 +556,69 @@ fn archive_submit_is_gated_until_a_stopping_run_finishes_draining() {
 }
 
 #[test]
+fn archive_export_in_flight_disables_archive_and_shows_progress_until_completion() {
+    init_logging();
+    let state = complete_triage_state_for_test(1);
+    let (state, open_effects) = update(state, Msg::ArchiveClicked);
+    let request_id = archive_request_id(&open_effects);
+    let (state, effects) = update(state, archive_submit_message(request_id));
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::ArchiveRequested { .. })));
+    assert!(!state.view().archive_enabled);
+    assert_eq!(
+        state.view().checkpoint_status_message.as_deref(),
+        Some("Exporting archive...")
+    );
+
+    // A second click while the worker is writing must not start a competing export.
+    let (state, effects) = update(state, Msg::ArchiveClicked);
+    assert!(effects.is_empty());
+    assert_eq!(state.archive_request_id(), request_id);
+
+    let (state, _) = update(
+        state,
+        Msg::ArchiveExportCompleted {
+            request_id,
+            path: "archive.md".into(),
+            doc_count: 1,
+            requested_checkpoint: None,
+        },
+    );
+    assert!(state.view().archive_enabled);
+    assert_eq!(state.view().checkpoint_status_message, None);
+    let (_, effects) = update(state, Msg::ArchiveClicked);
+    assert_eq!(archive_request_id(&effects), request_id + 1);
+}
+
+#[test]
+fn archive_export_failure_reenables_archive_and_reports_reason_until_next_open() {
+    init_logging();
+    let state = complete_triage_state_for_test(1);
+    let (state, open_effects) = update(state, Msg::ArchiveClicked);
+    let request_id = archive_request_id(&open_effects);
+    let (state, _) = update(state, archive_submit_message(request_id));
+    let (state, effects) = update(
+        state,
+        Msg::ArchiveExportFailed {
+            request_id,
+            basename: "archive.md".into(),
+            reason: "disk full".into(),
+        },
+    );
+    assert!(effects.is_empty());
+    assert!(state.view().archive_enabled);
+    assert_eq!(
+        state.view().checkpoint_status_message.as_deref(),
+        Some("Archive export failed: disk full")
+    );
+
+    let (state, effects) = update(state, Msg::ArchiveClicked);
+    assert_eq!(archive_request_id(&effects), request_id + 1);
+    assert_eq!(state.view().checkpoint_status_message, None);
+}
+
+#[test]
 fn archive_actions_preserve_pending_checkpoint_save_status() {
     init_logging();
     let (state, _) = update(

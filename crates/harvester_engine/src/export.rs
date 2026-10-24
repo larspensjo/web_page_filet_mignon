@@ -371,6 +371,8 @@ pub fn build_triage_archive(
 }
 
 /// Shared artifact exclusions and stable filename precedence for archive readers.
+/// Only names are checked here; `read_archive_window_doc` skips exports found by content,
+/// so each article is read once per scan.
 pub(crate) fn ordered_archive_window_paths(
     output_dir: &Path,
     output_filename: &str,
@@ -394,7 +396,7 @@ fn exclude_export_artifacts(entries: &mut Vec<PathBuf>, output_dir: &Path, outpu
     let output_artifact = output_dir.join(output_filename);
 
     entries.retain(|path| {
-        if is_archive_artifact(path, output_dir, output_filename) {
+        if is_named_archive_artifact(path, output_dir, output_filename) {
             return false;
         }
         if *path == output_artifact {
@@ -404,25 +406,23 @@ fn exclude_export_artifacts(entries: &mut Vec<PathBuf>, output_dir: &Path, outpu
     });
 }
 
-fn is_archive_artifact(path: &Path, output_dir: &Path, output_filename: &str) -> bool {
+fn is_named_archive_artifact(path: &Path, output_dir: &Path, output_filename: &str) -> bool {
     if path.parent() != Some(output_dir) {
         return false;
     }
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
     };
-    if name == output_filename || name == "archive.md" {
-        return true;
-    }
-    if name.starts_with("archive-") && name.ends_with(".md") {
-        return true;
-    }
-    fs::read(path)
-        .map(|bytes| {
-            bytes.starts_with(DOC_START_MARKER.as_bytes())
-                || bytes.starts_with(ARCHIVE_INDEX_MARKER.as_bytes())
-        })
-        .unwrap_or(false)
+    name == output_filename
+        || name == "archive.md"
+        || (name.starts_with("archive-") && name.ends_with(".md"))
+}
+
+/// A renamed export in the output root is recognised by its leading archive marker.
+fn is_archive_content(path: &Path, output_dir: &Path, bytes: &[u8]) -> bool {
+    path.parent() == Some(output_dir)
+        && (bytes.starts_with(DOC_START_MARKER.as_bytes())
+            || bytes.starts_with(ARCHIVE_INDEX_MARKER.as_bytes()))
 }
 
 fn collect_md_files(dir: &Path) -> Result<Vec<PathBuf>, ExportError> {
@@ -459,7 +459,8 @@ fn passes_since_filter(meta: &DocMeta, since_utc: Option<DateTime<Utc>>) -> bool
     }
 }
 
-/// Shared archive population: unreadable article metadata is logged and excluded.
+/// Shared archive population: unreadable article metadata is logged and excluded;
+/// archive exports are skipped silently.
 pub(crate) fn read_archive_window_doc(
     output_dir: &Path,
     path: &Path,
@@ -468,7 +469,12 @@ pub(crate) fn read_archive_window_doc(
         .strip_prefix(output_dir)
         .unwrap_or(path)
         .to_string_lossy();
-    let content = fs::read_to_string(path)?;
+    let bytes = fs::read(path)?;
+    if is_archive_content(path, output_dir, &bytes) {
+        return Ok(None);
+    }
+    let content = String::from_utf8(bytes)
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
     match parse_doc(&content, &relative) {
         Ok(meta) => Ok(Some((content, meta))),
         Err(error) => {
