@@ -942,6 +942,76 @@ fn poll_only_run_becomes_terminal_when_source_poll_settles() {
 }
 
 #[test]
+fn failed_sources_are_summarized_on_the_run_notice() {
+    let state = tick(AppState::new(), 0);
+    let (state, _) = crate::update(
+        state,
+        Msg::AiAvailabilityDetected {
+            availability: crate::AiAvailability::Unavailable {
+                reason: crate::AiUnavailableReason::MissingApiKey,
+            },
+        },
+    );
+    let (state, _) = crate::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
+    let mut state = crate::update::test_support::update(state, Msg::PollStarted { total: 6 }).0;
+    let payment = "Brave API HTTP 402 Payment Required (check the Brave plan and billing)";
+    let failures = [
+        ("brave-a", payment),
+        ("feed-rss", "HTTP error 429 Too Many Requests"),
+        ("brave-b", payment),
+        ("brave-c", payment),
+        ("brave-d", payment),
+    ];
+    for (source, error) in failures {
+        state = crate::update::test_support::update(
+            state,
+            Msg::SourcePollFailed {
+                source_id: SourceId::new(source).expect("valid source id"),
+                error: error.into(),
+            },
+        )
+        .0;
+    }
+    state = crate::update::test_support::update(
+        state,
+        Msg::SourcePollCompleted {
+            source_id: SourceId::new("working-source").expect("valid source id"),
+            urls: Vec::new(),
+            kind: SourceKind::Rss,
+            parsed: 0,
+            dedup_filtered: 0,
+        },
+    )
+    .0;
+    let state = crate::update::test_support::update(state, Msg::AllSourcesPollEnded).0;
+
+    let notice = state.run_completion_notice().expect("completion notice");
+    assert_eq!(
+        notice.source_failure_message.as_deref(),
+        Some(
+            "5 of 6 sources failed. \
+             Brave API HTTP 402 Payment Required (check the Brave plan and billing): \
+             4 sources (brave-a, brave-b and 2 more). \
+             HTTP error 429 Too Many Requests: feed-rss."
+        )
+    );
+    assert!(notice.ai_stopped_message.is_none());
+}
+
+#[test]
+fn run_without_source_failures_has_no_source_message() {
+    let (state, articles) = prepare_pipeline(1, 0);
+    let state = run_to_completion(state, &articles, &[true]);
+    let notice = state.run_completion_notice().expect("completion notice");
+    assert!(notice.source_failure_message.is_none());
+}
+
+#[test]
 fn accepted_stop_during_poll_drains_the_poll_without_ingesting_its_urls() {
     let state = tick(AppState::new(), 0);
     let state = crate::update(

@@ -301,7 +301,11 @@ retries also halt the current run. A recovered success resets that consecutive-f
 counter; the next explicit triage or summaries start clears provider halts, and the
 next run start clears every halt. A run that settles while halted carries the halt's
 explanation in its completion notice (`ai_stopped_message`), which the desktop shows as
-"Run stopped early" in the warning colour instead of a normal completion. Each halt fails
+"Run stopped early" in the warning colour instead of a normal completion. Sources that
+fail to poll during a run are kept with their error on the run's progress, and the
+completion notice summarizes them (`source_failure_message`: failed of polled, grouped
+by error, most common first, a few source names per group). Brave HTTP refusals name
+the account action: 402 says to check the plan and billing, 401/403 the API key. Each halt fails
 admitted pending entries across all three stages with its reason; in-flight requests
 can finish. Completions from replaced sessions do not create a scheduler halt.
 

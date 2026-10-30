@@ -1,6 +1,6 @@
 {
   "generation": 1,
-  "schema_version": 16,
+  "schema_version": 17,
   "view": {
     "ai_unavailable_message": null,
     "archive_enabled": true,
@@ -60,7 +60,8 @@
     "run_completion_notice": {
       "ai_stopped_message": "AI budget for this run used up (too many LLM input tokens this run). Start another run to process the rest.",
       "completed_at_utc": "2023-11-14T22:13:21Z",
-      "new_result_count": 0
+      "new_result_count": 0,
+      "source_failure_message": null
     },
     "run_enabled": true,
     "run_progress": {

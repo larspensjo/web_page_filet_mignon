@@ -108,8 +108,13 @@ pub struct RunProgress {
     pub(crate) signal_enqueued_at_reset: u32,
     pub(crate) download_started_job_ids: BTreeSet<crate::JobId>,
     pub(crate) download_finished_job_ids: BTreeSet<crate::JobId>,
+    /// Sources that failed to poll this run, with their error, in arrival order.
+    pub(crate) source_failures: Vec<(String, String)>,
     pub(crate) terminal: bool,
 }
+
+const SOURCE_FAILURE_GROUPS_SHOWN: usize = 3;
+const SOURCE_FAILURE_NAMES_SHOWN: usize = 2;
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct StageCounts {
@@ -147,6 +152,7 @@ impl RunProgress {
             signal_enqueued_at_reset,
             download_started_job_ids: BTreeSet::new(),
             download_finished_job_ids: BTreeSet::new(),
+            source_failures: Vec::new(),
             terminal: false,
         }
     }
@@ -228,6 +234,55 @@ impl RunProgress {
             }
         }
     }
+    /// Summary of this run's failed sources, grouped by error, most common first.
+    pub(crate) fn source_failure_message(&self) -> Option<String> {
+        if self.source_failures.is_empty() {
+            return None;
+        }
+        let mut groups: Vec<(&str, Vec<&str>)> = Vec::new();
+        for (source, error) in &self.source_failures {
+            match groups
+                .iter_mut()
+                .find(|(known, _)| *known == error.as_str())
+            {
+                Some((_, sources)) => sources.push(source),
+                None => groups.push((error, vec![source])),
+            }
+        }
+        groups.sort_by_key(|(_, sources)| std::cmp::Reverse(sources.len()));
+        let failed = self.source_failures.len();
+        let polled = self.stages[PipelineStage::ScanningSources.index()]
+            .total
+            .max(failed as u32);
+        let mut message = format!("{failed} of {polled} sources failed.");
+        for (error, sources) in groups.iter().take(SOURCE_FAILURE_GROUPS_SHOWN) {
+            let error =
+                harvester_engine::truncate_to_char_boundary(error, ACTIVITY_REASON_MAX_CHARS);
+            let names = sources
+                .iter()
+                .take(SOURCE_FAILURE_NAMES_SHOWN)
+                .copied()
+                .collect::<Vec<_>>()
+                .join(", ");
+            let hidden = sources.len().saturating_sub(SOURCE_FAILURE_NAMES_SHOWN);
+            let who = match (sources.len(), hidden) {
+                (1, _) => names,
+                (count, 0) => format!("{count} sources ({names})"),
+                (count, hidden) => format!("{count} sources ({names} and {hidden} more)"),
+            };
+            message.push_str(&format!(" {error}: {who}."));
+        }
+        let other: usize = groups
+            .iter()
+            .skip(SOURCE_FAILURE_GROUPS_SHOWN)
+            .map(|(_, sources)| sources.len())
+            .sum();
+        if other > 0 {
+            message.push_str(&format!(" Other errors: {other} sources."));
+        }
+        Some(message)
+    }
+
     pub(crate) fn settle(&mut self, now: Option<DateTime<Utc>>) {
         self.stop(now);
         for record in &mut self.stages {
@@ -330,6 +385,8 @@ pub struct RunCompletionNotice {
     /// Set when the run ended with AI work stopped by a budget or provider
     /// limit, so the run does not read as a normal completion.
     pub ai_stopped_message: Option<String>,
+    /// Set when sources failed to poll during the run, grouped by error.
+    pub source_failure_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -153,7 +153,7 @@ describe("job list", () => {
 		].sort();
 		expect(fields).toHaveLength(20);
 		for (const [, fixture] of reviewFixtures) {
-			expect(fixture.schema_version).toBe(16);
+			expect(fixture.schema_version).toBe(17);
 			expect(Object.keys(fixture.view).sort()).toEqual(fields);
 			expect(Object.keys(fixture.view.archive_meter).sort()).toEqual(
 				[

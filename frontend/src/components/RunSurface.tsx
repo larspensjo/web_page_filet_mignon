@@ -405,7 +405,7 @@ export function RunSurface({
 
 			{notice && (
 				<div
-					className={`run-notice${notice.ai_stopped_message ? " run-notice--warning" : ""}`}
+					className={`run-notice${notice.ai_stopped_message || notice.source_failure_message ? " run-notice--warning" : ""}`}
 					role="status"
 				>
 					<div className="run-notice-text">
@@ -415,6 +415,11 @@ export function RunSurface({
 						{notice.ai_stopped_message && (
 							<span className="run-notice-detail">
 								{notice.ai_stopped_message}
+							</span>
+						)}
+						{notice.source_failure_message && (
+							<span className="run-notice-detail">
+								{notice.source_failure_message}
 							</span>
 						)}
 					</div>

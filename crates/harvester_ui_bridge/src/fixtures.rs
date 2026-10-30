@@ -29,6 +29,11 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
     let run_in_progress = run_in_progress_with_failures();
     let run_finished = completed_run_state();
     let run_budget_stopped = run_stopped_by_ai_budget_state();
+    let run_source_failures = completed_run_state_with_source_failure(true);
+    assert!(run_source_failures
+        .view()
+        .run_completion_notice
+        .is_some_and(|notice| notice.source_failure_message.is_some()));
     let overlapping_stages = overlapping_active_stages();
     let unfinished_work = idle_with_corpus(&empty);
     let stopping = stopping_with_in_flight_work();
@@ -73,6 +78,7 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
         ),
         ("run_finished_with_notice", run_finished),
         ("run_stopped_by_ai_budget", run_budget_stopped),
+        ("run_finished_with_source_failures", run_source_failures),
         ("ai_unavailable", ai_unavailable),
         ("overlapping_active_stages", overlapping_stages),
         ("unfinished_work_available", unfinished_work),
@@ -96,9 +102,9 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
                 | "idle_last_24_hours"
                 | "idle_with_selection"
                 | "ai_unavailable" => Status::Loading,
-                "run_finished_with_notice" | "run_in_progress_with_reused_results" => {
-                    Status::Scored
-                }
+                "run_finished_with_notice"
+                | "run_finished_with_source_failures"
+                | "run_in_progress_with_reused_results" => Status::Scored,
                 "idle_empty_output_folder_started"
                 | "idle_with_corpus"
                 | "run_in_progress_with_failures"
@@ -486,7 +492,12 @@ fn reprocess_notice_state() -> AppState {
 }
 
 fn completed_run_state() -> AppState {
-    let (mut state, _article, job_id, triage_effects) = prepared_article_state();
+    completed_run_state_with_source_failure(false)
+}
+
+fn completed_run_state_with_source_failure(with_source_failure: bool) -> AppState {
+    let (mut state, _article, job_id, triage_effects) =
+        prepared_article_state_with_source_failure(with_source_failure);
     state = add_llm_metadata(state);
     let triage_request_id = request_id(&triage_effects, PromptId::ArticleTriage, "triage");
     let (next, summary_effects) = update(state, triage_success(triage_request_id, 4));

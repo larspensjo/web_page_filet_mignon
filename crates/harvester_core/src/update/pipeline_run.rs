@@ -17,7 +17,10 @@ enum ProgressEvent {
         total: u32,
     },
     SourcePollCompleted,
-    SourcePollFailed,
+    SourcePollFailed {
+        source_id: String,
+        error: String,
+    },
     AllSourcesPollEnded,
     JobProgress {
         job_id: crate::JobId,
@@ -54,7 +57,10 @@ pub(super) fn progress_before(state: &AppState, msg: &Msg) -> ProgressBefore {
             total: *total as u32,
         },
         Msg::SourcePollCompleted { .. } => ProgressEvent::SourcePollCompleted,
-        Msg::SourcePollFailed { .. } => ProgressEvent::SourcePollFailed,
+        Msg::SourcePollFailed { source_id, error } => ProgressEvent::SourcePollFailed {
+            source_id: source_id.to_string(),
+            error: error.clone(),
+        },
         Msg::AllSourcesPollEnded => ProgressEvent::AllSourcesPollEnded,
         Msg::JobProgress { job_id, .. } => {
             let needs_url = state
@@ -240,6 +246,7 @@ fn settle_run(state: &mut AppState) {
         .saturating_sub(run.signal_completed_at_reset)
         .saturating_sub(reused_count);
     run.settle(now);
+    let source_failure_message = run.source_failure_message();
     if let Some(admission) = state.pipeline_admission.as_mut() {
         admission.armed = false;
     }
@@ -249,6 +256,7 @@ fn settle_run(state: &mut AppState) {
         new_result_count,
         completed_at_utc,
         ai_stopped_message,
+        source_failure_message,
     });
     state.set_pipeline_run_phase(PipelineRunPhase::Idle);
     clear_export_unavailable_status(state);
@@ -393,10 +401,11 @@ pub(super) fn record_progress_after(state: &mut AppState, before: ProgressBefore
                 }
             }
         }
-        ProgressEvent::SourcePollFailed => {
+        ProgressEvent::SourcePollFailed { source_id, error } => {
             let run = state.run_progress_mut().expect("active run");
             let record = run.stage_mut(PipelineStage::ScanningSources);
             record.failed = record.failed.saturating_add(1);
+            run.source_failures.push((source_id, error));
         }
         ProgressEvent::AllSourcesPollEnded => {
             let run = state.run_progress_mut().expect("active run");

@@ -179,6 +179,7 @@ export type RunState = "Idle" | "Active" | { Stopping: { in_flight: number } };
 export type RunCompletionNotice = {
 	new_result_count: number;
 	ai_stopped_message: string | null;
+	source_failure_message: string | null;
 	completed_at_utc: string;
 };
 

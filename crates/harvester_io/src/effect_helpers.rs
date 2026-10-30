@@ -534,6 +534,18 @@ pub fn fetch_brave_results(
     )
 }
 
+/// Brave refusals name the account action a person can take, since every
+/// later source in the run fails the same way.
+fn brave_http_error(status: reqwest::StatusCode) -> String {
+    let hint = match status.as_u16() {
+        429 => "rate-limited",
+        402 => "check the Brave plan and billing",
+        401 | 403 => "check the Brave API key",
+        _ => "error",
+    };
+    format!("Brave API HTTP {status} ({hint})")
+}
+
 pub(crate) fn fetch_brave_results_with_url(
     base_url: &str,
     query: &str,
@@ -567,12 +579,7 @@ pub(crate) fn fetch_brave_results_with_url(
 
     let status = response.status();
     if !status.is_success() {
-        let kind = if status.as_u16() == 429 {
-            "rate-limited"
-        } else {
-            "error"
-        };
-        return Err(format!("Brave API HTTP {} ({})", status, kind));
+        return Err(brave_http_error(status));
     }
 
     let mut buffer = Vec::new();
@@ -830,6 +837,27 @@ mod brave_fetch_tests {
         .unwrap()
         .unwrap_err();
         assert!(err.contains("401"), "expected 401 in: {err}");
+    }
+
+    #[tokio::test]
+    async fn fetch_maps_402_to_billing_hint() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(402))
+            .mount(&server)
+            .await;
+
+        let uri = server.uri();
+        let err = tokio::task::spawn_blocking(move || {
+            fetch_brave_results_with_url(&uri, "q", "key", None, None, &default_settings())
+        })
+        .await
+        .unwrap()
+        .unwrap_err();
+        assert_eq!(
+            err,
+            "Brave API HTTP 402 Payment Required (check the Brave plan and billing)"
+        );
     }
 
     #[test]

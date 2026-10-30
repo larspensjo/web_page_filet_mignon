@@ -2917,3 +2917,11 @@ Change: LLM quotas became per-run (`LlmQuotaTracker::reset_usage`, `LlmCommand::
 Lessons Learned: A guard that refuses work must surface at the level the user looks at (the run outcome), not only in per-article failure reasons and logs. Architecture.md promised a "restart warning" that no code produced; stale safety documentation hid the gap.
 Prevention: `run_budget_halt_is_reported_and_cleared_by_the_next_run`, `run_quota_halt_resets_when_the_next_run_starts`, `reset_usage_starts_a_fresh_run_allowance`, `reset_usage_clears_totals_and_reopens_every_limit`, and the RunSurface "stopped early" test.
 Refs: crates/harvester_core/src/update/pipeline_run.rs, crates/harvester_engine/src/llm/handle.rs, frontend/src/components/RunSurface.tsx; DecisionLog 2026-10-30
+
+## 2026-10-30 - Runs reported success while every Brave source failed
+Type: Bug Fix
+Context: The Brave Search API started returning 402 Payment Required mid-run. All 23 Brave sources failed in that and later runs, but the run settled as `outcome=completed` with a normal "Run finished" notice; failures were only `[source-poll]` log warnings and a failed count on the Scanning sources stage, which the compact run view hides.
+Change: `RunProgress` keeps each failed source with its error; `RunCompletionNotice.source_failure_message` summarizes them grouped by error; the desktop shows it as a warning detail line. Brave HTTP errors now name the action (402 plan and billing, 401/403 API key). New snapshot fixture `run_finished_with_source_failures`; IPC 17.
+Lessons Learned: Same lesson as the AI-budget halt the same day: any degradation that loses intake or processing must reach the run outcome, not only the log. A per-stage failure count is not enough when the stage view is collapsed by default.
+Prevention: `failed_sources_are_summarized_on_the_run_notice`, `run_without_source_failures_has_no_source_message`, `fetch_maps_402_to_billing_hint`, and the RunSurface failed-sources test.
+Refs: crates/harvester_core/src/run_progress.rs, crates/harvester_io/src/effect_helpers.rs, frontend/src/components/RunSurface.tsx; DecisionLog 2026-10-30

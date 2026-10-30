@@ -3,6 +3,7 @@ import exportUnavailable from "@fixtures/snapshots/export_unavailable_during_run
 import overlappingActiveStages from "@fixtures/snapshots/overlapping_active_stages.json";
 import reprocessNotice from "@fixtures/snapshots/reprocess_notice.json";
 import runFinishedWithNotice from "@fixtures/snapshots/run_finished_with_notice.json";
+import runFinishedWithSourceFailures from "@fixtures/snapshots/run_finished_with_source_failures.json";
 import runInProgressWithFailures from "@fixtures/snapshots/run_in_progress_with_failures.json";
 import runInProgressWithReusedResults from "@fixtures/snapshots/run_in_progress_with_reused_results.json";
 import runStoppedByAiBudget from "@fixtures/snapshots/run_stopped_by_ai_budget.json";
@@ -36,6 +37,8 @@ const reusedResults =
 	runInProgressWithReusedResults as unknown as SnapshotEnvelope;
 const finished = runFinishedWithNotice as unknown as SnapshotEnvelope;
 const budgetStopped = runStoppedByAiBudget as unknown as SnapshotEnvelope;
+const sourceFailures =
+	runFinishedWithSourceFailures as unknown as SnapshotEnvelope;
 const overlapping = overlappingActiveStages as unknown as SnapshotEnvelope;
 const unfinished = unfinishedWorkAvailable as unknown as SnapshotEnvelope;
 const stopping = stoppingWithInFlightWork as unknown as SnapshotEnvelope;
@@ -1034,6 +1037,18 @@ describe("RunSurface", () => {
 			"AI budget for this run used up (too many LLM input tokens this run). Start another run to process the rest.",
 		);
 		expect(screen.queryByText(/^Run finished/)).not.toBeInTheDocument();
+	});
+
+	it("lists failed sources on the finished run notice as a warning", () => {
+		render(<RunSurface view={sourceFailures.view} />);
+
+		const notice = screen
+			.getByText("Run finished - 1 article scored")
+			.closest(".run-notice");
+		expect(notice).toHaveClass("run-notice--warning");
+		expect(notice).toHaveTextContent(
+			"1 of 2 sources failed. fixture source failure: fixture-failed-source.",
+		);
 	});
 
 	it("keeps an ordinary finished run notice free of warnings", () => {

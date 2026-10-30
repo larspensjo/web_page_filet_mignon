@@ -1,6 +1,6 @@
 {
   "generation": 1,
-  "schema_version": 16,
+  "schema_version": 17,
   "view": {
     "ai_unavailable_message": null,
     "archive_enabled": true,
@@ -101,7 +101,8 @@
     "run_completion_notice": {
       "ai_stopped_message": null,
       "completed_at_utc": "2023-11-14T22:13:21Z",
-      "new_result_count": 1
+      "new_result_count": 1,
+      "source_failure_message": null
     },
     "run_enabled": true,
     "run_progress": {
