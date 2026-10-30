@@ -90,7 +90,7 @@ fn note_owned_quota(state: &mut AppState, result: &LlmResultKind) {
     if let LlmResultKind::QuotaExhausted { reason, origin } = result {
         match origin {
             QuotaOrigin::SessionBudget => {
-                state.halt_model_dispatch(ModelDispatchHalt::SessionQuota(reason.clone()));
+                state.halt_model_dispatch(ModelDispatchHalt::RunQuota(reason.clone()));
             }
             QuotaOrigin::Provider => {
                 state.halt_model_dispatch(ModelDispatchHalt::ProviderCredits(reason.clone()));

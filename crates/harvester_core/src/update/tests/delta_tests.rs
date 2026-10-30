@@ -381,7 +381,7 @@ fn resume_run_loads_the_current_window_before_triage() {
     assert!(matches!(
         effects.as_slice(),
         [
-            Effect::ResetDownloadQuota,
+            Effect::ResetRunQuotas,
             Effect::LoadProcessingConfiguration {
                 require_triage_context: true,
                 ..
@@ -482,7 +482,7 @@ fn resume_run_triages_and_summarizes_the_current_window() {
     assert!(matches!(
         effects.as_slice(),
         [
-            Effect::ResetDownloadQuota,
+            Effect::ResetRunQuotas,
             Effect::LoadProcessingConfiguration {
                 require_triage_context: true,
                 ..

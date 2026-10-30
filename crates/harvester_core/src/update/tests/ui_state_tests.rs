@@ -257,7 +257,7 @@ fn missing_api_key_blocks_triage_and_briefing_actions() {
     );
     assert_eq!(
         triage_effects,
-        vec![Effect::ResetDownloadQuota],
+        vec![Effect::ResetRunQuotas],
         "blocked triage must dispatch nothing beyond the run's quota reset"
     );
     assert_eq!(
@@ -273,7 +273,7 @@ fn missing_api_key_blocks_triage_and_briefing_actions() {
     );
     assert_eq!(
         summary_effects,
-        vec![Effect::ResetDownloadQuota],
+        vec![Effect::ResetRunQuotas],
         "blocked summary preparation must dispatch nothing beyond the run's quota reset"
     );
 }

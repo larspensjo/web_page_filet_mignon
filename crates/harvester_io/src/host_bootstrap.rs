@@ -190,10 +190,10 @@ fn resolved_model_map(
 
 pub fn llm_quota_limits_from_engine(quotas: &LlmQuotas) -> LlmQuotaLimits {
     LlmQuotaLimits {
-        max_calls_per_session: quotas.max_calls_per_session.map(u64::from),
-        max_input_tokens_per_session: quotas.max_input_tokens_per_session,
-        max_output_tokens_per_session: quotas.max_output_tokens_per_session,
-        max_cost_microdollars_per_session: quotas.max_cost_microdollars_per_session,
+        max_calls_per_run: quotas.max_calls_per_run.map(u64::from),
+        max_input_tokens_per_run: quotas.max_input_tokens_per_run,
+        max_output_tokens_per_run: quotas.max_output_tokens_per_run,
+        max_cost_microdollars_per_run: quotas.max_cost_microdollars_per_run,
     }
 }
 

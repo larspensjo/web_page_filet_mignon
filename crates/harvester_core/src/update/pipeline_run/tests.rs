@@ -114,7 +114,7 @@ fn unarmed_full_run_settles_and_next_full_polls_again() {
     );
     assert_eq!(
         effects,
-        vec![Effect::ResetDownloadQuota, Effect::PollAllSources]
+        vec![Effect::ResetRunQuotas, Effect::PollAllSources]
     );
     assert!(!state.pipeline_run_armed());
     let (state, effects) = crate::update(
@@ -144,7 +144,7 @@ fn unarmed_full_run_settles_and_next_full_polls_again() {
     );
     assert_eq!(
         effects,
-        vec![Effect::ResetDownloadQuota, Effect::PollAllSources]
+        vec![Effect::ResetRunQuotas, Effect::PollAllSources]
     );
     assert!(!state.run_progress().unwrap().terminal);
 }
@@ -920,7 +920,7 @@ fn poll_only_run_becomes_terminal_when_source_poll_settles() {
     );
     assert_eq!(
         effects,
-        vec![Effect::ResetDownloadQuota, Effect::PollAllSources]
+        vec![Effect::ResetRunQuotas, Effect::PollAllSources]
     );
     let state = crate::update::test_support::update(state, Msg::PollStarted { total: 1 }).0;
     let state = crate::update::test_support::update(
@@ -1432,6 +1432,65 @@ fn driver_runs_triage_summaries_scoring_and_sets_notice_exactly_once() {
     assert_eq!(state.run_completion_notice(), Some(&notice));
     let state = crate::update::test_support::update(state, Msg::RunFinishedNoticeDismissed).0;
     assert!(state.run_completion_notice().is_none());
+}
+
+#[test]
+fn run_budget_halt_is_reported_and_cleared_by_the_next_run() {
+    let (mut state, _) = prepare_pipeline(3, 0);
+    state.set_llm_quota_usage(crate::LlmQuotaUsage {
+        calls: 40,
+        input_tokens: 2_000_000,
+        output_tokens: 9_000,
+        cost_microdollars: 1_000_000,
+    });
+    for _ in 0..1000 {
+        if state.run_progress().unwrap().terminal {
+            break;
+        }
+        let in_flight = triage_request(&state)
+            .or_else(|| summary_request(&state))
+            .or_else(|| scoring_request(&state));
+        let msg = match in_flight {
+            Some(request_id) => Msg::LlmCompleted {
+                request_id,
+                result: LlmResultKind::QuotaExhausted {
+                    reason: "too many LLM input tokens this run".into(),
+                    origin: harvester_engine::llm::QuotaOrigin::SessionBudget,
+                },
+                metadata: None,
+            },
+            None => Msg::PipelineRunAdvance,
+        };
+        state = crate::update(state, msg).0;
+    }
+    assert!(state.run_progress().unwrap().terminal);
+    let notice = state.run_completion_notice().expect("completion notice");
+    assert_eq!(
+        notice.ai_stopped_message.as_deref(),
+        Some(
+            "AI budget for this run used up (too many LLM input tokens this run). \
+             Start another run to process the rest."
+        )
+    );
+
+    let (state, effects) = crate::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
+    assert_eq!(effects.first(), Some(&Effect::ResetRunQuotas));
+    assert!(state.model_dispatch_halt_reason().is_none());
+    assert_eq!(state.llm_quota().usage, crate::LlmQuotaUsage::default());
+    assert!(state.run_completion_notice().is_none());
+}
+
+#[test]
+fn completed_run_notice_has_no_ai_stopped_message() {
+    let (state, articles) = prepare_pipeline(1, 0);
+    let state = run_to_completion(state, &articles, &[true]);
+    let notice = state.run_completion_notice().expect("completion notice");
+    assert!(notice.ai_stopped_message.is_none());
 }
 
 #[test]

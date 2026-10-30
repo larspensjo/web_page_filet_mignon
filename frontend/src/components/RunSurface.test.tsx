@@ -5,6 +5,7 @@ import reprocessNotice from "@fixtures/snapshots/reprocess_notice.json";
 import runFinishedWithNotice from "@fixtures/snapshots/run_finished_with_notice.json";
 import runInProgressWithFailures from "@fixtures/snapshots/run_in_progress_with_failures.json";
 import runInProgressWithReusedResults from "@fixtures/snapshots/run_in_progress_with_reused_results.json";
+import runStoppedByAiBudget from "@fixtures/snapshots/run_stopped_by_ai_budget.json";
 import stoppedWithUnfinishedWork from "@fixtures/snapshots/stopped_with_unfinished_work_export_enabled.json";
 import stoppingWithInFlightWork from "@fixtures/snapshots/stopping_with_in_flight_work.json";
 import unfinishedWorkAvailable from "@fixtures/snapshots/unfinished_work_available.json";
@@ -34,6 +35,7 @@ const inProgress = runInProgressWithFailures as unknown as SnapshotEnvelope;
 const reusedResults =
 	runInProgressWithReusedResults as unknown as SnapshotEnvelope;
 const finished = runFinishedWithNotice as unknown as SnapshotEnvelope;
+const budgetStopped = runStoppedByAiBudget as unknown as SnapshotEnvelope;
 const overlapping = overlappingActiveStages as unknown as SnapshotEnvelope;
 const unfinished = unfinishedWorkAvailable as unknown as SnapshotEnvelope;
 const stopping = stoppingWithInFlightWork as unknown as SnapshotEnvelope;
@@ -1019,6 +1021,29 @@ describe("RunSurface", () => {
 		unmount();
 		renderExpanded(<RunSurface view={viewWithStages(regrowth)} />);
 		assertRows(regrowth, regrowthRows);
+	});
+
+	it("marks a run that ended on its AI budget as stopped early", () => {
+		render(<RunSurface view={budgetStopped.view} />);
+
+		const notice = screen
+			.getByText("Run stopped early - 0 articles scored")
+			.closest(".run-notice");
+		expect(notice).toHaveClass("run-notice--warning");
+		expect(notice).toHaveTextContent(
+			"AI budget for this run used up (too many LLM input tokens this run). Start another run to process the rest.",
+		);
+		expect(screen.queryByText(/^Run finished/)).not.toBeInTheDocument();
+	});
+
+	it("keeps an ordinary finished run notice free of warnings", () => {
+		render(<RunSurface view={finished.view} />);
+
+		const notice = screen
+			.getByText("Run finished - 1 article scored")
+			.closest(".run-notice");
+		expect(notice).not.toHaveClass("run-notice--warning");
+		expect(document.querySelector(".run-notice-detail")).toBeNull();
 	});
 
 	it("collapses to the projected idle summary when no run is active", () => {

@@ -96,8 +96,8 @@ impl AppState {
     }
     pub(crate) fn halt_model_dispatch(&mut self, halt: ModelDispatchHalt) {
         if self.model_dispatch_halt_reason.is_none()
-            || (matches!(halt, ModelDispatchHalt::SessionQuota(_))
-                && self.session_quota_halt_reason().is_none())
+            || (matches!(halt, ModelDispatchHalt::RunQuota(_))
+                && self.run_quota_halt_reason().is_none())
         {
             engine_logging::engine_warn!(
                 "[model-budget] article dispatch halted kind={:?} reason={}",
@@ -118,9 +118,37 @@ impl AppState {
             self.mark_dirty();
         }
     }
-    pub(crate) fn session_quota_halt_reason(&self) -> Option<&str> {
+    /// A new run starts with a fresh model budget, so every earlier halt and
+    /// the previous run's usage are cleared before its first dispatch.
+    pub(crate) fn reset_run_model_budget(&mut self) {
+        if self.model_dispatch_halt_reason.take().is_some() {
+            self.note_unfinished_global_inputs_changed();
+        }
+        self.llm_quota.usage = LlmQuotaUsage::default();
+        self.mark_dirty();
+    }
+    /// User-facing explanation for a run that ended with model dispatch halted.
+    pub(crate) fn model_dispatch_halt_notice(&self) -> Option<String> {
+        self.model_dispatch_halt_reason.as_ref().map(|halt| match halt {
+            ModelDispatchHalt::RunQuota(reason) => format!(
+                "AI budget for this run used up ({reason}). Start another run to process the rest."
+            ),
+            ModelDispatchHalt::ProviderCredits(reason) => format!(
+                "The AI provider refused further requests ({reason}). Check the account's credits, then start another run."
+            ),
+            ModelDispatchHalt::RateLimit(reason) => format!(
+                "AI requests stopped after repeated rate limits ({reason}). Start another run later to process the rest."
+            ),
+        })
+    }
+    pub(crate) fn model_dispatch_halt_kind(&self) -> Option<&'static str> {
+        self.model_dispatch_halt_reason
+            .as_ref()
+            .map(|halt| halt.kind())
+    }
+    pub(crate) fn run_quota_halt_reason(&self) -> Option<&str> {
         match self.model_dispatch_halt_reason.as_ref() {
-            Some(ModelDispatchHalt::SessionQuota(reason)) => Some(reason),
+            Some(ModelDispatchHalt::RunQuota(reason)) => Some(reason),
             _ => None,
         }
     }
@@ -220,7 +248,7 @@ impl AppState {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ModelDispatchHalt {
-    SessionQuota(String),
+    RunQuota(String),
     ProviderCredits(String),
     RateLimit(String),
 }
@@ -228,15 +256,15 @@ pub(crate) enum ModelDispatchHalt {
 impl ModelDispatchHalt {
     fn reason(&self) -> &str {
         match self {
-            Self::SessionQuota(reason)
-            | Self::ProviderCredits(reason)
-            | Self::RateLimit(reason) => reason,
+            Self::RunQuota(reason) | Self::ProviderCredits(reason) | Self::RateLimit(reason) => {
+                reason
+            }
         }
     }
 
     fn kind(&self) -> &'static str {
         match self {
-            Self::SessionQuota(_) => "session_quota",
+            Self::RunQuota(_) => "run_quota",
             Self::ProviderCredits(_) => "provider_credits",
             Self::RateLimit(_) => "rate_limit",
         }

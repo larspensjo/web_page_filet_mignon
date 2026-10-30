@@ -108,7 +108,7 @@ fn record_reprocess_notice(state: &mut AppState) {
         .llm_quota()
         .limits
         .as_ref()
-        .and_then(|l| l.max_calls_per_session)
+        .and_then(|l| l.max_calls_per_run)
         .map(|limit| limit.saturating_sub(state.llm_quota().usage.calls));
     let notice = crate::evaluate_reprocess_notice(articles, calls, remaining);
     engine_logging::engine_info!(

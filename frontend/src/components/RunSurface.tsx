@@ -404,10 +404,20 @@ export function RunSurface({
 			)}
 
 			{notice && (
-				<div className="run-notice" role="status">
-					<span>{`Run finished - ${notice.new_result_count} article${
-						notice.new_result_count === 1 ? "" : "s"
-					} scored`}</span>
+				<div
+					className={`run-notice${notice.ai_stopped_message ? " run-notice--warning" : ""}`}
+					role="status"
+				>
+					<div className="run-notice-text">
+						<span>{`${notice.ai_stopped_message ? "Run stopped early" : "Run finished"} - ${notice.new_result_count} article${
+							notice.new_result_count === 1 ? "" : "s"
+						} scored`}</span>
+						{notice.ai_stopped_message && (
+							<span className="run-notice-detail">
+								{notice.ai_stopped_message}
+							</span>
+						)}
+					</div>
 					<button
 						className="ghost-button"
 						type="button"

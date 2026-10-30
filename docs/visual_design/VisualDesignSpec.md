@@ -194,6 +194,9 @@ Buttons should clearly express priority and intent.
 - The expanded or compact choice lasts for the app session and carries over between runs.
   Each launch starts compact.
 - A large reprocess notice is muted run-surface text, not a modal or confirmation step.
+- The run-finished notice uses the primary accent border. When AI work was stopped by the
+  run budget or the provider, it reads "Run stopped early", takes the Accent Warning border,
+  and adds the reason and next step as a warning-coloured detail line.
 - The existing `ai_unavailable_message` is visible below the Run controls. API-key and ordinary AI-unavailable notices use muted status text. A saved-result store refusal uses the reserved warning red, names its file, explains the reason and recovery action, and leaves intake available.
 
 ## Links

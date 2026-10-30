@@ -149,10 +149,10 @@ fn quota_usage_snapshot_is_authoritative_and_model_usage_stays_separate() {
         state,
         Msg::LlmQuotaConfigured {
             limits: LlmQuotaLimits {
-                max_calls_per_session: Some(100),
-                max_input_tokens_per_session: Some(1_000),
-                max_output_tokens_per_session: Some(1_000),
-                max_cost_microdollars_per_session: Some(1_000),
+                max_calls_per_run: Some(100),
+                max_input_tokens_per_run: Some(1_000),
+                max_output_tokens_per_run: Some(1_000),
+                max_cost_microdollars_per_run: Some(1_000),
             },
         },
     );

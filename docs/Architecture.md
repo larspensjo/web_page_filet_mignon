@@ -289,14 +289,19 @@ their original request until it settles. A same-digest admission is refused.
 Successful summary sessions retain their cache
 identity so scoring can validate their provenance.
 
-The download engine caps each pipeline run at 500 started URLs. Starting a new run
-emits `ResetDownloadQuota`, so the cap never accumulates across runs in a long-lived app.
+The download engine caps each pipeline run at 500 started URLs, and the LLM worker caps
+each run's model usage (calls, input and output tokens, cost; `LlmQuotas`). Starting a
+new run clears any model-dispatch halt and the displayed usage, then emits
+`ResetRunQuotas`, which resets both engine counters before the run's first request, so
+neither cap accumulates across runs in a long-lived app.
 
-The 1,000-call session quota halts article-model dispatch for the process lifetime
-and shows a restart warning on later run starts. Provider out-of-credits and three
-consecutive provider requests that exhaust their rate-limit retries halt the current run. A recovered
-success resets that consecutive-failure counter; the next explicit
-triage or summaries start clears those halts and their warnings. Each halt fails
+A run-quota refusal halts article-model dispatch for the rest of the run. Provider
+out-of-credits and three consecutive provider requests that exhaust their rate-limit
+retries also halt the current run. A recovered success resets that consecutive-failure
+counter; the next explicit triage or summaries start clears provider halts, and the
+next run start clears every halt. A run that settles while halted carries the halt's
+explanation in its completion notice (`ai_stopped_message`), which the desktop shows as
+"Run stopped early" in the warning colour instead of a normal completion. Each halt fails
 admitted pending entries across all three stages with its reason; in-flight requests
 can finish. Completions from replaced sessions do not create a scheduler halt.
 

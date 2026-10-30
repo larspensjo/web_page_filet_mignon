@@ -248,10 +248,10 @@ mod tests {
             state,
             harvester_core::Msg::LlmQuotaConfigured {
                 limits: harvester_core::LlmQuotaLimits {
-                    max_calls_per_session: Some(1),
-                    max_input_tokens_per_session: None,
-                    max_output_tokens_per_session: None,
-                    max_cost_microdollars_per_session: None,
+                    max_calls_per_run: Some(1),
+                    max_input_tokens_per_run: None,
+                    max_output_tokens_per_run: None,
+                    max_cost_microdollars_per_run: None,
                 },
             },
         );

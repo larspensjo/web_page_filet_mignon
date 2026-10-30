@@ -1005,7 +1005,7 @@ fn effect_kind(effect: &Effect) -> &'static str {
         Effect::PollAllSources => "PollAllSources",
         Effect::RequestLlmCompletion { .. } => "RequestLlmCompletion",
         Effect::StartSession => "StartSession",
-        Effect::ResetDownloadQuota => "ResetDownloadQuota",
+        Effect::ResetRunQuotas => "ResetRunQuotas",
         Effect::StopFinish { .. } => "StopFinish",
         Effect::ArchiveRequested { .. } => "ArchiveRequested",
         Effect::OpenArchiveDialog { .. } => "OpenArchiveDialog",

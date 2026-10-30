@@ -1,26 +1,26 @@
 use crate::types::FailureKind;
 
-/// Session-level caps for LLM usage.
+/// Per-run caps for LLM usage. The host resets usage when a pipeline run starts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LlmQuotas {
-    pub max_calls_per_session: Option<u32>,
-    pub max_input_tokens_per_session: Option<u64>,
-    pub max_output_tokens_per_session: Option<u64>,
-    pub max_cost_microdollars_per_session: Option<u64>,
+    pub max_calls_per_run: Option<u32>,
+    pub max_input_tokens_per_run: Option<u64>,
+    pub max_output_tokens_per_run: Option<u64>,
+    pub max_cost_microdollars_per_run: Option<u64>,
 }
 
 impl Default for LlmQuotas {
     fn default() -> Self {
         Self {
-            max_calls_per_session: Some(1_000),
-            max_input_tokens_per_session: Some(2_000_000),
-            max_output_tokens_per_session: Some(500_000),
-            max_cost_microdollars_per_session: Some(5_000_000),
+            max_calls_per_run: Some(1_000),
+            max_input_tokens_per_run: Some(2_000_000),
+            max_output_tokens_per_run: Some(500_000),
+            max_cost_microdollars_per_run: Some(5_000_000),
         }
     }
 }
 
-/// Tracks cumulative usage across an LLM session.
+/// Tracks cumulative LLM usage since the last run reset.
 pub struct LlmQuotaTracker {
     quotas: LlmQuotas,
     total_calls: u64,
@@ -40,14 +40,23 @@ impl LlmQuotaTracker {
         }
     }
 
+    /// Start a new run's allowance. Calls still in flight from the previous
+    /// run record their usage against the new run.
+    pub fn reset_usage(&mut self) {
+        self.total_calls = 0;
+        self.total_input_tokens = 0;
+        self.total_output_tokens = 0;
+        self.total_cost_microdollars = 0;
+    }
+
     /// Pre-call reservation: atomically check and reserve a call slot.
     /// Returns `Ok(())` if the call is allowed and increments the call counter.
     /// Returns `Err` if the call count limit is already reached.
     pub fn reserve_call(&mut self) -> Result<(), FailureKind> {
-        if let Some(max_calls) = self.quotas.max_calls_per_session {
+        if let Some(max_calls) = self.quotas.max_calls_per_run {
             if self.total_calls >= max_calls as u64 {
                 return Err(FailureKind::QuotaExceeded {
-                    description: "too many LLM calls this session".into(),
+                    description: "too many LLM calls this run".into(),
                 });
             }
         }
@@ -68,26 +77,26 @@ impl LlmQuotaTracker {
         output_tokens: u64,
         cost_microdollars: u64,
     ) -> Result<(), FailureKind> {
-        if let Some(max_input) = self.quotas.max_input_tokens_per_session {
+        if let Some(max_input) = self.quotas.max_input_tokens_per_run {
             if self.total_input_tokens + input_tokens > max_input {
                 return Err(FailureKind::QuotaExceeded {
-                    description: "too many LLM input tokens this session".into(),
+                    description: "too many LLM input tokens this run".into(),
                 });
             }
         }
 
-        if let Some(max_output) = self.quotas.max_output_tokens_per_session {
+        if let Some(max_output) = self.quotas.max_output_tokens_per_run {
             if self.total_output_tokens + output_tokens > max_output {
                 return Err(FailureKind::QuotaExceeded {
-                    description: "too many LLM output tokens this session".into(),
+                    description: "too many LLM output tokens this run".into(),
                 });
             }
         }
 
-        if let Some(max_cost) = self.quotas.max_cost_microdollars_per_session {
+        if let Some(max_cost) = self.quotas.max_cost_microdollars_per_run {
             if self.total_cost_microdollars + cost_microdollars > max_cost {
                 return Err(FailureKind::QuotaExceeded {
-                    description: "LLM cost limit exceeded this session".into(),
+                    description: "LLM cost limit exceeded this run".into(),
                 });
             }
         }
@@ -107,31 +116,31 @@ impl LlmQuotaTracker {
         output_tokens: u64,
         cost_microdollars: u64,
     ) -> Result<(), FailureKind> {
-        if let Some(max_calls) = self.quotas.max_calls_per_session {
+        if let Some(max_calls) = self.quotas.max_calls_per_run {
             if self.total_calls >= max_calls as u64 {
                 return Err(FailureKind::QuotaExceeded {
-                    description: "too many LLM calls this session".into(),
+                    description: "too many LLM calls this run".into(),
                 });
             }
         }
-        if let Some(max_input) = self.quotas.max_input_tokens_per_session {
+        if let Some(max_input) = self.quotas.max_input_tokens_per_run {
             if self.total_input_tokens + input_tokens > max_input {
                 return Err(FailureKind::QuotaExceeded {
-                    description: "too many LLM input tokens this session".into(),
+                    description: "too many LLM input tokens this run".into(),
                 });
             }
         }
-        if let Some(max_output) = self.quotas.max_output_tokens_per_session {
+        if let Some(max_output) = self.quotas.max_output_tokens_per_run {
             if self.total_output_tokens + output_tokens > max_output {
                 return Err(FailureKind::QuotaExceeded {
-                    description: "too many LLM output tokens this session".into(),
+                    description: "too many LLM output tokens this run".into(),
                 });
             }
         }
-        if let Some(max_cost) = self.quotas.max_cost_microdollars_per_session {
+        if let Some(max_cost) = self.quotas.max_cost_microdollars_per_run {
             if self.total_cost_microdollars + cost_microdollars > max_cost {
                 return Err(FailureKind::QuotaExceeded {
-                    description: "LLM cost limit exceeded this session".into(),
+                    description: "LLM cost limit exceeded this run".into(),
                 });
             }
         }

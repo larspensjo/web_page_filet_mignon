@@ -193,6 +193,23 @@
 	color: var(--text-primary);
 }
 
+.run-notice--warning {
+	border-color: var(--accent-warning);
+}
+
+.run-notice-text {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-tight);
+	min-width: 0;
+}
+
+.run-notice-detail {
+	color: var(--accent-warning);
+	font-size: var(--metadata-size);
+	line-height: var(--metadata-line-height);
+}
+
 .run-reprocess-notice {
 	margin: var(--space-compact) 0 0;
 	color: var(--text-tertiary);

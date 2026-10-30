@@ -5,10 +5,10 @@ pub const DANGER_PERCENT: u8 = 90;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LlmQuotaLimits {
-    pub max_calls_per_session: Option<u64>,
-    pub max_input_tokens_per_session: Option<u64>,
-    pub max_output_tokens_per_session: Option<u64>,
-    pub max_cost_microdollars_per_session: Option<u64>,
+    pub max_calls_per_run: Option<u64>,
+    pub max_input_tokens_per_run: Option<u64>,
+    pub max_output_tokens_per_run: Option<u64>,
+    pub max_cost_microdollars_per_run: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -59,7 +59,7 @@ pub fn build_llm_quota_view(quota: &LlmQuotaState) -> LlmQuotaView {
     let limit = quota
         .limits
         .as_ref()
-        .and_then(|limits| limits.max_calls_per_session);
+        .and_then(|limits| limits.max_calls_per_run);
     let Some(limit_value) = limit else {
         return LlmQuotaView {
             label: format!("LLM calls {used} / unlimited"),
@@ -105,10 +105,10 @@ mod tests {
     fn quota(used: u64, limit: Option<u64>) -> LlmQuotaState {
         LlmQuotaState {
             limits: Some(LlmQuotaLimits {
-                max_calls_per_session: limit,
-                max_input_tokens_per_session: None,
-                max_output_tokens_per_session: None,
-                max_cost_microdollars_per_session: None,
+                max_calls_per_run: limit,
+                max_input_tokens_per_run: None,
+                max_output_tokens_per_run: None,
+                max_cost_microdollars_per_run: None,
             }),
             usage: LlmQuotaUsage {
                 calls: used,

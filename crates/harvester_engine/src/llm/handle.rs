@@ -144,6 +144,12 @@ impl LlmHandle {
         response_rx.recv().ok()
     }
 
+    /// Start a new run's usage allowance. Requests sent after this call count
+    /// against the fresh run quotas.
+    pub fn reset_usage(&self) {
+        let _ = self.cmd_tx.send(LlmCommand::ResetUsage);
+    }
+
     /// Send a stop signal and drop the sender, causing the worker thread to drain all
     /// in-flight requests and shut down cleanly.
     pub fn drain_and_stop(self) {
@@ -170,6 +176,7 @@ pub enum LlmCommand {
     GetUsageTotals {
         response_tx: mpsc::Sender<LlmUsageTotals>,
     },
+    ResetUsage,
     Stop,
 }
 
@@ -284,7 +291,7 @@ pub enum LlmCompletionError {
 
 /// Where a quota-exhausted stop originated. Provider = the LLM vendor refused
 /// the call (e.g. OpenAI insufficient_quota / out of credits). SessionBudget =
-/// Harvester's own per-session call/token/cost limit tripped.
+/// Harvester's own per-run call/token/cost limit tripped (name kept for compatibility).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum QuotaOrigin {
     Provider,
@@ -340,6 +347,11 @@ fn worker_loop(
             LlmCommand::GetUsageTotals { response_tx } => {
                 let totals = quota_tracker.lock().unwrap().totals();
                 let _ = response_tx.send(totals);
+            }
+            LlmCommand::ResetUsage => {
+                quota_tracker.lock().unwrap().reset_usage();
+                engine_info!("[model-budget] run usage reset");
+                send_llm_usage_update(&event_tx, &quota_tracker);
             }
             LlmCommand::Complete(_) => {
                 // Acquire a semaphore permit synchronously, bounding concurrency.
@@ -1065,7 +1077,7 @@ mod tests {
     #[test]
     fn pre_call_quota_rejections_report_usage_and_drain_all_requests() {
         let mut config = test_llm_config();
-        config.quotas.max_calls_per_session = Some(0);
+        config.quotas.max_calls_per_run = Some(0);
         config.max_concurrent_requests = 10;
         let handle = LlmHandle::new(config);
         let events = handle.event_receiver();
@@ -1108,6 +1120,65 @@ mod tests {
         }
         assert_eq!(completions.len(), 10);
         assert_eq!(usage_updates, 10);
+        handle.drain_and_stop();
+    }
+
+    #[test]
+    fn reset_usage_starts_a_fresh_run_allowance() {
+        let output_dir = tempfile::TempDir::new().unwrap();
+        let provider = Arc::new(MockLlmProvider::new());
+        for _ in 0..2 {
+            provider.queue_json_success(
+                r#"{"category":"Technology","priority":2,"tags":["ai"],"rationale":"relevant"}"#,
+            );
+        }
+        let mut config = test_llm_config();
+        config.provider = provider;
+        config.output_dir = output_dir.path().to_path_buf();
+        config.quotas.max_calls_per_run = Some(1);
+        let handle = LlmHandle::new(config);
+        let events = handle.event_receiver();
+        let complete = |request_id| {
+            handle
+                .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
+                    request_id,
+                    prompt_id: PromptId::ArticleTriage,
+                    prompt_version: None,
+                    input_content: "A compact article body".into(),
+                    context: Vec::new(),
+                    extra_template_vars: Vec::new(),
+                })))
+                .unwrap();
+        };
+        let next_event = || {
+            events
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(5))
+                .expect("worker event")
+        };
+        let completion_succeeded = |wanted: u64| loop {
+            if let LlmEvent::Completed { request_id, result } = next_event() {
+                assert_eq!(request_id, wanted);
+                break result.is_ok();
+            }
+        };
+
+        complete(1);
+        assert!(completion_succeeded(1));
+        handle.reset_usage();
+        loop {
+            if let LlmEvent::UsageUpdated { usage } = next_event() {
+                if usage.calls == 0 {
+                    break;
+                }
+            }
+        }
+        complete(2);
+        assert!(
+            completion_succeeded(2),
+            "the second call must use the new run's allowance"
+        );
         handle.drain_and_stop();
     }
 

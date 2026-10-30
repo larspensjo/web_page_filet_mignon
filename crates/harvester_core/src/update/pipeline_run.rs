@@ -136,7 +136,8 @@ pub(super) fn handle_pipeline_requested(
     let mut effects = Vec::new();
     if !state.run_progress_is_active() {
         begin_run_if_needed(state);
-        effects.push(Effect::ResetDownloadQuota);
+        state.reset_run_model_budget();
+        effects.push(Effect::ResetRunQuotas);
     }
     let polling = state.is_poll_in_progress() || state.batch_observation().jobs_in_flight > 0;
     let scope = if scope == crate::PipelineRunScope::Resume && polling {
@@ -243,13 +244,20 @@ fn settle_run(state: &mut AppState) {
         admission.armed = false;
     }
     state.finalize_summary_cache_run();
+    let ai_stopped_message = state.model_dispatch_halt_notice();
     state.set_run_completion_notice(RunCompletionNotice {
         new_result_count,
         completed_at_utc,
+        ai_stopped_message,
     });
     state.set_pipeline_run_phase(PipelineRunPhase::Idle);
     clear_export_unavailable_status(state);
-    engine_logging::engine_info!("[run-terminal] run_id={run_id} outcome=completed");
+    match state.model_dispatch_halt_kind() {
+        Some(halt) => engine_logging::engine_warn!(
+            "[run-terminal] run_id={run_id} outcome=ai_halted halt={halt}"
+        ),
+        None => engine_logging::engine_info!("[run-terminal] run_id={run_id} outcome=completed"),
+    }
     state.mark_dirty();
 }
 

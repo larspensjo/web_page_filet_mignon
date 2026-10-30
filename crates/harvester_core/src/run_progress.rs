@@ -327,6 +327,9 @@ pub enum RunState {
 pub struct RunCompletionNotice {
     pub new_result_count: usize,
     pub completed_at_utc: DateTime<Utc>,
+    /// Set when the run ended with AI work stopped by a budget or provider
+    /// limit, so the run does not read as a normal completion.
+    pub ai_stopped_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

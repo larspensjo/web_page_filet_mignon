@@ -145,13 +145,13 @@ fn provider_quota_exhausted_summary_halts_immediately_with_credit_reason() {
 }
 
 #[test]
-fn session_budget_quota_exhausted_stops_run_with_session_limit_reason() {
+fn run_budget_quota_exhausted_stops_run_with_run_limit_reason() {
     init_logging();
     let (state, requests) = start_summary_run(5, 1);
     let (state, _) = deliver(state, requests[0], quota_result(QuotaOrigin::SessionBudget));
 
     assert_eq!(
-        state.session_quota_halt_reason(),
+        state.run_quota_halt_reason(),
         Some("session call quota exhausted")
     );
     assert_eq!(state.briefing().pending_count(), 0);
@@ -194,7 +194,7 @@ fn provider_credit_halt_resets_when_triage_starts_again() {
 }
 
 #[test]
-fn session_quota_halt_persists_across_triage_start_with_original_reason() {
+fn run_quota_halt_resets_when_the_next_run_starts() {
     init_logging();
     let mut state = AppState::new();
     state.set_llm_max_in_flight(1);
@@ -205,18 +205,18 @@ fn session_quota_halt_persists_across_triage_start_with_original_reason() {
     )
     .unwrap();
     let (state, _) = deliver(state, id, quota_result(QuotaOrigin::SessionBudget));
+    assert_eq!(
+        state.run_quota_halt_reason(),
+        Some("session call quota exhausted")
+    );
+    assert!(state.run_progress().unwrap().terminal);
     let (state, effects) = start_triage_for_test(state, loaded_triage_articles(2));
     assert!(request_id_for_prompt(
         &effects,
         harvester_engine::llm::prompt::PromptId::ArticleTriage
     )
-    .is_none());
-    assert!(state.model_dispatch_halt_reason().is_some());
-    assert_eq!(
-        state.session_quota_halt_reason(),
-        Some("session call quota exhausted")
-    );
-    assert!(state.briefing().pending_count() == 0);
+    .is_some());
+    assert!(state.model_dispatch_halt_reason().is_none());
 }
 
 #[test]

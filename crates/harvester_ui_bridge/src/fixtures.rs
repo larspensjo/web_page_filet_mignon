@@ -28,6 +28,7 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
     let with_selection = selected_fixture_state(&empty);
     let run_in_progress = run_in_progress_with_failures();
     let run_finished = completed_run_state();
+    let run_budget_stopped = run_stopped_by_ai_budget_state();
     let overlapping_stages = overlapping_active_stages();
     let unfinished_work = idle_with_corpus(&empty);
     let stopping = stopping_with_in_flight_work();
@@ -71,6 +72,7 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
             run_in_progress_with_reused_results(),
         ),
         ("run_finished_with_notice", run_finished),
+        ("run_stopped_by_ai_budget", run_budget_stopped),
         ("ai_unavailable", ai_unavailable),
         ("overlapping_active_stages", overlapping_stages),
         ("unfinished_work_available", unfinished_work),
@@ -105,7 +107,8 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
                 | "stopping_with_in_flight_work"
                 | "stopped_with_unfinished_work_export_enabled"
                 | "export_unavailable_during_run"
-                | "reprocess_notice" => Status::NotScoredYet,
+                | "reprocess_notice"
+                | "run_stopped_by_ai_budget" => Status::NotScoredYet,
                 _ => unreachable!("every named fixture must pin its meter status"),
             };
             let view = state.view();
@@ -505,6 +508,30 @@ fn completed_run_state() -> AppState {
     state = reduce(state, Msg::JobSelected { job_id });
     assert!(state.view().run_completion_notice.is_some());
     assert!(!state.view().signal_candidate_rows.is_empty());
+    state
+}
+
+fn run_stopped_by_ai_budget_state() -> AppState {
+    let (mut state, _article, _job_id, triage_effects) = prepared_article_state();
+    state = add_llm_metadata(state);
+    let triage_request_id = request_id(&triage_effects, PromptId::ArticleTriage, "triage");
+    state = reduce(
+        state,
+        Msg::LlmCompleted {
+            request_id: triage_request_id,
+            result: LlmResultKind::QuotaExhausted {
+                reason: "too many LLM input tokens this run".into(),
+                origin: harvester_engine::llm::QuotaOrigin::SessionBudget,
+            },
+            metadata: None,
+        },
+    );
+    state = reduce(state, Msg::PipelineRunAdvance);
+    state = reduce(state, Msg::PipelineRunAdvance);
+    assert!(state
+        .view()
+        .run_completion_notice
+        .is_some_and(|notice| notice.ai_stopped_message.is_some()));
     state
 }
 

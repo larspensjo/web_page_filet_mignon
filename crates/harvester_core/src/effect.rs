@@ -74,9 +74,9 @@ pub enum Effect {
     },
     FlushResults,
     StartSession,
-    /// A new pipeline run began; the download engine starts its per-run URL
-    /// allowance from zero.
-    ResetDownloadQuota,
+    /// A new pipeline run began; the download engine and the LLM worker start
+    /// their per-run URL and model-usage allowances from zero.
+    ResetRunQuotas,
     StopFinish {
         policy: StopPolicy,
     },

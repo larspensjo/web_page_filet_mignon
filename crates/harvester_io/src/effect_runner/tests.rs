@@ -1026,7 +1026,7 @@ async fn run_timeline_observes_real_poll_engine_handoff_and_terminal_without_new
     assert!(observe(&state, "PipelineRunRequested").is_empty());
     assert_eq!(
         effects,
-        vec![Effect::ResetDownloadQuota, Effect::PollAllSources]
+        vec![Effect::ResetRunQuotas, Effect::PollAllSources]
     );
     runner.enqueue(effects);
     let deadline = Instant::now() + Duration::from_secs(10);
