@@ -21,7 +21,7 @@ param(
     [ValidateRange(1, 1000000)][int]$MinLines = 500,
     [string]$RecommendModel = 'opus',
     # Codex model slugs are case-sensitive; 'GPT-5.6-Luna' is rejected by the API.
-    [string]$ExtractModel = 'gpt-5.6-luna',
+    [string]$ExtractModel = 'gpt-6-luna',
     [string]$ExtractReasoning = 'high',
     [switch]$RunTests,
     [switch]$PreflightOnly
@@ -87,6 +87,17 @@ function Get-ShrinkSourceRoot {
     }
     $parent = (Split-Path -Parent $norm) -replace '\\', '/'
     return $parent
+}
+
+function ConvertTo-ShrinkDestinationPath {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Destination)
+
+    # The recommender sometimes annotates the path, e.g.
+    # "src/x_payload.rs (child module via #[path = ...])". Keep the leading .rs path;
+    # anything else is returned as-is for Test-ShrinkDestination to reject.
+    $d = ($Destination -replace '\\', '/').Trim()
+    if ($d -match '^`?(?<path>[^\s`]+\.rs)`?(\s|$)') { return $Matches['path'] }
+    return $d
 }
 
 function Test-ShrinkDestination {
@@ -418,7 +429,11 @@ function Invoke-RustFileShrinkMain {
         }
 
         $candidate = Get-ObjectProperty -Object $recommendation -Name 'candidate' -Default $null
-        $destRel = [string](Get-ObjectProperty -Object $candidate -Name 'suggested_destination' -Default '')
+        $destRaw = [string](Get-ObjectProperty -Object $candidate -Name 'suggested_destination' -Default '')
+        $destRel = ConvertTo-ShrinkDestinationPath -Destination $destRaw
+        if ($destRel -ne $destRaw) {
+            Add-LogLine -LogPath $ctx.LogPath -Line "Normalized suggested_destination '$destRaw' -> '$destRel'."
+        }
 
         # Validate the destination BEFORE granting edit permission (review finding #4).
         # No edits exist yet, so an invalid destination is a clean halt (no restore needed).

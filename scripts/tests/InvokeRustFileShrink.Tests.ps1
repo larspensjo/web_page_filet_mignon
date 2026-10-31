@@ -80,6 +80,22 @@ Describe 'Get-ShrinkSourceRoot' {
     }
 }
 
+Describe 'ConvertTo-ShrinkDestinationPath' {
+    It 'returns a bare path unchanged apart from separators and whitespace' {
+        ConvertTo-ShrinkDestinationPath -Destination ' crates\x\src\parser.rs ' | Should -Be 'crates/x/src/parser.rs'
+    }
+    It 'drops a trailing annotation after the .rs path' {
+        $d = 'src/capture_payload.rs (child module of capture via #[path = "capture_payload.rs"] mod payload;)'
+        ConvertTo-ShrinkDestinationPath -Destination $d | Should -Be 'src/capture_payload.rs'
+    }
+    It 'drops backticks around the path' {
+        ConvertTo-ShrinkDestinationPath -Destination '`src/parser.rs` (new module)' | Should -Be 'src/parser.rs'
+    }
+    It 'leaves a value without a leading .rs path for the validator to reject' {
+        ConvertTo-ShrinkDestinationPath -Destination 'a new module next to big.rs' | Should -Be 'a new module next to big.rs'
+    }
+}
+
 Describe 'Test-ShrinkDestination' {
     It 'accepts a .rs destination under the target source root' {
         { Test-ShrinkDestination -Destination 'crates/x/src/parser.rs' -TargetRelPath 'crates/x/src/big.rs' } | Should -Not -Throw

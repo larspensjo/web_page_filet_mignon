@@ -14,7 +14,11 @@
       "properties": {
         "name": { "type": "string" },
         "description": { "type": "string" },
-        "suggested_destination": { "type": "string" },
+        "suggested_destination": {
+          "type": "string",
+          "description": "Bare repo-relative path ending in .rs; no annotations.",
+          "pattern": "^[^\\s`]+\\.rs$"
+        },
         "estimated_lines": { "type": "integer", "minimum": 0 }
       }
     },

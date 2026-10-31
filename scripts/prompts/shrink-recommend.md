@@ -11,6 +11,9 @@ Rules:
 - Read-only. Do not edit files, do not stage, do not claim to have edited anything.
 - Output JSON only — no prose, no code fences — matching the schema below exactly.
 - If decision is "extract", include the "candidate" object. If "stop", omit "candidate".
+- "suggested_destination" is a bare repo-relative path ending in ".rs" (e.g.
+  "src/foo_parser.rs"), with no notes, quotes or backticks. Describe how the module is
+  wired in (e.g. a `#[path]` attribute) in "next_step_summary" instead.
 
 Output JSON schema:
 {{RECOMMENDATION_SCHEMA}}
