@@ -7,6 +7,7 @@ use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
 use harvester_engine::llm::prompt::PromptId;
 
 mod archive_meter_tests;
+mod archive_pending_count_tests;
 mod support;
 use support::*;
 
@@ -576,7 +577,13 @@ fn open_in_browser_with_no_selection_emits_nothing() {
     assert!(effects.is_empty());
 }
 
+mod archive_checkpoint_tests;
+mod archive_dialog_submit_tests;
+mod archive_pre_triage_handoff_tests;
+mod archive_signal_selection_tests;
+mod archive_startup_cache_tests;
 mod archive_tests;
+mod archive_token_estimate_tests;
 mod blacklist_tests;
 
 mod import_tests;
