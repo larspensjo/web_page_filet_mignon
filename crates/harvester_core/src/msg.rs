@@ -157,6 +157,13 @@ pub enum Msg {
         /// Count filtered by the seen-set (cross-cycle dedup).
         dedup_filtered: usize,
     },
+    /// A source was deliberately not polled this run (e.g. a Brave source
+    /// searched too recently). Counts as handled, not failed.
+    SourcePollSkipped {
+        source_id: harvester_engine::SourceId,
+        kind: harvester_engine::SourceKind,
+        reason: String,
+    },
     /// Polling failed for a source.
     SourcePollFailed {
         source_id: harvester_engine::SourceId,
@@ -283,6 +290,7 @@ impl Msg {
             Self::LlmQuotaUsageUpdated { .. } => "LlmQuotaUsageUpdated",
             Self::PollStarted { .. } => "PollStarted",
             Self::SourcePollCompleted { .. } => "SourcePollCompleted",
+            Self::SourcePollSkipped { .. } => "SourcePollSkipped",
             Self::SourcePollFailed { .. } => "SourcePollFailed",
             Self::AllSourcesPollEnded => "AllSourcesPollEnded",
             Self::TriageArticlesLoaded { .. } => "TriageArticlesLoaded",

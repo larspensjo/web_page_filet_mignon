@@ -54,9 +54,28 @@ pub(super) fn handle_source_poll_completed(
         parsed,
         dedup_filtered,
         emitted,
+        skipped: None,
     });
     state.record_poll_pipeline_jobs(&job_ids);
     effects
+}
+
+pub(super) fn handle_source_poll_skipped(
+    state: &mut AppState,
+    source_id: harvester_engine::SourceId,
+    kind: harvester_engine::SourceKind,
+    reason: String,
+) -> Vec<Effect> {
+    engine_info!("[source-poll] {} skipped: {}", source_id, reason);
+    state.record_poll_stat(crate::SourcePollStat {
+        source_id,
+        kind,
+        parsed: 0,
+        dedup_filtered: 0,
+        emitted: 0,
+        skipped: Some(reason),
+    });
+    Vec::new()
 }
 
 pub(super) fn handle_source_poll_failed(

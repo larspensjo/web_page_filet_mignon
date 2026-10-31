@@ -41,6 +41,13 @@ the run's first preparation read and model dispatch, then stays fixed. Hydration
 discovers unfinished work without admitting scoring. Import completion uses Resume
 to process the current window without starting another source poll.
 
+Brave sources are searched at most once per 20 hours, because Brave bills per request.
+The poll worker records each source's last search Brave accepted in
+`.brave_search_log.ron` and reports a source searched more recently as
+`SourcePollSkipped` with the age; that counts as scanned, not failed, and appears as
+"skipped" in the poll summary. Failed requests are not recorded, so they are retried on
+the next run. `HARVESTER_FORCE_BRAVE_SEARCH=1` lifts the limit for testing.
+
 Both hosts overlap intake and processing: triage can start after the quiet
 interval while later downloads continue. Admissions split in window order at
 four times the synchronous request budget. A triage wave releases completed,

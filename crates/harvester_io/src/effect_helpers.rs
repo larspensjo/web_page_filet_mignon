@@ -8,7 +8,8 @@ use harvester_core::{LlmQuotaUsage, LlmResultKind, Msg, Stage};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::{LlmCompletionError, LlmError, LlmEvent, LlmRunMetadata};
 use harvester_engine::{
-    poll_rss_source, BraveSeenSet, FetchSettings, RssSeenSet, SourceId, UrlPolicy,
+    brave_skip_reason, poll_rss_source, BraveSearchLog, BraveSeenSet, FetchSettings, RssSeenSet,
+    SourceId, SourceKind, UrlPolicy,
 };
 use reqwest::blocking::Client;
 use reqwest::header::ACCEPT;
@@ -48,7 +49,19 @@ pub struct BravePollContext<'a> {
     pub brave_seen_set: &'a mut BraveSeenSet,
     pub brave_seen_set_path: &'a Path,
     pub brave_metadata_path: &'a Path,
+    pub search_log: &'a mut BraveSearchLog,
+    pub search_log_path: &'a Path,
+    /// Search even when the source was searched within the minimum interval.
+    pub force_search: bool,
     pub msg_tx: &'a mpsc::Sender<Msg>,
+}
+
+/// Environment variable that lifts the once-per-interval Brave limit, for
+/// testing Brave-related features. Any non-empty value other than `0` enables it.
+pub const FORCE_BRAVE_SEARCH_ENV: &str = "HARVESTER_FORCE_BRAVE_SEARCH";
+
+pub fn force_brave_search_from_env() -> bool {
+    std::env::var(FORCE_BRAVE_SEARCH_ENV).is_ok_and(|value| !value.is_empty() && value != "0")
 }
 
 pub struct RssPollContext<'a> {
@@ -605,8 +618,9 @@ pub(crate) fn fetch_brave_results_with_url(
 
 /// Handle a single Brave News source poll.
 ///
-/// Flow: resolve the API key, fetch and parse results, select unseen URLs up to
-/// the per-poll limit, persist seen state, then emit the selected URLs.
+/// Flow: skip sources searched within the minimum interval, resolve the API
+/// key, fetch and record the accepted search, parse results, select unseen URLs
+/// up to the per-poll limit, persist seen state, then emit the selected URLs.
 pub fn handle_brave_source_poll(
     source_id: &SourceId,
     cfg: &harvester_engine::BraveNewsSourceConfig,
@@ -618,6 +632,21 @@ pub fn handle_brave_source_poll(
     let brave_seen_set = &mut context.brave_seen_set;
     let brave_seen_set_path = context.brave_seen_set_path;
     let brave_metadata_path = context.brave_metadata_path;
+    if !context.force_search {
+        if let Some(age) = context
+            .search_log
+            .recent_search_age(source_id, chrono::Utc::now())
+        {
+            let reason = brave_skip_reason(age);
+            engine_info!("[brave-poll] {} skipped: {}", source_id, reason);
+            let _ = msg_tx.send(Msg::SourcePollSkipped {
+                source_id: source_id.clone(),
+                kind: SourceKind::Brave,
+                reason,
+            });
+            return;
+        }
+    }
     let api_key = match std::env::var(&cfg.api_key_env) {
         Ok(key) if !key.is_empty() => key,
         Ok(_) => {
@@ -653,7 +682,22 @@ pub fn handle_brave_source_poll(
         cfg.freshness.as_deref(),
         fetch_settings,
     ) {
-        Ok(bytes) => bytes,
+        Ok(bytes) => {
+            // Brave billed this request, so it counts even if parsing fails.
+            context
+                .search_log
+                .record_success(source_id, chrono::Utc::now());
+            if let Err(err) =
+                crate::persist_brave_search_log(context.search_log, context.search_log_path)
+            {
+                engine_warn!(
+                    "[brave-poll] failed to persist search log for {}: {}",
+                    source_id,
+                    err
+                );
+            }
+            bytes
+        }
         Err(reason) => {
             engine_warn!("[brave-poll] fetch failed for {}: {}", source_id, reason);
             let _ = msg_tx.send(Msg::SourcePollFailed {
@@ -860,11 +904,18 @@ mod brave_fetch_tests {
         );
     }
 
-    #[test]
-    fn handle_brave_poll_fails_with_missing_env_var() {
+    fn brave_test_id() -> harvester_engine::SourceId {
+        harvester_engine::SourceId::new("brave-test").unwrap()
+    }
+
+    /// Polls one source whose API key variable is unset, so any search
+    /// attempt fails before reaching the network.
+    fn poll_without_key(
+        search_log: &mut BraveSearchLog,
+        force_search: bool,
+    ) -> harvester_core::Msg {
         use std::sync::mpsc;
         let (tx, rx) = mpsc::channel();
-        let source_id = harvester_engine::SourceId::new("brave-test").unwrap();
         let cfg = harvester_engine::BraveNewsSourceConfig {
             query: "test".to_string(),
             api_key_env: "BRAVE_KEY_DEFINITELY_NOT_SET_XYZ".to_string(),
@@ -877,21 +928,80 @@ mod brave_fetch_tests {
             brave_seen_set: &mut seen_set,
             brave_seen_set_path: &temp.path().join(".brave_seen_set.ron"),
             brave_metadata_path: &temp.path().join(".brave_metadata.ron"),
+            search_log,
+            search_log_path: &temp.path().join(".brave_search_log.ron"),
+            force_search,
             msg_tx: &tx,
         };
         handle_brave_source_poll(
-            &source_id,
+            &brave_test_id(),
             &cfg,
             None,
             &FetchSettings::default(),
             &mut context,
         );
+        rx.try_recv().unwrap()
+    }
 
-        match rx.try_recv().unwrap() {
-            harvester_core::Msg::SourcePollFailed { source_id: id, .. } => {
-                assert_eq!(id, source_id);
+    #[test]
+    fn handle_brave_poll_fails_with_missing_env_var() {
+        let mut search_log = BraveSearchLog::new();
+        match poll_without_key(&mut search_log, false) {
+            harvester_core::Msg::SourcePollFailed { source_id, .. } => {
+                assert_eq!(source_id, brave_test_id());
             }
             other => panic!("expected SourcePollFailed, got {other:?}"),
         }
+        assert_eq!(
+            search_log,
+            BraveSearchLog::new(),
+            "a failed search must not delay the next attempt"
+        );
+    }
+
+    #[test]
+    fn handle_brave_poll_skips_source_searched_recently() {
+        let mut search_log = BraveSearchLog::new();
+        let searched = chrono::Utc::now() - chrono::Duration::hours(3);
+        search_log.record_success(&brave_test_id(), searched);
+
+        match poll_without_key(&mut search_log, false) {
+            harvester_core::Msg::SourcePollSkipped {
+                source_id,
+                kind,
+                reason,
+            } => {
+                assert_eq!(source_id, brave_test_id());
+                assert_eq!(kind, SourceKind::Brave);
+                assert!(reason.starts_with("searched 3 hours ago"), "{reason}");
+            }
+            other => panic!("expected SourcePollSkipped, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn handle_brave_poll_searches_again_after_the_interval() {
+        let mut search_log = BraveSearchLog::new();
+        let searched = chrono::Utc::now()
+            - chrono::Duration::hours(harvester_engine::BRAVE_MIN_SEARCH_INTERVAL_HOURS + 1);
+        search_log.record_success(&brave_test_id(), searched);
+
+        let msg = poll_without_key(&mut search_log, false);
+        assert!(
+            matches!(msg, harvester_core::Msg::SourcePollFailed { .. }),
+            "expected a search attempt, got {msg:?}"
+        );
+    }
+
+    #[test]
+    fn forced_brave_poll_ignores_a_recent_search() {
+        let mut search_log = BraveSearchLog::new();
+        search_log.record_success(&brave_test_id(), chrono::Utc::now());
+
+        let msg = poll_without_key(&mut search_log, true);
+        assert!(
+            matches!(msg, harvester_core::Msg::SourcePollFailed { .. }),
+            "expected a search attempt, got {msg:?}"
+        );
     }
 }

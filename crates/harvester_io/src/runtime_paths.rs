@@ -24,6 +24,7 @@ pub struct RuntimePaths {
     pub briefing_checkpoint_path: PathBuf,
     pub brave_seen_set_path: PathBuf,
     pub brave_metadata_path: PathBuf,
+    pub brave_search_log_path: PathBuf,
     pub blacklist_path: PathBuf,
 }
 
@@ -44,6 +45,7 @@ impl RuntimePaths {
         let briefing_checkpoint_path = output_dir.join(".briefing_checkpoint.ron");
         let brave_seen_set_path = output_dir.join(".brave_seen_set.ron");
         let brave_metadata_path = output_dir.join(".brave_metadata.ron");
+        let brave_search_log_path = output_dir.join(".brave_search_log.ron");
         let blacklist_path = crate::blacklist_store::default_blacklist_path(&output_dir);
 
         Self {
@@ -60,6 +62,7 @@ impl RuntimePaths {
             briefing_checkpoint_path,
             brave_seen_set_path,
             brave_metadata_path,
+            brave_search_log_path,
             blacklist_path,
         }
     }

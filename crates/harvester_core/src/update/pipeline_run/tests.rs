@@ -1004,6 +1004,45 @@ fn failed_sources_are_summarized_on_the_run_notice() {
 }
 
 #[test]
+fn skipped_sources_count_as_scanned_not_failed() {
+    let state = tick(AppState::new(), 0);
+    let (state, _) = crate::update(
+        state,
+        Msg::AiAvailabilityDetected {
+            availability: crate::AiAvailability::Unavailable {
+                reason: crate::AiUnavailableReason::MissingApiKey,
+            },
+        },
+    );
+    let (state, _) = crate::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
+    let state = crate::update::test_support::update(state, Msg::PollStarted { total: 1 }).0;
+    let state = crate::update::test_support::update(
+        state,
+        Msg::SourcePollSkipped {
+            source_id: SourceId::new("brave-a").expect("valid source id"),
+            kind: SourceKind::Brave,
+            reason: "searched 3 hours ago".into(),
+        },
+    )
+    .0;
+    let scanned =
+        &state.run_progress().expect("active run").stages[PipelineStage::ScanningSources.index()];
+    assert_eq!((scanned.completed, scanned.failed), (1, 0));
+
+    let state = crate::update::test_support::update(state, Msg::AllSourcesPollEnded).0;
+    let stats = state.source_states().last_completed_poll_stats();
+    assert_eq!(stats.len(), 1);
+    assert_eq!(stats[0].skipped.as_deref(), Some("searched 3 hours ago"));
+    let notice = state.run_completion_notice().expect("completion notice");
+    assert!(notice.source_failure_message.is_none());
+}
+
+#[test]
 fn run_without_source_failures_has_no_source_message() {
     let (state, articles) = prepare_pipeline(1, 0);
     let state = run_to_completion(state, &articles, &[true]);

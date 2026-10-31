@@ -539,6 +539,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             parsed,
             dedup_filtered,
         ),
+        Msg::SourcePollSkipped {
+            source_id,
+            kind,
+            reason,
+        } => polling::handle_source_poll_skipped(&mut state, source_id, kind, reason),
         Msg::SourcePollFailed { source_id, error } => {
             polling::handle_source_poll_failed(&mut state, source_id, error)
         }

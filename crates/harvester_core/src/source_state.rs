@@ -13,6 +13,8 @@ pub struct SourcePollStat {
     pub dedup_filtered: usize,
     /// Final count emitted into the pipeline (after dedup + limit cap).
     pub emitted: usize,
+    /// Why the source was not polled this cycle; `None` when it was polled.
+    pub skipped: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -145,6 +147,7 @@ mod tests {
             parsed: emitted,
             dedup_filtered: 0,
             emitted,
+            skipped: None,
         }
     }
 

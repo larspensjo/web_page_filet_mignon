@@ -1,5 +1,7 @@
 use engine_logging::{engine_info, engine_warn};
-use harvester_engine::{AtomicFileWriter, BraveNewsItem, BraveSeenSet, RssSeenSet, SourceId};
+use harvester_engine::{
+    AtomicFileWriter, BraveNewsItem, BraveSearchLog, BraveSeenSet, RssSeenSet, SourceId,
+};
 use ron::ser::PrettyConfig;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -88,6 +90,42 @@ pub fn persist_brave_seen_set(set: &BraveSeenSet, path: &Path) -> io::Result<()>
     writer
         .write(file_name, &content)
         .map(|_| engine_info!("[brave-seen] saved seen set to {:?}", path))
+        .map_err(io::Error::other)
+}
+
+/// Load the Brave search log. Missing/corrupt files yield an empty log, which
+/// only means every Brave source is due once.
+pub fn load_brave_search_log(path: &Path) -> BraveSearchLog {
+    match fs::read_to_string(path) {
+        Ok(contents) => match ron::from_str::<BraveSearchLog>(&contents) {
+            Ok(log) => log,
+            Err(err) => {
+                engine_warn!("[brave-schedule] failed to parse {:?}: {}", path, err);
+                BraveSearchLog::new()
+            }
+        },
+        Err(err) if err.kind() == io::ErrorKind::NotFound => BraveSearchLog::new(),
+        Err(err) => {
+            engine_warn!("[brave-schedule] failed to read {:?}: {}", path, err);
+            BraveSearchLog::new()
+        }
+    }
+}
+
+/// Save the Brave search log atomically.
+pub fn persist_brave_search_log(log: &BraveSearchLog, path: &Path) -> io::Result<()> {
+    let content = ron::ser::to_string_pretty(log, PrettyConfig::new())
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "invalid brave search log path")
+        })?;
+    AtomicFileWriter::new(dir.to_path_buf())
+        .write(file_name, &content)
+        .map(|_| ())
         .map_err(io::Error::other)
 }
 
@@ -223,6 +261,32 @@ mod tests {
         assert!(loaded.is_seen("https://example.com/article-1"));
         assert!(loaded.is_seen("https://example.com/article-2"));
         assert!(!loaded.is_seen("https://example.com/unseen"));
+    }
+
+    #[test]
+    fn brave_search_log_save_and_load_roundtrips() {
+        init_logging();
+        let temp = TempDir::new().expect("tempdir");
+        let path = temp.path().join("brave_search_log.ron");
+        let id = SourceId::new("brave-a").expect("valid");
+        let searched = chrono::Utc::now();
+
+        let mut log = BraveSearchLog::new();
+        log.record_success(&id, searched);
+        persist_brave_search_log(&log, &path).expect("save");
+
+        let loaded = load_brave_search_log(&path);
+        assert_eq!(loaded, log);
+        assert!(loaded.recent_search_age(&id, searched).is_some());
+    }
+
+    #[test]
+    fn corrupt_brave_search_log_loads_empty() {
+        init_logging();
+        let temp = TempDir::new().expect("tempdir");
+        let path = temp.path().join("brave_search_log.ron");
+        fs::write(&path, "not ron").expect("write corrupt");
+        assert_eq!(load_brave_search_log(&path), BraveSearchLog::new());
     }
 
     #[test]

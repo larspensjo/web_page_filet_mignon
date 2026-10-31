@@ -2,6 +2,7 @@
 mod archive_url;
 mod blocker_page;
 mod brave_poll;
+mod brave_search_log;
 mod brave_seen_set;
 pub mod briefing;
 pub mod content_extraction;
@@ -35,6 +36,7 @@ mod url_policy;
 
 pub use archive_url::archive_url_key;
 pub use brave_poll::{parse_brave_news_response, BraveNewsItem, BravePollError};
+pub use brave_search_log::{brave_skip_reason, BraveSearchLog, BRAVE_MIN_SEARCH_INTERVAL_HOURS};
 pub use brave_seen_set::{normalize_url_for_dedupe, BraveSeenSet};
 pub use briefing::{
     scan_archive_article_metadata, scan_archive_window_metadata, summary_preparation_budget,

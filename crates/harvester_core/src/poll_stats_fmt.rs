@@ -28,19 +28,28 @@ pub fn format_poll_stats(stats: &[SourcePollStat]) -> String {
         }
         let total_emitted: usize = group.iter().map(|s| s.emitted).sum();
         let total_filtered: usize = group.iter().map(|s| s.dedup_filtered).sum();
+        let total_skipped = group.iter().filter(|s| s.skipped.is_some()).count();
+        let skipped_note = if total_skipped == 0 {
+            String::new()
+        } else {
+            format!(", {total_skipped} skipped")
+        };
         let mut lines = vec![
             format!("## {label}"),
             format!(
-                "**{} source{}**. {} emitted, {} dedup-filtered.",
+                "**{} source{}**. {} emitted, {} dedup-filtered{}.",
                 group.len(),
                 if group.len() == 1 { "" } else { "s" },
                 total_emitted,
                 total_filtered,
+                skipped_note,
             ),
             String::new(),
         ];
         for s in &group {
-            if s.parsed == 0 {
+            if let Some(reason) = &s.skipped {
+                lines.push(format!("- **{}**: skipped ({reason})", s.source_id));
+            } else if s.parsed == 0 {
                 lines.push(format!("- **{}**: 0 parsed", s.source_id));
             } else {
                 lines.push(format!(
@@ -73,6 +82,7 @@ mod tests {
             parsed,
             dedup_filtered,
             emitted,
+            skipped: None,
         }
     }
 
@@ -99,5 +109,15 @@ mod tests {
         );
         assert!(formatted.contains("\n\n## Brave\n"));
         assert!(formatted.contains("- **brave-ai-data-center**: 0 parsed"));
+    }
+
+    #[test]
+    fn skipped_sources_are_counted_and_show_their_reason() {
+        let mut skipped = stat("brave-a", SourceKind::Brave, 0, 0, 0);
+        skipped.skipped = Some("searched 3 hours ago".to_string());
+        let formatted = format_poll_stats(&[skipped, stat("brave-b", SourceKind::Brave, 10, 4, 6)]);
+
+        assert!(formatted.contains("**2 sources**. 6 emitted, 4 dedup-filtered, 1 skipped."));
+        assert!(formatted.contains("- **brave-a**: skipped (searched 3 hours ago)"));
     }
 }

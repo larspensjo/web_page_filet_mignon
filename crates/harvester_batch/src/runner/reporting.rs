@@ -423,6 +423,7 @@ mod tests {
             parsed: 2,
             dedup_filtered: 1,
             emitted: 1,
+            skipped: None,
         });
         let mut reporter = PollSummaryReporter::default();
         assert!(reporter.take(&[]).is_none());

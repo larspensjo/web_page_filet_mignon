@@ -56,7 +56,9 @@ pub(super) fn progress_before(state: &AppState, msg: &Msg) -> ProgressBefore {
         Msg::PollStarted { total } => ProgressEvent::PollStarted {
             total: *total as u32,
         },
-        Msg::SourcePollCompleted { .. } => ProgressEvent::SourcePollCompleted,
+        Msg::SourcePollCompleted { .. } | Msg::SourcePollSkipped { .. } => {
+            ProgressEvent::SourcePollCompleted
+        }
         Msg::SourcePollFailed { source_id, error } => ProgressEvent::SourcePollFailed {
             source_id: source_id.to_string(),
             error: error.clone(),

@@ -6,9 +6,10 @@ use harvester_core::Msg;
 use harvester_engine::{poll_curated_source, poll_file_source, SourceKind, SourceType};
 
 use crate::effect_helpers::{
-    handle_brave_source_poll, handle_rss_source_poll, BravePollContext, PollGuard, RssPollContext,
+    force_brave_search_from_env, handle_brave_source_poll, handle_rss_source_poll,
+    BravePollContext, PollGuard, RssPollContext, FORCE_BRAVE_SEARCH_ENV,
 };
-use crate::{load_brave_seen_set, load_seen_set, load_sources};
+use crate::{load_brave_search_log, load_brave_seen_set, load_seen_set, load_sources};
 
 use super::EffectRunner;
 
@@ -19,6 +20,7 @@ impl EffectRunner {
         let seen_set_path = self.paths.seen_set_path.clone();
         let brave_seen_set_path = self.paths.brave_seen_set_path.clone();
         let brave_metadata_path = self.paths.brave_metadata_path.clone();
+        let brave_search_log_path = self.paths.brave_search_log_path.clone();
         let output_dir = self.paths.output_dir.clone();
         let url_policy = self.url_policy.clone();
         let fetch_settings = self.fetch_settings.clone();
@@ -44,6 +46,14 @@ impl EffectRunner {
 
             let mut seen_set = load_seen_set(&seen_set_path);
             let mut brave_seen_set = load_brave_seen_set(&brave_seen_set_path);
+            let mut brave_search_log = load_brave_search_log(&brave_search_log_path);
+            let force_brave_search = force_brave_search_from_env();
+            if force_brave_search {
+                engine_info!(
+                    "[brave-poll] {} is set; searching every Brave source this run",
+                    FORCE_BRAVE_SEARCH_ENV
+                );
+            }
 
             let _ = msg_tx.send(Msg::PollStarted {
                 total: enabled_sources.len(),
@@ -142,6 +152,9 @@ impl EffectRunner {
                             brave_seen_set: &mut brave_seen_set,
                             brave_seen_set_path: &brave_seen_set_path,
                             brave_metadata_path: &brave_metadata_path,
+                            search_log: &mut brave_search_log,
+                            search_log_path: &brave_search_log_path,
+                            force_search: force_brave_search,
                             msg_tx: &msg_tx,
                         };
                         handle_brave_source_poll(

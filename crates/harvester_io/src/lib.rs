@@ -38,8 +38,8 @@ pub use run_lock::{
 };
 pub use runtime_paths::{default_sources_path, RuntimePaths, DEFAULT_SOURCES_FILENAME};
 pub use seen_set_store::{
-    load_brave_seen_set, load_seen_set, persist_brave_metadata, persist_brave_seen_set,
-    persist_seen_set, BraveMetadataEntry,
+    load_brave_search_log, load_brave_seen_set, load_seen_set, persist_brave_metadata,
+    persist_brave_search_log, persist_brave_seen_set, persist_seen_set, BraveMetadataEntry,
 };
 pub use signal_candidate_cache_store::load as load_signal_candidate_cache;
 pub use signal_candidate_overrides_store::{
