@@ -2931,3 +2931,11 @@ Type: Implementation
 Context: Brave Search API usage exceeded the free $5 monthly credit. A per-source analysis of 29 runs showed same-day repeat runs (feature testing) were the main multiplier, and "past week" sources returned 63-79% already-seen URLs.
 Change: New `BraveSearchLog` (engine) persisted as `.brave_search_log.ron` (io). `handle_brave_source_poll` skips a source searched within 20 hours and emits the new `Msg::SourcePollSkipped`; the reducer records it as a `SourcePollStat` with `skipped: Some(reason)`, run progress counts it as scanned, and the poll summary prints "skipped (...)". A search is recorded once Brave returns HTTP success. `HARVESTER_FORCE_BRAVE_SEARCH` overrides. The sources file was also edited by hand (outside git): six weak sources merged into three and every Brave `count` raised to 50, which costs nothing because Brave bills per request; backup at `output/.sources.ron.bak-2026-10-30`.
 Refs: crates/harvester_engine/src/brave_search_log.rs, handle_brave_poll_skips_source_searched_recently, forced_brave_poll_ignores_a_recent_search, handle_brave_poll_fails_with_missing_env_var, skipped_sources_count_as_scanned_not_failed, skipped_sources_are_counted_and_show_their_reason; DecisionLog 2026-10-30
+
+## 2026-11-05 - Bound idle desktop view rebuilds
+Type: Bug Fix
+Context: The always-on 75 ms UI tick caused an unconditional full view rebuild, using about 60% of a core while idle.
+Change: Tick-only driver iterations with no effects now rebuild at most once per second; other iterations retain immediate view updates.
+Lessons Learned: An inexpensive clock message can become costly when it repeatedly triggers an expensive derived view.
+Prevention: Keep time-sensitive view refreshes at the host boundary and count actual view builds in driver regression tests.
+Refs: crates/harvester_ui_bridge/src/driver.rs, clock_only_ticks_refresh_at_most_once_per_second, non_tick_message_always_builds_a_view, tick_with_reducer_effect_always_builds_a_view, first_clock_only_iteration_builds_a_view, ticks_during_active_pipeline_always_build_a_view, tick_with_pre_triage_refresh_always_builds_a_view; DecisionLog 2026-11-05

@@ -16,6 +16,11 @@ use crate::snapshot::{project, BodyTable, SnapshotEnvelope};
 
 pub const SNAPSHOT_MIN_INTERVAL_MS: u64 = 50;
 
+/// The Last 24h job-list window advances through tick-driven view rebuilds
+/// (DecisionLog 2026-09-16); refreshing once per second preserves that coarse
+/// movement while bounding how stale the view can become.
+pub const CLOCK_ONLY_VIEW_REFRESH_MS: u64 = 1_000;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiCommand {
     ShowArchiveDialog(ArchiveDialogRequest),
@@ -267,6 +272,7 @@ where
     let body = AssertUnwindSafe(|| {
         let mut coalescer = SnapshotCoalescer::default();
         let mut last_view: Option<Arc<AppViewModel>> = None;
+        let mut last_view_built_at: Option<Duration> = None;
         loop {
             let iteration_started = iteration_observer.as_ref().map(|_| Instant::now());
             let mut timing = DriverIterationTiming::default();
@@ -300,6 +306,10 @@ where
             };
             let mut messages = vec![first];
             messages.extend(receiver.try_iter());
+            let clock_only_batch = messages
+                .iter()
+                .all(|message| matches!(message, Msg::Tick { .. }));
+            let mut reducer_effects_emitted = false;
             for message in messages {
                 last_message_kind = message.kind().to_owned();
                 let reducer_started = Instant::now();
@@ -314,6 +324,7 @@ where
                 }
                 reducer_observer(&last_message_kind, elapsed, &next);
                 state = next;
+                reducer_effects_emitted |= !effects.is_empty();
                 measure_phase!(
                     timing,
                     effect_hand_off,
@@ -327,42 +338,70 @@ where
                 reducer_observer("EvaluatePreTriageRefresh", refresh_started.elapsed(), &next);
             }
             state = next;
+            let pre_triage_effects_emitted = !effects.is_empty();
             measure_phase!(
                 timing,
                 effect_hand_off,
                 dispatch_effects(effects, &mut effect_sink, &mut command_sink)
             );
-            if !matches!(
+            let pipeline_advance_ran = !matches!(
                 state.pipeline_run_phase(),
                 harvester_core::PipelineRunPhase::Idle
-            ) {
+            );
+            if pipeline_advance_ran {
                 last_message_kind = "PipelineRunAdvance".to_string();
                 let reducer_started = Instant::now();
                 let (next, effects) =
                     measure_phase!(timing, reduce, reducer(state, Msg::PipelineRunAdvance));
                 reducer_observer(&last_message_kind, reducer_started.elapsed(), &next);
                 state = next;
+                reducer_effects_emitted |= !effects.is_empty();
                 measure_phase!(
                     timing,
                     effect_hand_off,
                     dispatch_effects(effects, &mut effect_sink, &mut command_sink)
                 );
             }
-            let view_started = Instant::now();
-            let view = measure_phase!(timing, view_build, Arc::new(state.view()));
-            view_observer(view_started.elapsed());
-            let changed = measure_phase!(
-                timing,
-                view_compare,
-                last_view.as_deref() != Some(view.as_ref())
-            );
-            measure_phase!(timing, snapshot, {
+            let clock_only = clock_only_batch
+                && !reducer_effects_emitted
+                && !refresh_triggered
+                && !pre_triage_effects_emitted
+                && !pipeline_advance_ran
+                && matches!(
+                    state.pipeline_run_phase(),
+                    harvester_core::PipelineRunPhase::Idle
+                );
+            let should_build_view = !clock_only
+                || last_view.is_none()
+                || last_view_built_at.is_none_or(|last| {
+                    now().saturating_sub(last) >= Duration::from_millis(CLOCK_ONLY_VIEW_REFRESH_MS)
+                });
+            let changed_view = if should_build_view {
+                let view_started = Instant::now();
+                let view = measure_phase!(timing, view_build, Arc::new(state.view()));
+                view_observer(view_started.elapsed());
+                let view_built_at = now();
+                last_view_built_at = Some(view_built_at);
+                let changed = measure_phase!(
+                    timing,
+                    view_compare,
+                    last_view.as_deref() != Some(view.as_ref())
+                );
                 if changed {
-                    if let Some((snapshot, table)) = coalescer.push(Arc::clone(&view), now()) {
+                    last_view = Some(Arc::clone(&view));
+                    Some((view, view_built_at))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            measure_phase!(timing, snapshot, {
+                if let Some((view, view_built_at)) = changed_view {
+                    if let Some((snapshot, table)) = coalescer.push(view, view_built_at) {
                         *bodies.write().expect("body table lock") = table;
                         snapshot_sink(SnapshotSignal::Snapshot(snapshot));
                     }
-                    last_view = Some(view);
                 }
                 if let Some((snapshot, table)) = coalescer.flush_due(now()) {
                     *bodies.write().expect("body table lock") = table;
@@ -418,7 +457,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::cell::Cell;
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::mpsc;
     use std::thread;
 
@@ -429,6 +469,250 @@ mod tests {
             job_count: value as usize,
             ..Default::default()
         })
+    }
+
+    // Assumes one iteration per message: the test reducer leaves the view unchanged, so no pending snapshot causes a recv-timeout iteration.
+    fn run_driver_steps<R>(steps: Vec<(u64, Msg)>, reducer: R) -> Vec<usize>
+    where
+        R: Fn(AppState, Msg) -> (AppState, Vec<Effect>) + Send + 'static,
+    {
+        let expected_steps = steps.len();
+        let processed = Arc::new(AtomicUsize::new(0));
+        let reducer_processed = Arc::clone(&processed);
+        let counted_reducer = move |state, message| {
+            let result = reducer(state, message);
+            reducer_processed.fetch_add(1, Ordering::SeqCst);
+            result
+        };
+        let clock_ms = Arc::new(AtomicU64::new(0));
+        let driver_clock_ms = Arc::clone(&clock_ms);
+        let view_builds = Arc::new(AtomicUsize::new(0));
+        let driver_view_builds = Arc::clone(&view_builds);
+        let (sender, receiver) = mpsc::channel();
+        let (iteration_sender, iteration_receiver) = mpsc::channel();
+        let driver = thread::spawn(move || {
+            run_driver_with_observers(
+                AppState::default(),
+                receiver,
+                counted_reducer,
+                |_| {},
+                |_| {},
+                |_| {},
+                Arc::new(RwLock::new(BodyTable::new())),
+                move || Duration::from_millis(driver_clock_ms.load(Ordering::SeqCst)),
+                |_, _, _| {},
+                move |_| {
+                    driver_view_builds.fetch_add(1, Ordering::SeqCst);
+                },
+                Some(move |_| {
+                    iteration_sender
+                        .send(())
+                        .expect("test should observe every driver iteration");
+                }),
+                move |_| processed.load(Ordering::SeqCst) >= expected_steps,
+            )
+        });
+
+        let mut builds_after_step = Vec::with_capacity(expected_steps);
+        for (time_ms, message) in steps {
+            clock_ms.store(time_ms, Ordering::SeqCst);
+            sender
+                .send(message)
+                .expect("driver should receive test message");
+            iteration_receiver
+                .recv_timeout(Duration::from_secs(3))
+                .expect("driver should finish the test iteration");
+            builds_after_step.push(view_builds.load(Ordering::SeqCst));
+        }
+        drop(sender);
+        assert_eq!(driver.join().unwrap(), DriverTermination::Clean);
+        builds_after_step
+    }
+
+    fn tick() -> Msg {
+        Msg::tick_at(DateTime::UNIX_EPOCH)
+    }
+
+    #[test]
+    fn clock_only_ticks_refresh_at_most_once_per_second() {
+        let builds = run_driver_steps(
+            vec![
+                (0, tick()),
+                (100, tick()),
+                (450, tick()),
+                (999, tick()),
+                (1_000, tick()),
+            ],
+            |state, _| (state, Vec::new()),
+        );
+
+        assert_eq!(builds, vec![1, 1, 1, 1, 2]);
+    }
+
+    #[test]
+    fn non_tick_message_always_builds_a_view() {
+        let builds = run_driver_steps(
+            vec![
+                (0, tick()),
+                (
+                    0,
+                    Msg::JobListModeSet {
+                        mode: harvester_core::JobListMode::Last24Hours,
+                    },
+                ),
+            ],
+            |state, _| (state, Vec::new()),
+        );
+
+        assert_eq!(builds, vec![1, 2]);
+    }
+
+    #[test]
+    fn tick_with_reducer_effect_always_builds_a_view() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let reducer_calls = Arc::clone(&calls);
+        let builds = run_driver_steps(vec![(0, tick()), (0, tick())], move |state, _| {
+            if reducer_calls.fetch_add(1, Ordering::SeqCst) == 1 {
+                (
+                    state,
+                    vec![Effect::ShowArchiveDialog {
+                        request_id: 1,
+                        article_count: 0,
+                        since_utc: None,
+                        default_basename: "archive".into(),
+                        default_file_exists: false,
+                        export_dir: Default::default(),
+                        pending_pre_triage_count: 0,
+                        token_estimates: Default::default(),
+                        signal_candidate_default: SignalCandidateDialogDefault::OffEmpty,
+                        signal_candidate_count: 0,
+                        signal_candidate_scoring_done: 0,
+                        signal_candidate_scoring_total: 0,
+                        signal_candidate_token_estimates: Default::default(),
+                    }],
+                )
+            } else {
+                (state, Vec::new())
+            }
+        });
+
+        assert_eq!(builds, vec![1, 2]);
+    }
+
+    #[test]
+    fn first_clock_only_iteration_builds_a_view() {
+        let builds = run_driver_steps(vec![(0, tick())], |state, _| (state, Vec::new()));
+
+        assert_eq!(builds, vec![1]);
+    }
+
+    fn run_three_tick_iterations<R, RO>(state: AppState, reducer: R, observer: RO) -> Vec<usize>
+    where
+        R: Fn(AppState, Msg) -> (AppState, Vec<Effect>),
+        RO: FnMut(&str, Duration, &AppState),
+    {
+        let (sender, receiver) = mpsc::channel();
+        sender.send(tick()).unwrap();
+        let iterations = Cell::new(0);
+        let builds = Cell::new(0);
+        let mut builds_after_iteration = Vec::new();
+        let termination = run_driver_with_observers(
+            state,
+            receiver,
+            reducer,
+            |effects| panic!("unexpected runner effects: {effects:?}"),
+            |command| panic!("unexpected UI command: {command:?}"),
+            |_| {},
+            Arc::new(RwLock::new(BodyTable::new())),
+            // Each iteration is less than 1 s apart, but beyond the snapshot
+            // coalescing interval so changed views cannot leave a pending flush.
+            || Duration::from_millis(iterations.get() * 100),
+            observer,
+            |_| builds.set(builds.get() + 1),
+            Some(|_| {
+                builds_after_iteration.push(builds.get());
+                iterations.set(iterations.get() + 1);
+                if iterations.get() < 3 {
+                    sender.send(tick()).unwrap();
+                }
+            }),
+            |_| iterations.get() == 3,
+        );
+        assert_eq!(termination, DriverTermination::Clean);
+        builds_after_iteration
+    }
+
+    #[test]
+    fn ticks_during_active_pipeline_always_build_a_view() {
+        let (state, _) = harvester_core::update(
+            AppState::default(),
+            Msg::AiAvailabilityDetected {
+                availability: harvester_core::AiAvailability::Unavailable {
+                    reason: harvester_core::AiUnavailableReason::MissingApiKey,
+                },
+            },
+        );
+        let (state, _) = harvester_core::update(
+            state,
+            Msg::PipelineRunRequested {
+                scope: harvester_core::PipelineRunScope::Full,
+            },
+        );
+        let advances = Cell::new(0);
+        let builds = run_three_tick_iterations(state, harvester_core::update, |kind, _, state| {
+            assert_ne!(
+                state.pipeline_run_phase(),
+                harvester_core::PipelineRunPhase::Idle
+            );
+            assert_ne!(kind, "EvaluatePreTriageRefresh");
+            if kind == "PipelineRunAdvance" {
+                advances.set(advances.get() + 1);
+            }
+        });
+
+        assert_eq!(advances.get(), 3);
+        assert_eq!(builds, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn tick_with_pre_triage_refresh_always_builds_a_view() {
+        let ticks = Cell::new(0);
+        let refreshes = Cell::new(0);
+        let builds = run_three_tick_iterations(
+            AppState::default(),
+            |mut state, message| {
+                assert!(matches!(message, Msg::Tick { .. }));
+                ticks.set(ticks.get() + 1);
+                if ticks.get() == 2 {
+                    // Arrange real refresh demand after a view already exists.
+                    let (restored, effects) = harvester_core::update(
+                        state,
+                        Msg::RestoreCompletedJobs(vec![harvester_core::CompletedJobSnapshot {
+                            url: "https://refresh.invalid/article".into(),
+                            tokens: Some(10),
+                            bytes: Some(100),
+                            links: Vec::new(),
+                            fetched_utc: None,
+                        }]),
+                    );
+                    assert!(effects.is_empty());
+                    state = restored;
+                }
+                harvester_core::update(state, message)
+            },
+            |kind, _, state| {
+                assert_eq!(
+                    state.pipeline_run_phase(),
+                    harvester_core::PipelineRunPhase::Idle
+                );
+                if kind == "EvaluatePreTriageRefresh" {
+                    refreshes.set(refreshes.get() + 1);
+                }
+            },
+        );
+
+        assert_eq!(refreshes.get(), 1);
+        assert_eq!(builds, vec![1, 2, 2]);
     }
 
     #[test]
