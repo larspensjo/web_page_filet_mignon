@@ -116,7 +116,12 @@ takes an owned hint snapshot from the process-lifetime root scan index and relea
 before reading files. The directory listing determines membership and order. A hint can
 rule out a listed root article only when the per-file length and modification time still
 match and the shared frontmatter date is valid and strictly before the checkpoint.
-Linked files and all files without that proof use the normal read and filter path.
+Linked files and all files without that proof use the normal read and filter path:
+files unknown to the index, changed files, non-articles and archive artifacts, and articles
+with a missing or malformed date. With no checkpoint, or an empty index, every file is read.
+Export feedback is the desktop IPC 18 `archive_export_notice`: Working (with read progress),
+Done or Failed. Done and Failed persist through the following checkpoint save until the next
+Archive press. The checkpoint status line no longer carries export text.
 The worker logs the hint count, files read and files skipped.
 A file rewritten to the same byte length while keeping its modification time would be skipped on its old date; the startup scan already accepts this risk.
 

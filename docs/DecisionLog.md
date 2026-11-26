@@ -487,17 +487,8 @@ Context: Rebuilding the full view on every idle tick used about 60% of a core. T
 Consequences: The Last 24h window still slides through tick-driven rebuilds, at most once per second while clock-only, with worst-case lag about 1 s plus one tick. Timing stays at the driver boundary; making `state.view()` cheaper and changing launch policy are outside this change.
 Refs: crates/harvester_ui_bridge/src/driver.rs, CLOCK_ONLY_VIEW_REFRESH_MS; 2026-09-16 "Desktop job list adds a Last 24h mode"
 
-## 2026-11-26 — Archive export reads only what it cannot rule out; outcome in its own notice
-Decision: Refines 2026-10-24 One archive export at a time, with visible progress: gating unchanged.
-Export feedback moves from the checkpoint status line to a dedicated archive notice in desktop
-IPC 18. Working shows read progress. Done and Failed stay until the next Archive press and
-survive the checkpoint save.
-Context: An export spent 93 seconds reading the corpus to apply the checkpoint, with little
-visible feedback during the wait and no confirmation when the archive was written.
-Consequences: The live directory listing decides membership and order. A scan-index read hint
-may only rule out a listed file and never add one. A skip requires matching file length and
-modification time and a parsed `fetched_utc` strictly before an existing checkpoint. With no
-checkpoint or an empty index, export reads everything. Files in `linked/`, files unknown to the
-index, non-articles and undated articles are always read. A rewrite that preserves file length
-and modification time can be skipped based on its old date. This is an accepted risk.
-Refs: docs/Architecture.md, docs/visual_design/VisualDesignSpec.md, crates/harvester_engine/src/export.rs, crates/harvester_ui_bridge/src/snapshot.rs
+## 2026-11-26 - The archive export shows its own notice and reads only what it cannot rule out
+Decision: While an archive export runs, the desktop shows its own notice: working, with read progress, then done or failed. The notice stays until the next Archive press. One export at a time is unchanged. This refines 2026-10-24 "One archive export at a time, with visible progress".
+Context: A real export spent 93 seconds reading every saved article to find the few hundred since the checkpoint, with only a faint status line and no word when it finished.
+Consequences: The live folder listing decides which articles are exported and in what order. The startup scan index may only rule a file out, on per-file proof, and never add one. With no checkpoint or an empty index, every file is read. A file rewritten to the same length while keeping its modification time could be skipped on its old date; this risk is accepted, as it already is for the startup scan.
+Refs: docs/Architecture.md (archive export), crates/harvester_engine/src/export.rs
