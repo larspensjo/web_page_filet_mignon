@@ -1,6 +1,8 @@
 use harvester_engine::llm::PromptRegistry;
-use harvester_engine::{CorpusScanIndex, HeldArticle, TriageArticleDelta};
-use std::{fs, path::Path};
+use harvester_engine::{
+    build_triage_archive_with, CorpusScanIndex, HeldArticle, TriageArticleDelta,
+};
+use std::{collections::HashMap, fs, path::Path};
 
 fn write(dir: &Path, name: &str, url: &str, date: &str, text: &str) {
     fs::write(
@@ -22,6 +24,76 @@ fn held(delta: &TriageArticleDelta) -> Vec<HeldArticle> {
             preparation_budget: delta.preparation_budget,
         })
         .collect()
+}
+
+#[test]
+fn archive_hints_preserve_frontmatter_and_checkpoint_boundary_behavior() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let linked = root.join("linked");
+    fs::create_dir(&linked).unwrap();
+    let url = "https://example.com/a";
+    let old = "2026-10-20T00:00:00Z";
+    let cutoff = "2026-11-01T00:00:00Z";
+    write(root, "a-old-duplicate.md", url, old, "old ");
+    // The last fetched_utc wins and its offset resolves to the cutoff exactly.
+    fs::write(
+        root.join("b-at-checkpoint.md"),
+        format!("---\nurl: {url}\ntitle: Boundary\nfetched_utc: {old}\nfetched_utc: \"2026-10-31T20:00:00-04:00\"\n---\nBoundary body"),
+    )
+    .unwrap();
+    // The scanner accepts this for triage, but it is an archive non-article.
+    fs::write(
+        root.join("title-missing.md"),
+        format!("---\nurl: https://example.com/no-title\nfetched_utc: {old}\n---\nBody"),
+    )
+    .unwrap();
+    write(
+        &linked,
+        "old.md",
+        "https://example.com/linked",
+        old,
+        "linked ",
+    );
+
+    let urls = [url.to_string()];
+    let mut index = CorpusScanIndex::default();
+    index
+        .load_delta(
+            root,
+            20_000,
+            &PromptRegistry::with_defaults(),
+            &urls,
+            None,
+            &[],
+            |_| {},
+        )
+        .unwrap();
+    let hints = index.archive_read_hints();
+    let since = cutoff.parse().unwrap();
+    let export = |hints| {
+        let summary = build_triage_archive_with(
+            root,
+            "archive.md",
+            &urls,
+            Some(since),
+            false,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+            hints,
+            &mut |_| {},
+        )
+        .unwrap();
+        let bytes = fs::read_to_string(summary.output_path).unwrap();
+        (summary.files_read, bytes)
+    };
+    let (full_count, full) = export(None);
+    let (hinted_count, hinted) = export(Some(&hints));
+    assert_eq!((full_count, hinted_count), (4, 3));
+    assert!(full.contains("Boundary body"));
+    assert_eq!(hinted, full);
 }
 
 #[test]

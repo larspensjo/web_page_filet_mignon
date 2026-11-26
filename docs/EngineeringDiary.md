@@ -2939,3 +2939,11 @@ Change: Tick-only driver iterations with no effects now rebuild at most once per
 Lessons Learned: An inexpensive clock message can become costly when it repeatedly triggers an expensive derived view.
 Prevention: Keep time-sensitive view refreshes at the host boundary and count actual view builds in driver regression tests.
 Refs: crates/harvester_ui_bridge/src/driver.rs, clock_only_ticks_refresh_at_most_once_per_second, non_tick_message_always_builds_a_view, tick_with_reducer_effect_always_builds_a_view, first_clock_only_iteration_builds_a_view, ticks_during_active_pipeline_always_build_a_view, tick_with_pre_triage_refresh_always_builds_a_view; DecisionLog 2026-11-05
+
+## 2026-11-26 - Archive export read the corpus before applying the checkpoint
+Type: Bug Fix
+Context: The reported export spent 93 seconds reading and parsing 17,981 root Markdown files to find 662 articles in the checkpoint window. The header had a faint working message and no completion notice.
+Change: The archive worker snapshots root scan hints, verifies each candidate fingerprint, and reports checked-file progress. The desktop shows immediate opening feedback and keeps the archive result visible across checkpoint saves. Dialog timing logs share a request ID from the click gate through bridge delivery.
+Lessons Learned: Filtering after a full read preserves coverage but pays the first-read cost for every file. Moving a filter ahead of I/O requires proof for each file and the same parsed date and cutoff as the full read.
+Prevention: Byte comparisons after adds, rewrites and deletes, the fingerprint fault check and a temporary-corpus benchmark cover the fast path. The tests cover a length change with the original modification time restored and verify that a triage load leads to actual skips on export. Reducer tests cover request gating, and reducer-generated snapshots exercise notice rendering across the IPC boundary.
+Refs: crates/harvester_engine/tests/archive_export_read_hints.rs, crates/harvester_engine/examples/archive_read_hints_benchmark.rs, crates/harvester_io/src/effect_runner/tests.rs, crates/harvester_core/src/update/tests/archive_export_progress_tests.rs, frontend/src/App.test.tsx

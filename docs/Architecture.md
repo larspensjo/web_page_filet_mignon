@@ -87,14 +87,18 @@ unfinished under their current keys.
 Archive availability is owned by core and depends on run state and on whether an
 export is already being written: it is disabled while a run is Active or Stopping or
 while an export is in flight, and enabled while Idle, including immediately
-after restart without a run, regardless of failed or unfinished articles. While an
-export is in flight the checkpoint status line reads "Exporting archive..."; a failed
-export leaves "Archive export failed: <reason>" there until the next archive open.
+after restart without a run, regardless of failed or unfinished articles. The desktop
+shows "Opening…" locally until the dialog arrives or the next snapshot acknowledges the
+click. Its archive notice shows "Exporting archive..." on submit and checked-file progress
+while the worker runs. The written basename and article count, or the failure reason,
+stay visible until the next Archive click. Checkpoint saves have their own status.
 Saved current-key results supply the dialog, selection, annotations and priority
 snapshot; a completed live triage session is not required. Both opening the archive
 dialog and submitting an export
 are gated by this state; a rejected submit reports that export is unavailable while
-a run is in progress. Desktop snapshots expose `archive_enabled` and `run_state`
+a run is in progress. Opening uses in-memory window data and one file-exists check.
+The click gate, ready data and bridge hand-off log the same request ID. Desktop snapshots
+expose `archive_enabled`, `archive_export_notice` and `run_state`
 (`Idle`, `Active`, or `Stopping { in_flight }`) as IPC fields.
 
 After an archive export requests a new checkpoint, its matching successful checkpoint
@@ -103,8 +107,18 @@ shows the articles remaining since the archive rather than retaining the Last 24
 list. Failed exports, failed or superseded checkpoint writes, manual checkpoint changes,
 and exports without a new checkpoint do not switch the list. Export diagnostics record
 submission, effect hand-off, worker start, scan/render/write boundaries, result delivery,
-and checkpoint writes. Scan progress is bounded to one entry per 1,000 files; early
-returns and unwinding record the last export phase and article path.
+and checkpoint writes. The worker reports progress from zero to the current listing total,
+throttled between the endpoints by 250 files or 200 ms. Scan logs record the current path
+every 1,000 files. Early returns and unwinding record the last export phase and article path.
+
+Archive export previously filtered by checkpoint after a full read. The export worker now
+takes an owned hint snapshot from the process-lifetime root scan index and releases the lock
+before reading files. The directory listing determines membership and order. A hint can
+rule out a listed root article only when the per-file length and modification time still
+match and the shared frontmatter date is valid and strictly before the checkpoint.
+Linked files and all files without that proof use the normal read and filter path.
+The worker logs the hint count, files read and files skipped.
+A file rewritten to the same byte length while keeping its modification time would be skipped on its old date; the startup scan already accepts this risk.
 
 The desktop's primary Run action requests Full (poll, download and process). Process
 unfinished requests Resume without fetching and is enabled only when AI is available

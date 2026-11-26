@@ -370,11 +370,23 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             use_summaries,
             use_signal_candidates,
         ),
+        Msg::ArchiveExportProgress {
+            request_id,
+            files_checked,
+            files_total,
+        } => archive::handle_export_progress(&mut state, request_id, files_checked, files_total),
         Msg::ArchiveExportCompleted {
             request_id,
+            path,
+            doc_count,
             requested_checkpoint,
-            ..
-        } => archive::handle_export_completed(&mut state, request_id, requested_checkpoint),
+        } => archive::handle_export_completed(
+            &mut state,
+            request_id,
+            &path,
+            doc_count,
+            requested_checkpoint,
+        ),
         Msg::ArchiveExportFailed {
             request_id,
             basename,

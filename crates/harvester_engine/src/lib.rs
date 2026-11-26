@@ -40,8 +40,8 @@ pub use brave_search_log::{brave_skip_reason, BraveSearchLog, BRAVE_MIN_SEARCH_I
 pub use brave_seen_set::{normalize_url_for_dedupe, BraveSeenSet};
 pub use briefing::{
     scan_archive_article_metadata, scan_archive_window_metadata, summary_preparation_budget,
-    ArchiveArticleMeta, ArticleScanProgress, CorpusScanIndex, CorpusScanStats, HeldArticle,
-    LoadedArticle, TriageArticleDelta, WindowArticle,
+    ArchiveArticleMeta, ArchiveReadHints, ArticleScanProgress, CorpusScanIndex, CorpusScanStats,
+    HeldArticle, LoadedArticle, TriageArticleDelta, WindowArticle,
 };
 pub use convert::{Converter, Html2MdConverter};
 pub use corpus_manifest::{
@@ -51,8 +51,9 @@ pub use decode::{decode_html, DecodeError, DecodedHtml};
 pub use domain::registrable_domain;
 pub use engine::{EngineConfig, EngineHandle};
 pub use export::{
-    build_triage_archive, ArchiveDocAnnotations, ArchiveFoldReason, ArchiveFoldReport,
-    ArchiveFoldedArticle, ExportError, ExportSummary, MAX_FALLBACK_BODY_CHARS,
+    build_triage_archive, build_triage_archive_with, ArchiveDocAnnotations, ArchiveFoldReason,
+    ArchiveFoldReport, ArchiveFoldedArticle, ArchiveReadProgress, ExportError, ExportSummary,
+    MAX_FALLBACK_BODY_CHARS,
 };
 pub use extract::{ExtractedContent, Extractor, ReadabilityLikeExtractor};
 pub use fetch::{FetchSettings, Fetcher, ProgressSink, ReqwestFetcher, RetrySettings};

@@ -220,6 +220,10 @@ impl AppState {
         self.archive_export_in_flight = Some(request_id);
     }
 
+    pub(crate) fn set_archive_export_notice(&mut self, notice: Option<crate::ArchiveExportNotice>) {
+        self.archive_export_notice = notice;
+    }
+
     /// Clears the in-flight export only when `request_id` is the one being written.
     pub(crate) fn finish_archive_export(&mut self, request_id: u64) -> bool {
         if self.archive_export_in_flight == Some(request_id) {

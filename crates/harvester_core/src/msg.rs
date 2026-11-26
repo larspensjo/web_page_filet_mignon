@@ -70,6 +70,12 @@ pub enum Msg {
         use_summaries: bool,
         use_signal_candidates: bool,
     },
+    /// Archive export has checked more of the currently listed files.
+    ArchiveExportProgress {
+        request_id: u64,
+        files_checked: usize,
+        files_total: usize,
+    },
     /// Archive export completed successfully.
     ArchiveExportCompleted {
         request_id: u64,
@@ -267,6 +273,7 @@ impl Msg {
             Self::ArchiveClicked => "ArchiveClicked",
             Self::ArchiveDialogReady { .. } => "ArchiveDialogReady",
             Self::ArchiveDialogSubmitted { .. } => "ArchiveDialogSubmitted",
+            Self::ArchiveExportProgress { .. } => "ArchiveExportProgress",
             Self::ArchiveExportCompleted { .. } => "ArchiveExportCompleted",
             Self::ArchiveExportFailed { .. } => "ArchiveExportFailed",
             Self::ToggleSignalCandidateExclusion { .. } => "ToggleSignalCandidateExclusion",

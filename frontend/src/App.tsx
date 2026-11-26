@@ -31,6 +31,9 @@ export function App() {
 	const [searchText, setSearchText] = useState("");
 	const [archiveRequest, setArchiveRequest] =
 		useState<ArchiveDialogRequest | null>(null);
+	const [openingArchiveGeneration, setOpeningArchiveGeneration] = useState<
+		number | null
+	>(null);
 	const [addUrlOpen, setAddUrlOpen] = useState(false);
 	const [searchFocusRequests, setSearchFocusRequests] = useState(0);
 	const searchInputRef = useRef<HTMLInputElement>(null);
@@ -45,7 +48,10 @@ export function App() {
 	}, []);
 
 	useProbe();
-	useUiCommand((command) => setArchiveRequest(command.ShowArchiveDialog));
+	useUiCommand((command) => {
+		setOpeningArchiveGeneration(null);
+		setArchiveRequest(command.ShowArchiveDialog);
+	});
 	const list = snapshot?.view.desktop_job_list;
 	const mode: JobListMode = list?.mode ?? "SinceCheckpoint";
 	const query = list?.query ?? "";
@@ -128,6 +134,20 @@ export function App() {
 		}, JOBS_SEARCH_DEBOUNCE_MS);
 	};
 	const candidates = snapshot?.view.signal_candidate_rows ?? [];
+	const archiveNotice = snapshot?.view.archive_export_notice;
+	const archiveWorking = archiveNotice?.kind === "Working";
+	// A newer snapshot can acknowledge a click that did not open a dialog.
+	const openingArchive = openingArchiveGeneration === snapshot?.generation;
+	const openArchive = () => {
+		if (!snapshot) return;
+		const generation = snapshot.generation;
+		setOpeningArchiveGeneration(generation);
+		void dispatchIntent({ type: "OpenArchiveDialog" }).catch(() => {
+			setOpeningArchiveGeneration((pending) =>
+				pending === generation ? null : pending,
+			);
+		});
+	};
 	const selected = list?.selected_job;
 	const selectedCandidate = selected
 		? (candidates.find(
@@ -158,11 +178,29 @@ export function App() {
 						</button>
 						<button
 							type="button"
-							disabled={!snapshot?.view.archive_enabled}
-							onClick={() => void dispatchIntent({ type: "OpenArchiveDialog" })}
+							disabled={
+								!snapshot?.view.archive_enabled ||
+								openingArchive ||
+								archiveWorking
+							}
+							onClick={openArchive}
 						>
-							Archive…
+							{openingArchive ? "Opening…" : "Archive…"}
 						</button>
+						{archiveNotice && (
+							<span
+								className={`archive-export-notice archive-export-notice--${archiveNotice.kind.toLowerCase()}`}
+								role="status"
+								title={archiveNotice.text}
+							>
+								{archiveWorking && (
+									<span className="archive-export-spinner" aria-hidden="true" />
+								)}
+								<span className="archive-export-notice-text">
+									{archiveNotice.text}
+								</span>
+							</span>
+						)}
 					</div>
 				</div>
 			</header>

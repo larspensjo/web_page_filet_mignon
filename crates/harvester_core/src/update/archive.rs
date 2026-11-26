@@ -1,26 +1,34 @@
-use crate::{AppState, Effect};
+use crate::{AppState, ArchiveExportNotice, ArchiveExportNoticeKind, Effect};
 use engine_logging::{engine_info, engine_warn};
 use harvester_engine::{archive_url_key, ArchiveDocAnnotations};
+use std::path::Path;
 
 pub(super) fn handle_archive_clicked(state: &mut AppState) -> Vec<Effect> {
+    if state.archive_export_in_flight().is_none() {
+        state.set_archive_export_notice(None);
+    }
     if !state.export_available() {
-        engine_warn!(
-            "[archive-gate] action=open run_id={} run_state={:?}",
+        engine_info!(
+            "[archive-dialog] click received request_id={} gate=run-in-progress run_id={} run_state={:?}",
+            state.archive_request_id(),
             state.run_progress().map_or(0, |run| run.run_id),
             state.run_state()
         );
         return Vec::new();
     }
     if let Some(in_flight) = state.archive_export_in_flight() {
-        engine_warn!(
-            "[archive-gate] action=open reason=export-in-flight in_flight_request_id={}",
+        engine_info!(
+            "[archive-dialog] click received request_id={} gate=export-in-flight",
             in_flight
         );
         return Vec::new();
     }
-    clear_export_unavailable_status(state);
-    clear_export_failed_status(state);
     let request_id = state.allocate_next_archive_request_id();
+    engine_info!(
+        "[archive-dialog] click received request_id={} gate=allowed",
+        request_id
+    );
+    clear_export_unavailable_status(state);
     let corpus = state.archive_corpus(); // triage-only; pre-triage excluded
     let corpus_count = corpus.count();
     let fingerprint = corpus.fingerprint();
@@ -45,9 +53,10 @@ pub(super) fn handle_archive_clicked(state: &mut AppState) -> Vec<Effect> {
     let pending_pre_triage_count = state.pre_triage().resolved_included_urls().len();
     let since_utc = state.briefing_since_utc();
     state.pin_signal_candidate_selection(signal_candidate_snapshot.clone());
+    let saved_signal_count = state.saved_signal_count();
     let signal_candidate_default = {
         crate::signal_candidate::compute_dialog_default(
-            state.saved_signal_count(),
+            saved_signal_count,
             state.signal_candidate().in_flight_count(),
             state.signal_candidate().failed_count(),
             signal_candidate_snapshot.selected_urls.len(),
@@ -84,7 +93,7 @@ pub(super) fn handle_archive_clicked(state: &mut AppState) -> Vec<Effect> {
         .count();
     engine_info!("[signal-archive] open request_id={} mode={} selected={} same_event={} identical_content={}", request_id, mode, selected, same_event, identical_content);
     let signal_candidate_scoring_done =
-        state.saved_signal_count() + state.signal_candidate().failed_count();
+        saved_signal_count + state.signal_candidate().failed_count();
     let signal_candidate_scoring_total = state
         .signal_candidate()
         .enqueued_count()
@@ -124,6 +133,11 @@ pub(super) fn handle_dialog_ready(
     if request_id != state.archive_request_id() {
         return Vec::new();
     }
+    engine_info!(
+        "[archive-dialog] dialog data ready request_id={} path={}",
+        request_id,
+        export_dir.join(&default_basename).display()
+    );
     vec![Effect::ShowArchiveDialog {
         request_id,
         article_count,
@@ -263,6 +277,10 @@ pub(super) fn handle_dialog_submitted(
         request_id, basename, ordered_urls.len(), summaries.len(), annotations.len(), priority_snapshot.len(), folds.len()
     );
     state.begin_archive_export(request_id);
+    state.set_archive_export_notice(Some(ArchiveExportNotice {
+        kind: ArchiveExportNoticeKind::Working,
+        text: "Exporting archive...".into(),
+    }));
     let mut effects = vec![Effect::ArchiveRequested {
         request_id,
         basename,
@@ -300,15 +318,35 @@ fn clear_export_unavailable_status(state: &mut AppState) {
     }
 }
 
-fn clear_export_failed_status(state: &mut AppState) {
-    if state
-        .briefing_checkpoint_status_message()
-        .is_some_and(|message| {
-            message.starts_with(crate::state::ARCHIVE_EXPORT_FAILED_STATUS_PREFIX)
-        })
-    {
-        state.set_briefing_checkpoint_status_message(None);
+pub(super) fn handle_export_progress(
+    state: &mut AppState,
+    request_id: u64,
+    files_checked: usize,
+    files_total: usize,
+) -> Vec<Effect> {
+    if state.archive_export_in_flight() == Some(request_id) {
+        state.set_archive_export_notice(Some(ArchiveExportNotice {
+            kind: ArchiveExportNoticeKind::Working,
+            text: format!(
+                "Reading articles {} of {}",
+                grouped_count(files_checked),
+                grouped_count(files_total)
+            ),
+        }));
     }
+    Vec::new()
+}
+
+fn grouped_count(count: usize) -> String {
+    let digits = count.to_string();
+    let mut formatted = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index != 0 && (digits.len() - index).is_multiple_of(3) {
+            formatted.push(',');
+        }
+        formatted.push(digit);
+    }
+    formatted
 }
 
 fn build_priority_snapshot(state: &AppState) -> std::collections::HashMap<String, u8> {
@@ -356,13 +394,29 @@ fn build_annotation_map(
 pub(super) fn handle_export_completed(
     state: &mut AppState,
     request_id: u64,
+    path: &Path,
+    doc_count: usize,
     requested_checkpoint: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Vec<Effect> {
     engine_info!(
-        "[archive-dialog] completion received request_id={} current_request_id={} requested_checkpoint={:?}",
-        request_id, state.archive_request_id(), requested_checkpoint
+        "[archive-dialog] completion received request_id={} current_request_id={} path={} requested_checkpoint={:?}",
+        request_id, state.archive_request_id(), path.display(), requested_checkpoint
     );
-    state.finish_archive_export(request_id);
+    if state.finish_archive_export(request_id) {
+        let basename = path
+            .file_name()
+            .unwrap_or(path.as_os_str())
+            .to_string_lossy();
+        let article_label = if doc_count == 1 {
+            "article"
+        } else {
+            "articles"
+        };
+        state.set_archive_export_notice(Some(ArchiveExportNotice {
+            kind: ArchiveExportNoticeKind::Done,
+            text: format!("{basename} written: {doc_count} {article_label}"),
+        }));
+    }
     if request_id != state.archive_request_id() {
         return Vec::new();
     }
@@ -394,10 +448,10 @@ pub(super) fn handle_export_failed(
     reason: String,
 ) -> Vec<Effect> {
     if state.finish_archive_export(request_id) {
-        state.set_briefing_checkpoint_status_message(Some(format!(
-            "{}{reason}",
-            crate::state::ARCHIVE_EXPORT_FAILED_STATUS_PREFIX
-        )));
+        state.set_archive_export_notice(Some(ArchiveExportNotice {
+            kind: ArchiveExportNoticeKind::Failed,
+            text: format!("Archive export failed: {reason}"),
+        }));
     }
     if request_id != state.archive_request_id() {
         return Vec::new();

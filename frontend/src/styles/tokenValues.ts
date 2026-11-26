@@ -7,6 +7,7 @@ export const designHex = {
 	"--text-secondary": "#b0aea5",
 	"--text-tertiary": "#87867f",
 	"--text-disabled": "#5e5d59",
+	"--text-success": "#a9c995",
 	"--accent-primary": "#c96442",
 	"--accent-hover": "#d97757",
 	"--accent-warning": "#b53333",

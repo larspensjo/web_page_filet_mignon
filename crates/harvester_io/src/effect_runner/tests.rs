@@ -905,9 +905,26 @@ fn archive_requested_writes_archive_markdown_for_selected_urls() {
         .collect(),
     }]);
 
-    let msg = rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("expected archive export completed message");
+    let mut progress = Vec::new();
+    let msg = loop {
+        let msg = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected archive export completed message");
+        match msg {
+            Msg::ArchiveExportProgress {
+                request_id,
+                files_checked,
+                files_total,
+            } => {
+                assert_eq!(request_id, 7);
+                assert_eq!(files_total, 2);
+                progress.push(files_checked);
+            }
+            other => break other,
+        }
+    };
+    assert_eq!(progress.first(), Some(&0));
+    assert_eq!(progress.last(), Some(&2));
     let archive_path = match msg {
         Msg::ArchiveExportCompleted {
             request_id,
@@ -935,6 +952,87 @@ fn archive_requested_writes_archive_markdown_for_selected_urls() {
     ));
     assert_eq!(archive.matches("===== DOC START =====").count(), 1);
     assert!(!archive.contains("A body"));
+}
+
+#[test]
+fn archive_requested_uses_read_hints_from_the_triage_load() {
+    const FIXTURE_DIR: &str = "HARVESTER_ARCHIVE_HINTS_TEST_DIR";
+    let Some(output) = std::env::var_os(FIXTURE_DIR).map(std::path::PathBuf::from) else {
+        // Isolate the process-wide logger from the other tests' loggers.
+        let temp = tempdir().unwrap();
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", std::thread::current().name().unwrap()])
+            .env(FIXTURE_DIR, temp.path())
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "archive fixture test failed:\n{}\n{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let log = fs::read_to_string(temp.path().join("engine.log")).unwrap();
+        assert!(
+            log.lines().any(|line| {
+                line.contains("[archive-export] hints=2 hints_wait_ms=")
+                    && line.contains("files_read=1 files_skipped=1 request_id=2 ")
+            }),
+            "expected the export to skip the old article:\n{log}"
+        );
+        return;
+    };
+
+    engine_logging::initialize_file_only_at(output.join("engine.log"));
+    let new_url = "https://example.com/new";
+    write_markdown_with_fetched_utc(
+        &output,
+        "old.md",
+        "https://example.com/old",
+        "2026-03-20T00:00:00Z",
+    );
+    write_markdown_with_fetched_utc(&output, "new.md", new_url, "2026-03-22T00:00:00Z");
+    let since = "2026-03-21T00:00:00Z"
+        .parse::<chrono::DateTime<chrono::Utc>>()
+        .unwrap();
+    let (runner, rx) = runner_with_receiver(&output);
+    runner.enqueue(vec![Effect::LoadArticlesForTriage {
+        request_id: 1,
+        ordered_urls: vec![new_url.into()],
+        since_utc: Some(since),
+        held: Vec::new(),
+    }]);
+    loop {
+        match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+            Msg::TriageArticlesLoaded { request_id: 1, .. } => break,
+            Msg::TriageArticlesLoadProgress { .. } | Msg::SavedArticlesLoaded { .. } => {}
+            other => panic!("unexpected triage load message: {other:?}"),
+        }
+    }
+
+    runner.enqueue(vec![Effect::ArchiveRequested {
+        request_id: 2,
+        basename: "archive.md".into(),
+        ordered_urls: vec![new_url.into()],
+        since_utc: Some(since),
+        requested_checkpoint: None,
+        use_summaries: false,
+        summaries: HashMap::new(),
+        annotations: HashMap::new(),
+        priority_snapshot: HashMap::new(),
+        folds: Default::default(),
+    }]);
+    loop {
+        match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+            Msg::ArchiveExportCompleted {
+                request_id: 2,
+                doc_count: 1,
+                ..
+            } => break,
+            Msg::ArchiveExportProgress { .. } => {}
+            other => panic!("unexpected archive export message: {other:?}"),
+        }
+    }
 }
 
 #[tokio::test]

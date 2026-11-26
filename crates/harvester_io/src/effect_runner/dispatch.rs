@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use engine_logging::{engine_error, engine_info, engine_warn};
 use harvester_core::{Effect, LlmResultKind, Msg, StopPolicy};
@@ -13,7 +13,9 @@ use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::prompt_context::ContextMeta;
 use harvester_engine::llm::prompt_context::PromptContextFile;
 use harvester_engine::llm::LlmCommand;
-use harvester_engine::{build_triage_archive, import_saved_webpages, ImportOptions};
+use harvester_engine::{
+    build_triage_archive_with, import_saved_webpages, ArchiveReadProgress, ImportOptions,
+};
 
 use super::worker::run_triage_refresh_load;
 use super::{truncate_url_for_log, EffectRunner};
@@ -130,19 +132,54 @@ impl EffectRunner {
             } => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.paths.output_dir.clone();
+                let corpus_scan_index = Arc::clone(&self.corpus_scan_index);
                 engine_info!(
                     "[archive-dialog] export queued request_id={} path={} urls={} use_summaries={} summaries={} fold_groups={} requested_checkpoint={:?}",
                     request_id, output_dir.join(&basename).display(), ordered_urls.len(), use_summaries,
                     summaries.len(), folds.len(), requested_checkpoint
                 );
                 thread::spawn(move || {
-                    let started = std::time::Instant::now();
+                    let started = Instant::now();
+                    let path = output_dir.join(&basename);
                     engine_info!(
                         "[archive-dialog] worker started request_id={} path={}",
                         request_id,
-                        output_dir.join(&basename).display()
+                        path.display()
                     );
-                    match build_triage_archive(
+                    let hints_wait_started = Instant::now();
+                    let scan_index_lock = corpus_scan_index.lock();
+                    let hints_wait_ms = hints_wait_started.elapsed().as_millis();
+                    let hints = match scan_index_lock {
+                        Ok(index) => Some(index.archive_read_hints()),
+                        Err(_) => {
+                            engine_warn!(
+                                "[archive-export] scan index lock poisoned request_id={} path={} falling back to full read",
+                                request_id, path.display()
+                            );
+                            None
+                        }
+                    };
+                    let mut files_total = 0;
+                    let mut last_reported = 0;
+                    let mut last_report = started;
+                    let mut on_progress = |progress: ArchiveReadProgress| {
+                        let checked = progress.files_checked;
+                        files_total = progress.files_total;
+                        if checked == 0
+                            || checked == files_total
+                            || checked - last_reported >= 250
+                            || last_report.elapsed() >= Duration::from_millis(200)
+                        {
+                            last_reported = checked;
+                            last_report = Instant::now();
+                            let _ = msg_tx.send(Msg::ArchiveExportProgress {
+                                request_id,
+                                files_checked: checked,
+                                files_total,
+                            });
+                        }
+                    };
+                    match build_triage_archive_with(
                         &output_dir,
                         &basename,
                         &ordered_urls,
@@ -152,8 +189,15 @@ impl EffectRunner {
                         &annotations,
                         &priority_snapshot,
                         Some(&folds),
+                        hints.as_ref(),
+                        &mut on_progress,
                     ) {
                         Ok(summary) => {
+                            engine_info!(
+                                "[archive-export] hints={} hints_wait_ms={} files_read={} files_skipped={} request_id={} path={}",
+                                hints.as_ref().map_or(0, |hints| hints.len()), hints_wait_ms, summary.files_read,
+                                files_total - summary.files_read, request_id, path.display()
+                            );
                             if let (Some(window_count), Some(counts)) =
                                 (summary.window_count, summary.unexported_by_priority)
                             {

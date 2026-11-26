@@ -3,7 +3,7 @@ use std::sync::{mpsc, Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
-use engine_logging::engine_error;
+use engine_logging::{engine_error, engine_info};
 use harvester_core::{
     AppState, AppViewModel, ArchiveTokenEstimates, Effect, Msg, SignalCandidateDialogDefault,
 };
@@ -310,7 +310,9 @@ where
                 .iter()
                 .all(|message| matches!(message, Msg::Tick { .. }));
             let mut reducer_effects_emitted = false;
+            let mut archive_open_rejected = false;
             for message in messages {
+                let archive_clicked = matches!(message, Msg::ArchiveClicked);
                 last_message_kind = message.kind().to_owned();
                 let reducer_started = Instant::now();
                 let (next, effects) = measure_phase!(timing, reduce, reducer(state, message));
@@ -324,6 +326,7 @@ where
                 }
                 reducer_observer(&last_message_kind, elapsed, &next);
                 state = next;
+                archive_open_rejected |= archive_clicked && effects.is_empty();
                 reducer_effects_emitted |= !effects.is_empty();
                 measure_phase!(
                     timing,
@@ -387,7 +390,9 @@ where
                     view_compare,
                     last_view.as_deref() != Some(view.as_ref())
                 );
-                if changed {
+                // A rejected Archive click still acknowledges the frontend's
+                // local Opening state, even when the view is unchanged.
+                if changed || archive_open_rejected {
                     last_view = Some(Arc::clone(&view));
                     Some((view, view_built_at))
                 } else {
@@ -442,6 +447,12 @@ where
         effect_sink(runner);
     }
     for command in commands {
+        let UiCommand::ShowArchiveDialog(request) = &command;
+        engine_info!(
+            "[archive-dialog] shown request_id={} path={}",
+            request.request_id,
+            request.export_dir.join(&request.default_basename).display()
+        );
         command_sink(command);
     }
 }
@@ -565,6 +576,44 @@ mod tests {
         );
 
         assert_eq!(builds, vec![1, 2]);
+    }
+
+    #[test]
+    fn rejected_archive_click_acknowledges_opening_with_an_unchanged_snapshot() {
+        let (sender, receiver) = mpsc::channel();
+        let (snapshot_sender, snapshot_receiver) = mpsc::channel();
+        let driver = thread::spawn(move || {
+            let started = Instant::now();
+            run_driver(
+                AppState::default(),
+                receiver,
+                |state, _| (state, Vec::new()),
+                |_| {},
+                |_| panic!("rejected click must not send a dialog"),
+                |signal| {
+                    let _ = snapshot_sender.send(signal);
+                },
+                Arc::new(RwLock::new(BodyTable::new())),
+                || started.elapsed(),
+            )
+        });
+        let take_snapshot = || {
+            let signal = snapshot_receiver
+                .recv_timeout(Duration::from_secs(3))
+                .unwrap();
+            let SnapshotSignal::Snapshot(snapshot) = signal else {
+                panic!("expected snapshot")
+            };
+            snapshot
+        };
+        sender.send(tick()).unwrap();
+        let initial = take_snapshot();
+        sender.send(Msg::ArchiveClicked).unwrap();
+        let acknowledged = take_snapshot();
+        assert_eq!(acknowledged.generation, initial.generation + 1);
+        assert_eq!(acknowledged.view, initial.view);
+        drop(sender);
+        driver.join().unwrap();
     }
 
     #[test]

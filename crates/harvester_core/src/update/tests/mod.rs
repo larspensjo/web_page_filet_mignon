@@ -579,6 +579,7 @@ fn open_in_browser_with_no_selection_emits_nothing() {
 
 mod archive_checkpoint_tests;
 mod archive_dialog_submit_tests;
+mod archive_export_progress_tests;
 mod archive_pre_triage_handoff_tests;
 mod archive_signal_selection_tests;
 mod archive_startup_cache_tests;

@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use engine_logging::{engine_info, engine_warn};
 
 use crate::archive_url_key;
+use crate::briefing::ArchiveReadHints;
 use crate::corpus_manifest::write_corpus_manifest;
 use crate::frontmatter::{parse_frontmatter, strip_frontmatter};
 use crate::persist::{ensure_output_dir, AtomicFileWriter, PersistError};
@@ -79,12 +80,20 @@ struct FoldedHeader<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportSummary {
     pub doc_count: usize,
+    /// Number of listed files whose contents were read, including non-articles.
+    pub files_read: usize,
     pub total_tokens: u64,
     pub output_path: PathBuf,
     pub window_count: Option<usize>,
     pub unexported_by_priority: Option<[usize; 6]>,
     /// Bounded withheld URL counts in same_event, identical_content order.
     pub unexported_folded: Option<[usize; 2]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArchiveReadProgress {
+    pub files_checked: usize,
+    pub files_total: usize,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -156,6 +165,35 @@ pub fn build_triage_archive(
     priority_snapshot: &HashMap<String, u8>,
     folds: Option<&ArchiveFoldReport>,
 ) -> Result<ExportSummary, ExportError> {
+    build_triage_archive_with(
+        output_dir,
+        basename,
+        ordered_urls,
+        since_utc,
+        use_summaries,
+        summaries,
+        annotations,
+        priority_snapshot,
+        folds,
+        None,
+        &mut |_| {},
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_triage_archive_with(
+    output_dir: &Path,
+    basename: &str,
+    ordered_urls: &[String],
+    since_utc: Option<DateTime<Utc>>,
+    use_summaries: bool,
+    summaries: &HashMap<String, String>,
+    annotations: &HashMap<String, ArchiveDocAnnotations>,
+    priority_snapshot: &HashMap<String, u8>,
+    folds: Option<&ArchiveFoldReport>,
+    hints: Option<&ArchiveReadHints>,
+    on_progress: &mut dyn FnMut(ArchiveReadProgress),
+) -> Result<ExportSummary, ExportError> {
     let mut trace = ExportTrace {
         path: output_dir.join(basename),
         started: Instant::now(),
@@ -178,6 +216,15 @@ pub fn build_triage_archive(
 
     trace.phase("read-articles");
     let mut docs_by_url: HashMap<String, DocMeta> = HashMap::new();
+    let mut files_read = 0;
+    let mut report_progress = |files_checked| {
+        on_progress(ArchiveReadProgress {
+            files_checked,
+            files_total: file_count,
+        })
+    };
+    report_progress(0);
+    let cutoff_with_hints = since_utc.zip(hints);
     for (index, path) in entries.into_iter().enumerate() {
         trace.last_file = Some(path.clone());
         if index % 1_000 == 0 {
@@ -186,14 +233,19 @@ pub fn build_triage_archive(
                 index, file_count, path.display(), trace.path.display(), trace.started.elapsed().as_millis()
             );
         }
-        let Some((_, meta)) = read_archive_window_doc(output_dir, &path)? else {
-            continue;
-        };
-        if !passes_since_filter(&meta, since_utc) {
-            continue;
+        let skip_read = cutoff_with_hints.is_some_and(|(since, hints)| {
+            path.parent() == Some(output_dir) && hints.proves_before(&path, since)
+        });
+        if !skip_read {
+            files_read += 1;
+            if let Some((_, meta)) = read_archive_window_doc(output_dir, &path)? {
+                if passes_since_filter(&meta, since_utc) {
+                    let normalized = archive_url_key(&meta.url);
+                    docs_by_url.entry(normalized).or_insert(meta);
+                }
+            }
         }
-        let normalized = archive_url_key(&meta.url);
-        docs_by_url.entry(normalized).or_insert(meta);
+        report_progress(index + 1);
     }
 
     trace.phase("select-documents");
@@ -362,6 +414,7 @@ pub fn build_triage_archive(
 
     Ok(ExportSummary {
         doc_count: docs.len(),
+        files_read,
         total_tokens,
         output_path,
         window_count: since_utc.is_some().then_some(window_count),
@@ -450,13 +503,11 @@ fn write_export_file(
 }
 
 fn passes_since_filter(meta: &DocMeta, since_utc: Option<DateTime<Utc>>) -> bool {
-    let Some(since_dt) = since_utc else {
-        return true;
-    };
-    match DateTime::parse_from_rfc3339(&meta.fetched_utc) {
-        Ok(parsed) => parsed.with_timezone(&Utc) >= since_dt,
-        Err(_) => true,
-    }
+    !since_utc.is_some_and(|since| fetched_before_checkpoint(&meta.fetched_utc, since))
+}
+
+pub(crate) fn fetched_before_checkpoint(fetched_utc: &str, since: DateTime<Utc>) -> bool {
+    DateTime::parse_from_rfc3339(fetched_utc).is_ok_and(|parsed| parsed.with_timezone(&Utc) < since)
 }
 
 /// Shared archive population: unreadable article metadata is logged and excluded;

@@ -53,10 +53,57 @@ pub struct CorpusScanStats {
     pub removed: usize,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Fingerprint {
     length: u64,
     modified: SystemTime,
+}
+
+/// An owned snapshot of root file metadata for ruling out archive reads.
+#[derive(Debug, Default)]
+pub struct ArchiveReadHints {
+    files: HashMap<PathBuf, ArchiveReadHint>,
+}
+
+#[derive(Debug)]
+struct ArchiveReadHint {
+    fingerprint: Fingerprint,
+    article: Option<ArchiveArticleHint>,
+}
+
+#[derive(Debug)]
+struct ArchiveArticleHint {
+    fetched_utc: Option<String>,
+}
+
+impl ArchiveReadHints {
+    pub fn len(&self) -> usize {
+        self.files.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty()
+    }
+
+    pub(crate) fn proves_before(&self, path: &Path, since: chrono::DateTime<chrono::Utc>) -> bool {
+        let Some(hint) = self.files.get(path) else {
+            return false;
+        };
+        let Some(fetched) = hint
+            .article
+            .as_ref()
+            .and_then(|article| article.fetched_utc.as_deref())
+        else {
+            return false;
+        };
+        if !crate::export::fetched_before_checkpoint(fetched, since) {
+            return false;
+        }
+        fs::metadata(path).is_ok_and(|metadata| {
+            metadata.len() == hint.fingerprint.length
+                && metadata.modified().ok() == Some(hint.fingerprint.modified)
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -73,6 +120,35 @@ pub struct CorpusScanIndex {
 }
 
 impl CorpusScanIndex {
+    pub fn archive_read_hints(&self) -> ArchiveReadHints {
+        let files = self
+            .files
+            .iter()
+            .map(|(path, file)| {
+                // Both readers use parse_frontmatter for fetched_utc. The archive
+                // also requires a nonempty title, which the triage scanner can omit.
+                let article = file
+                    .article
+                    .as_ref()
+                    .filter(|article| {
+                        article
+                            .source_title
+                            .as_deref()
+                            .is_some_and(|title| !title.is_empty())
+                    })
+                    .map(|article| ArchiveArticleHint {
+                        fetched_utc: article.fetched_utc.clone(),
+                    });
+                let hint = ArchiveReadHint {
+                    fingerprint: file.fingerprint,
+                    article,
+                };
+                (path.clone(), hint)
+            })
+            .collect();
+        ArchiveReadHints { files }
+    }
+
     /// All valid frontmatter fetch times, without a display cutoff or text preparation.
     pub fn fetch_times(&mut self, output: &Path) -> Result<HashMap<String, String>, String> {
         use std::io::{BufRead, BufReader};

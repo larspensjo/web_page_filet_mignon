@@ -55,6 +55,7 @@ Adjacent surfaces should differ subtly but clearly. Use tonal steps to separate 
 | Text Secondary | `#b0aea5` | Body text, descriptions |
 | Text Tertiary | `#87867f` | Metadata, timestamps, muted labels |
 | Text Disabled | `#5e5d59` | Disabled controls, placeholder text |
+| Text Success | `#a9c995` | Confirmation that the archive was written |
 
 ### Accent
 
@@ -289,6 +290,8 @@ Use:
   selection shows its estimated tokens. A positive backlog reads “still processing” while
   Active or Stopping and “unfinished” while Idle, except during loading or unavailability.
 - The LLM-call budget keeps its existing escalation to Accent Primary and Accent Warning.
+- The archive notice uses the accent color and a spinner while Working, Text Success for
+  Done, and Accent Warning for Failed. Done and Failed stay visible until the next Archive press.
 - The compact run glance follows the same restraint: state shows as tinted tracks, with no
   glow and no animation.
 

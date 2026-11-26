@@ -486,3 +486,18 @@ Decision: Idle clock-only iterations rebuild the desktop view at most once per s
 Context: Rebuilding the full view on every idle tick used about 60% of a core. This refines the 2026-09-16 "Desktop job list adds a Last 24h mode" consequence about tick-driven view rebuilds.
 Consequences: The Last 24h window still slides through tick-driven rebuilds, at most once per second while clock-only, with worst-case lag about 1 s plus one tick. Timing stays at the driver boundary; making `state.view()` cheaper and changing launch policy are outside this change.
 Refs: crates/harvester_ui_bridge/src/driver.rs, CLOCK_ONLY_VIEW_REFRESH_MS; 2026-09-16 "Desktop job list adds a Last 24h mode"
+
+## 2026-11-26 — Archive export reads only what it cannot rule out; outcome in its own notice
+Decision: Refines 2026-10-24 One archive export at a time, with visible progress: gating unchanged.
+Export feedback moves from the checkpoint status line to a dedicated archive notice in desktop
+IPC 18. Working shows read progress. Done and Failed stay until the next Archive press and
+survive the checkpoint save.
+Context: An export spent 93 seconds reading the corpus to apply the checkpoint, with little
+visible feedback during the wait and no confirmation when the archive was written.
+Consequences: The live directory listing decides membership and order. A scan-index read hint
+may only rule out a listed file and never add one. A skip requires matching file length and
+modification time and a parsed `fetched_utc` strictly before an existing checkpoint. With no
+checkpoint or an empty index, export reads everything. Files in `linked/`, files unknown to the
+index, non-articles and undated articles are always read. A rewrite that preserves file length
+and modification time can be skipped based on its old date. This is an accepted risk.
+Refs: docs/Architecture.md, docs/visual_design/VisualDesignSpec.md, crates/harvester_engine/src/export.rs, crates/harvester_ui_bridge/src/snapshot.rs

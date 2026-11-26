@@ -24,6 +24,7 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
         harvester_core::StartupReadinessStatus::Ready
     );
     let with_corpus = idle_with_corpus(&empty);
+    let (archive_working, archive_done, archive_failed) = archive_export_states(&with_corpus);
     let last_24_hours = idle_last_24_hours(&empty);
     let with_selection = selected_fixture_state(&empty);
     let run_in_progress = run_in_progress_with_failures();
@@ -92,6 +93,9 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
             run_in_progress_with_failures(),
         ),
         ("reprocess_notice", reprocessing),
+        ("archive_export_working", archive_working),
+        ("archive_export_done", archive_done),
+        ("archive_export_failed", archive_failed),
     ];
     states
         .into_iter()
@@ -114,6 +118,9 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
                 | "stopped_with_unfinished_work_export_enabled"
                 | "export_unavailable_during_run"
                 | "reprocess_notice"
+                | "archive_export_working"
+                | "archive_export_done"
+                | "archive_export_failed"
                 | "run_stopped_by_ai_budget" => Status::NotScoredYet,
                 _ => unreachable!("every named fixture must pin its meter status"),
             };
@@ -131,6 +138,58 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
             (name, project(&view).0.with_generation(1))
         })
         .collect()
+}
+
+fn archive_export_states(idle: &AppState) -> (AppState, AppState, AppState) {
+    let (state, effects) = update(idle.clone(), Msg::ArchiveClicked);
+    let request_id = effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::OpenArchiveDialog { request_id, .. } => Some(request_id),
+            _ => None,
+        })
+        .expect("ArchiveClicked opens the archive dialog");
+    let (submitted, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".into(),
+            set_checkpoint: false,
+            submitted_at: time(1),
+            use_summaries: false,
+            use_signal_candidates: false,
+        },
+    );
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::ArchiveRequested { request_id: id, .. } if *id == request_id
+    )));
+    let working = reduce(
+        submitted,
+        Msg::ArchiveExportProgress {
+            request_id,
+            files_checked: 4_000,
+            files_total: 17_981,
+        },
+    );
+    let done = reduce(
+        working.clone(),
+        Msg::ArchiveExportCompleted {
+            request_id,
+            path: "archive.md".into(),
+            doc_count: 194,
+            requested_checkpoint: None,
+        },
+    );
+    let failed = reduce(
+        working.clone(),
+        Msg::ArchiveExportFailed {
+            request_id,
+            basename: "archive.md".into(),
+            reason: "disk full".into(),
+        },
+    );
+    (working, done, failed)
 }
 
 /// Channel-2 payloads the frontend renders without a snapshot: the archive dialog

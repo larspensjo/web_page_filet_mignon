@@ -1,9 +1,10 @@
 {
   "generation": 1,
-  "schema_version": 17,
+  "schema_version": 18,
   "view": {
     "ai_unavailable_message": null,
     "archive_enabled": false,
+    "archive_export_notice": null,
     "archive_meter": {
       "selected_count": 0,
       "status": "NotScoredYet",

@@ -157,8 +157,11 @@ fn archive_export_in_flight_disables_archive_and_shows_progress_until_completion
         .any(|effect| matches!(effect, Effect::ArchiveRequested { .. })));
     assert!(!state.view().archive_enabled);
     assert_eq!(
-        state.view().checkpoint_status_message.as_deref(),
-        Some("Exporting archive...")
+        state.view().archive_export_notice,
+        Some(crate::ArchiveExportNotice {
+            kind: crate::ArchiveExportNoticeKind::Working,
+            text: "Exporting archive...".into(),
+        })
     );
 
     // A second click while the worker is writing must not start a competing export.
@@ -176,7 +179,13 @@ fn archive_export_in_flight_disables_archive_and_shows_progress_until_completion
         },
     );
     assert!(state.view().archive_enabled);
-    assert_eq!(state.view().checkpoint_status_message, None);
+    assert_eq!(
+        state.view().archive_export_notice,
+        Some(crate::ArchiveExportNotice {
+            kind: crate::ArchiveExportNoticeKind::Done,
+            text: "archive.md written: 1 article".into(),
+        })
+    );
     let (_, effects) = update(state, Msg::ArchiveClicked);
     assert_eq!(archive_request_id(&effects), request_id + 1);
 }
@@ -199,13 +208,16 @@ fn archive_export_failure_reenables_archive_and_reports_reason_until_next_open()
     assert!(effects.is_empty());
     assert!(state.view().archive_enabled);
     assert_eq!(
-        state.view().checkpoint_status_message.as_deref(),
-        Some("Archive export failed: disk full")
+        state.view().archive_export_notice,
+        Some(crate::ArchiveExportNotice {
+            kind: crate::ArchiveExportNoticeKind::Failed,
+            text: "Archive export failed: disk full".into(),
+        })
     );
 
     let (state, effects) = update(state, Msg::ArchiveClicked);
     assert_eq!(archive_request_id(&effects), request_id + 1);
-    assert_eq!(state.view().checkpoint_status_message, None);
+    assert_eq!(state.view().archive_export_notice, None);
 }
 
 #[test]

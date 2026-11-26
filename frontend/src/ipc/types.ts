@@ -257,6 +257,11 @@ export type ArchiveMeterView = {
 	status: ArchiveMeterStatus;
 };
 
+export type ArchiveExportNotice = {
+	kind: "Working" | "Done" | "Failed";
+	text: string;
+};
+
 export type SnapshotEnvelope = {
 	generation: number;
 	schema_version: number;
@@ -274,6 +279,7 @@ export type SnapshotEnvelope = {
 		signal_candidate_rows: SignalCandidateRow[];
 		run_progress: RunProgressView;
 		archive_enabled: boolean;
+		archive_export_notice: ArchiveExportNotice | null;
 		run_state: RunState;
 		run_completion_notice: RunCompletionNotice | null;
 		run_enabled: boolean;

@@ -147,6 +147,19 @@ pub struct ReprocessNoticeView {
     pub estimated_calls: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ArchiveExportNoticeKind {
+    Working,
+    Done,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArchiveExportNotice {
+    pub kind: ArchiveExportNoticeKind,
+    pub text: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppViewModel {
     pub job_count: usize,
@@ -161,6 +174,7 @@ pub struct AppViewModel {
     /// Reducer-owned cumulative timeline for the desktop pipeline experience.
     pub run_progress: RunProgressView,
     pub archive_enabled: bool,
+    pub archive_export_notice: Option<ArchiveExportNotice>,
     pub run_state: RunState,
     pub run_completion_notice: Option<RunCompletionNotice>,
     pub run_enabled: bool,
@@ -190,6 +204,7 @@ impl Default for AppViewModel {
             ai_unavailable_message: None,
             run_progress: RunProgressView::default(),
             archive_enabled: true,
+            archive_export_notice: None,
             run_state: RunState::Idle,
             run_completion_notice: None,
             run_enabled: true,

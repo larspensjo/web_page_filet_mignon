@@ -30,7 +30,8 @@ fn parse_rfc3339_utc(label: &str, value: &str) -> Result<chrono::DateTime<chrono
 
 mod corpus_index;
 pub use corpus_index::{
-    CorpusScanIndex, CorpusScanStats, HeldArticle, TriageArticleDelta, WindowArticle,
+    ArchiveReadHints, CorpusScanIndex, CorpusScanStats, HeldArticle, TriageArticleDelta,
+    WindowArticle,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

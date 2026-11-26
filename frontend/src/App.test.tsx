@@ -1,4 +1,7 @@
 import aiUnavailable from "@fixtures/snapshots/ai_unavailable.json";
+import archiveDone from "@fixtures/snapshots/archive_export_done.json";
+import archiveFailed from "@fixtures/snapshots/archive_export_failed.json";
+import archiveWorking from "@fixtures/snapshots/archive_export_working.json";
 import exportUnavailable from "@fixtures/snapshots/export_unavailable_during_run.json";
 import emptyCorpus from "@fixtures/snapshots/idle_empty_corpus.json";
 import emptyOutputFolderStarted from "@fixtures/snapshots/idle_empty_output_folder_started.json";
@@ -128,7 +131,7 @@ describe("job list", () => {
 		}
 	});
 
-	it("pins the reduced IPC 15 snapshot in every bridge fixture", () => {
+	it("pins the desktop IPC 18 snapshot in every bridge fixture", () => {
 		const fields = [
 			"job_count",
 			"desktop_job_list",
@@ -140,6 +143,7 @@ describe("job list", () => {
 			"ai_unavailable_message",
 			"run_progress",
 			"archive_enabled",
+			"archive_export_notice",
 			"run_state",
 			"run_completion_notice",
 			"run_enabled",
@@ -151,9 +155,9 @@ describe("job list", () => {
 			"llm_quota",
 			"right_pane",
 		].sort();
-		expect(fields).toHaveLength(20);
+		expect(fields).toHaveLength(21);
 		for (const [, fixture] of reviewFixtures) {
-			expect(fixture.schema_version).toBe(17);
+			expect(fixture.schema_version).toBe(18);
 			expect(Object.keys(fixture.view).sort()).toEqual(fields);
 			expect(Object.keys(fixture.view.archive_meter).sort()).toEqual(
 				[
@@ -1144,11 +1148,49 @@ describe("modals and chrome", () => {
 	it("asks core to open the archive dialog from the header button", async () => {
 		await renderWithCommands();
 		fireEvent.click(screen.getByRole("button", { name: "Archive…" }));
+		expect(screen.getByRole("button", { name: "Opening…" })).toBeDisabled();
 		expect(intents()).toEqual([
 			["dispatch_intent", { payload: { type: "OpenArchiveDialog" } }],
 		]);
 		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+		emitUiCommand(showArchiveDialog);
+		expect(
+			screen.getByRole("dialog", { name: "Archive export" }),
+		).toBeVisible();
+		fireEvent.keyDown(window, { key: "Escape" });
+		expect(screen.getByRole("button", { name: "Archive…" })).toBeEnabled();
 	});
+
+	it("clears Opening when the next snapshot does not open a dialog", async () => {
+		await renderWithCommands();
+		fireEvent.click(screen.getByRole("button", { name: "Archive…" }));
+		expect(screen.getByRole("button", { name: "Opening…" })).toBeDisabled();
+		emitSnapshot({ ...corpus, generation: corpus.generation + 1 });
+		expect(screen.getByRole("button", { name: "Archive…" })).toBeEnabled();
+	});
+
+	it.each([
+		["Working", archiveWorking, "Reading articles 4,000 of 17,981"],
+		["Done", archiveDone, "archive.md written: 194 articles"],
+		["Failed", archiveFailed, "Archive export failed: disk full"],
+	] as const)(
+		"renders the %s archive export notice next to Archive",
+		async (kind, fixture, text) => {
+			const working = kind === "Working";
+			snapshot = fixture as unknown as SnapshotEnvelope;
+			await renderWithCommands();
+			const button = screen.getByRole("button", { name: "Archive…" });
+			const status = screen.getByText(text).closest('[role="status"]');
+			expect(status).toHaveAttribute("role", "status");
+			expect(status).toHaveAttribute("title", text);
+			expect(status).toHaveClass(
+				`archive-export-notice--${kind.toLowerCase()}`,
+			);
+			expect(button.nextElementSibling).toBe(status);
+			expect(button).toHaveProperty("disabled", working);
+			expect(!!status?.querySelector(".archive-export-spinner")).toBe(working);
+		},
+	);
 
 	it("gates Archive and its open dialog from the core export flag", async () => {
 		for (const runFixture of [exportUnavailable, stoppingWithInFlightWork]) {
