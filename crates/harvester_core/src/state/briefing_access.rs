@@ -2,6 +2,7 @@
 use super::PendingBriefingCheckpointSaveSnapshot;
 use super::{AppState, PendingBriefingCheckpointSave, CHECKPOINT_SAVING_STATUS_MESSAGE};
 use crate::briefing::BriefingSession;
+use crate::morning_archive::{PortfolioRecord, PortfolioRecords};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 
@@ -44,6 +45,18 @@ impl AppState {
     pub(crate) fn set_briefing_since_utc(&mut self, v: Option<DateTime<Utc>>) {
         self.briefing_since_utc = v;
         self.rebuild_saved_results();
+    }
+
+    pub(crate) fn set_briefing_portfolio(&mut self, portfolio: PortfolioRecords) {
+        self.briefing_portfolio = portfolio;
+    }
+
+    pub(crate) fn latest_confirmed_portfolio_record(&self) -> Option<&PortfolioRecord> {
+        self.briefing_portfolio
+            .values()
+            .filter_map(|record| record.confirmed_until_utc.map(|until| (until, record)))
+            .max_by_key(|(until, _)| *until)
+            .map(|(_, record)| record)
     }
 
     #[cfg(test)]

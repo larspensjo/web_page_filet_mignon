@@ -32,10 +32,14 @@ export function decodeUiCommand(payload: unknown): UiCommand | null {
 	if (typeof payload !== "object" || payload === null) return null;
 	const record = payload as Record<string, unknown>;
 	const request = record.ShowArchiveDialog;
+	if (typeof request !== "object" || request === null) return null;
+	const { request_id, portfolio_start_utc } = request as {
+		request_id?: unknown;
+		portfolio_start_utc?: unknown;
+	};
 	if (
-		typeof request !== "object" ||
-		request === null ||
-		typeof (request as { request_id?: unknown }).request_id !== "number"
+		typeof request_id !== "number" ||
+		(portfolio_start_utc !== null && typeof portfolio_start_utc !== "string")
 	)
 		return null;
 	return { ShowArchiveDialog: request as UiCommand["ShowArchiveDialog"] };

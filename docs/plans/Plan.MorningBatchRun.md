@@ -138,7 +138,7 @@ Lars runs one script in the morning and gets a portfolio brief. For that:
   helper checks, the inherited-variable warnings, the build and `Invoke-WithSecretMap`.
   `RuntimeArguments` is empty for both, and `Start-HarvesterBatch.ps1` forwards nothing. Pester
   pins this in `scripts/tests/HarvesterLaunch.Tests.ps1`.
-- The desktop archive modal defaults "Set checkpoint to now after export" to on
+- Before Phase 6, the desktop archive modal opened with the checkpoint box checked
   (`frontend/src/components/ArchiveModal.tsx`).
 - discord-wrapper reference: `src/shell/credentials.rs`, `src/shell/answer_credentials.rs`,
   `src/sensitive.rs`, `src/shell/reader_data.rs` (`AvailableAnswers`).
@@ -291,11 +291,17 @@ Each line is one testable promise. Tags are referenced by phases and tests.
 
 ### Desktop
 
-- **D1** The archive dialog's checkpoint box defaults to off, and an unticked export emits no
-  checkpoint save (its index still carries `window_until_utc`).
-- **D2** The dialog states whether this export moves the portfolio's starting point: with a
-  record, "does not move" plus the record's date; without one, that the checkpoint seeds the
-  first morning archive.
+- **D1** The archive dialog opens with "Move the checkpoint: later desktop exports leave out
+  everything before now." unchecked in both states. An unticked export emits no checkpoint save
+  and still records `window_until_utc` in its index.
+- **D2** The dialog uses the loaded checkpoint alone to choose one statement.
+  - **State A** applies when at least one morning record has `confirmed_until_utc`. Use the latest
+    timestamp and format it in local time. Show "The morning brief is not affected: its next archive
+    starts at \<date and time, local> or later." The date is a lower bound (Orchestrator, 2026-11-27): the start moves to the last archive's end only at the next morning run after AI_portfolio's processed mark confirms it, and the desktop cannot read that mark.
+  - **State B** applies when no morning record has `confirmed_until_utc`, including when the record
+    map is empty. Show "No morning archive has been made yet. The first one starts where the last
+    processed archive ended, or at the checkpoint if there is none, so ticking the box below may
+    move where it starts."
 - **D3** The desktop preserves the checkpoint record (it never drops the added fields).
 
 ## Design decisions made by this plan
@@ -583,8 +589,10 @@ the checkpoint seeds R to that exact instant and replaces the legacy target; the
 
 **Relation to the desktop and CLI checkpoint.** `since_utc` keeps driving the desktop list mode
 and processing window. Once a target's record is seeded, desktop exports and the checkpoint
-commands never move its portfolio start; before seeding, the checkpoint is the fallback seed. The
-dialog shows exactly that (D2).
+commands leave its confirmed start in place. To seed a start, morning window resolution can use a
+valid sidecar, a reconciled pending publication, or the desktop checkpoint. The desktop dialog uses
+the latest confirmed timestamp from the loaded checkpoint. It uses the first-run wording when no
+record has a confirmed timestamp (D2).
 
 **No loss, no duplicate (W8).** Confirmed windows chain: each morning window is `[R, until)`, and R
 only moves to the `until` of a published archive the portfolio confirmed (bounded by L). An
@@ -1071,16 +1079,15 @@ Estimate: 25-35 min. Quiet window: no (crate-scoped), unless combined with a wor
 
 Failing tests first:
 
-- reducer: `OpenArchiveDialog` carries the record for the desktop's view (the portfolio record
-  with the latest `confirmed_until_utc`, or none) from the loaded checkpoint record;
+- reducer: `OpenArchiveDialog` carries the record with the latest `confirmed_until_utc` from the
+  loaded checkpoint. It carries none when the map is empty or every record lacks that timestamp;
 - channel-2 fixture regenerated with `UPDATE_UI_FIXTURES=1` for the new payload fields;
-- frontend (`ArchiveModal.test.tsx`): the checkpoint box is off by default; with a record the
-  dialog reads "This export does not move the portfolio's starting point (<date>)."; without one
-  it reads "Setting the checkpoint also sets where the first morning archive starts."; the
-  submitted payload carries `set_checkpoint: false` unless ticked.
+- frontend (`ArchiveModal.test.tsx`): assert the exact checkbox label and unchecked default in D1,
+  the exact text in both states in D2, the local date and time helper with a fixed time zone, and
+  the submitted `set_checkpoint: false` unless ticked.
 
 Then implement, following `docs/visual_design/VisualDesignSpec.md` (modal facts list and
-`modal-note`; no new colours).
+`modal-note`; no new colours). Place the note above the checkbox.
 
 **IPC version, decided from compatibility.** The existing test only compares the two constants,
 so it cannot detect a payload change. The rule applied: a payload change that an older page or
@@ -1090,7 +1097,7 @@ statement against a new host. Therefore `IPC_SCHEMA_VERSION` moves to 19 in
 `crates/harvester_ui_bridge/src/ipc.rs` and `frontend/src/ipc/schemaVersion.ts`, and the
 channel-2 fixture is the test that pins the payload shape.
 
-Coupled docs: VisualDesignSpec (archive dialog default and the portfolio-start statement),
+Coupled docs: VisualDesignSpec (archive dialog default, label, and morning archive wording),
 Architecture (desktop export and checkpoint), DecisionLog entry for IPC 19 within entry 7.
 
 Checks: `cargo build`; `cargo test -p harvester_core -p harvester_ui_bridge`; `cargo test -p
@@ -1195,7 +1202,7 @@ once and check that it read the result line and wrote the sidecar.
 | docs/ArchiveExportFormat.md | half-open window and narrowed `window_count` population; window fields; external target; publication; temporary and kept-aside names; sidecar role; batch result-line contract | 4, 5b |
 | shared archive fixtures | regenerated with the window lines and the upper bound | 4 |
 | docs/Architecture.md | key source; Brave lookup; morning gate; portfolio record and startup ordering; desktop dialog; launch policy and morning checkout | 2, 4, 5a, 6, 7 |
-| docs/visual_design/VisualDesignSpec.md | archive dialog default and portfolio-start statement | 6 |
+| docs/visual_design/VisualDesignSpec.md | archive dialog default, label, and morning archive wording | 6 |
 | Agents.md | key rule unchanged (still accurate); the morning checkout is launcher-owned and never an agent's working folder, build location or command location (Lars's read-only size check excepted); the batch-lock note names the morning binary for morning runs; tests and tools never pass `--use-stored-keys` | 7 |
 | crates/openai_provider_kit/README.md | hosts never call `from_env()` | 2 |
 | docs/EngineeringDiary.md | entries listed in Phase 8 | 8 |

@@ -8,7 +8,7 @@ import type {
 	SignalCandidateRow,
 } from "../ipc/types";
 import {
-	formatFetchedTime,
+	formatLocalDateTime,
 	jobTitle,
 	priorityClass,
 	visibilityExplanation,
@@ -184,7 +184,7 @@ export function ReadingPane({
 					)}
 					{selected.fetched_utc && (
 						<span className="pill">
-							{formatFetchedTime(selected.fetched_utc)}
+							{formatLocalDateTime(selected.fetched_utc)}
 						</span>
 					)}
 				</div>

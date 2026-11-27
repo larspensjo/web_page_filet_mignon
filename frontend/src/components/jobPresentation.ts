@@ -1,9 +1,10 @@
 import type { JobResultKind, SelectedJobVisibility } from "../ipc/types";
 
-const LOCAL_DATE_TIME = new Intl.DateTimeFormat("en-GB", {
+const DATE_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
 	dateStyle: "medium",
 	timeStyle: "short",
-});
+};
+const LOCAL_DATE_TIME = new Intl.DateTimeFormat("en-GB", DATE_TIME_OPTIONS);
 
 export function jobTitle(job: {
 	summary_title: string | null;
@@ -22,11 +23,16 @@ export function isFailureOutcome(
 	return typeof outcome !== "string";
 }
 
-export function formatFetchedTime(timestamp: string): string {
+export function formatLocalDateTime(
+	timestamp: string,
+	timeZone?: string,
+): string {
 	const value = new Date(timestamp);
-	return Number.isNaN(value.getTime())
-		? timestamp
-		: LOCAL_DATE_TIME.format(value);
+	if (Number.isNaN(value.getTime())) return timestamp;
+	const formatter = timeZone
+		? new Intl.DateTimeFormat("en-GB", { ...DATE_TIME_OPTIONS, timeZone })
+		: LOCAL_DATE_TIME;
+	return formatter.format(value);
 }
 
 export function visibilityExplanation(

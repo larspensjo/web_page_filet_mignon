@@ -1,4 +1,5 @@
 use crate::briefing::BriefingSession;
+use crate::morning_archive::PortfolioRecords;
 use crate::pre_triage_filter::{PreTriagePhase, PreTriageSession};
 use crate::source_state::SourceStateIndex;
 use crate::summary_cache::SummaryCache;
@@ -309,6 +310,7 @@ pub struct AppState {
     llm_requests: LlmResultIndex,
     briefing: BriefingSession,
     briefing_since_utc: Option<chrono::DateTime<chrono::Utc>>,
+    briefing_portfolio: PortfolioRecords,
     pending_briefing_checkpoint_save: Option<PendingBriefingCheckpointSave>,
     briefing_checkpoint_status_message: Option<String>,
     triage: TriageSession,
@@ -436,6 +438,7 @@ impl Default for AppState {
             llm_requests: LlmResultIndex::new(),
             briefing: BriefingSession::default(),
             briefing_since_utc: None,
+            briefing_portfolio: PortfolioRecords::default(),
             pending_briefing_checkpoint_save: None,
             briefing_checkpoint_status_message: None,
             triage: TriageSession::default(),

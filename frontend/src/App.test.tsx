@@ -131,7 +131,7 @@ describe("job list", () => {
 		}
 	});
 
-	it("pins the desktop IPC 18 snapshot in every bridge fixture", () => {
+	it("pins the desktop IPC 19 snapshot in every bridge fixture", () => {
 		const fields = [
 			"job_count",
 			"desktop_job_list",
@@ -157,7 +157,7 @@ describe("job list", () => {
 		].sort();
 		expect(fields).toHaveLength(21);
 		for (const [, fixture] of reviewFixtures) {
-			expect(fixture.schema_version).toBe(18);
+			expect(fixture.schema_version).toBe(19);
 			expect(Object.keys(fixture.view).sort()).toEqual(fields);
 			expect(Object.keys(fixture.view.archive_meter).sort()).toEqual(
 				[
@@ -1118,6 +1118,7 @@ describe("modals and chrome", () => {
 		await renderWithCommands();
 		emitUiCommand({ Unknown: {} });
 		emitUiCommand({ ShowArchiveDialog: { request_id: "nope" } });
+		emitUiCommand({ ShowArchiveDialog: { request_id: 1 } });
 		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 	});
 
@@ -1135,7 +1136,7 @@ describe("modals and chrome", () => {
 						payload: {
 							request_id: 1,
 							basename: "archive.md",
-							set_checkpoint: true,
+							set_checkpoint: false,
 							use_summaries: true,
 							use_signal_candidates: false,
 						},

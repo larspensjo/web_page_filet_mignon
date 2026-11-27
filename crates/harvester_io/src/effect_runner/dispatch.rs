@@ -102,6 +102,7 @@ impl EffectRunner {
                 request_id,
                 article_count,
                 since_utc,
+                portfolio_record,
                 default_basename,
                 pending_pre_triage_count,
                 token_estimates,
@@ -116,16 +117,21 @@ impl EffectRunner {
                 thread::spawn(move || {
                     let default_file_exists = output_dir.join(&default_basename).exists();
                     engine_info!(
-                        "[archive-dialog] open requested request_id={} article_count={} default_basename={} default_file_exists={}",
+                        "[archive-dialog] open requested request_id={} article_count={} default_basename={} default_file_exists={} morning_start={}",
                         request_id,
                         article_count,
                         default_basename,
-                        default_file_exists
+                        default_file_exists,
+                        portfolio_record
+                            .as_ref()
+                            .and_then(|record| record.confirmed_until_utc)
+                            .map_or_else(|| "none".to_string(), |start| start.to_rfc3339())
                     );
                     let _ = msg_tx.send(Msg::ArchiveDialogReady {
                         request_id,
                         article_count,
                         since_utc,
+                        portfolio_record: portfolio_record.map(Box::new),
                         default_basename,
                         default_file_exists,
                         export_dir: output_dir,

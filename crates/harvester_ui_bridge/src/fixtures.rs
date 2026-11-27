@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
+use harvester_core::morning_archive::PortfolioRecord;
 use harvester_core::{
     AiAvailability, AiUnavailableReason, AppState, CompletedJobSnapshot, Effect, JobListMode,
     LinkSnapshotRecord, LlmResultKind, Msg, SelectedJobVisibility,
@@ -200,7 +201,20 @@ pub fn named_ui_commands() -> Vec<(&'static str, UiCommand)> {
 
 fn show_archive_dialog() -> UiCommand {
     let empty = reduce(AppState::new(), Msg::tick_at(time(0)));
-    let state = idle_with_corpus(&empty);
+    let state = reduce(
+        idle_with_corpus(&empty),
+        Msg::BriefingCheckpointLoaded {
+            since_utc: None,
+            portfolio: [(
+                "portfolio-archive".into(),
+                PortfolioRecord {
+                    confirmed_until_utc: Some(time(0)),
+                    ..Default::default()
+                },
+            )]
+            .into(),
+        },
+    );
     assert!(state.export_available());
     let (state, effects) = update(state, Msg::ArchiveClicked);
     let ready = effects
@@ -210,6 +224,7 @@ fn show_archive_dialog() -> UiCommand {
                 request_id,
                 article_count,
                 since_utc,
+                portfolio_record,
                 default_basename,
                 pending_pre_triage_count,
                 token_estimates,
@@ -222,6 +237,7 @@ fn show_archive_dialog() -> UiCommand {
                 request_id,
                 article_count,
                 since_utc,
+                portfolio_record: portfolio_record.map(Box::new),
                 default_basename,
                 default_file_exists: true,
                 export_dir: std::path::PathBuf::from("output"),
@@ -1061,6 +1077,7 @@ mod tests {
         assert!(request.token_estimates.full_tokens > 0);
         assert!(request.default_file_exists);
         assert_eq!(request.default_basename, "archive.md");
+        assert_eq!(request.portfolio_start_utc, Some(time(0)));
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use crate::morning_archive::PortfolioRecord;
 use crate::{AppState, ArchiveExportNotice, ArchiveExportNoticeKind, Effect};
 use engine_logging::{engine_info, engine_warn};
 use harvester_engine::{
@@ -103,6 +104,7 @@ pub(super) fn handle_archive_clicked(state: &mut AppState) -> Vec<Effect> {
         request_id,
         article_count,
         since_utc,
+        portfolio_record: state.latest_confirmed_portfolio_record().cloned(),
         default_basename: "archive.md".to_string(),
         pending_pre_triage_count,
         token_estimates,
@@ -120,6 +122,7 @@ pub(super) fn handle_dialog_ready(
     request_id: u64,
     article_count: usize,
     since_utc: Option<chrono::DateTime<chrono::Utc>>,
+    portfolio_record: Option<PortfolioRecord>,
     default_basename: String,
     default_file_exists: bool,
     export_dir: std::path::PathBuf,
@@ -143,6 +146,7 @@ pub(super) fn handle_dialog_ready(
         request_id,
         article_count,
         since_utc,
+        portfolio_start_utc: portfolio_record.and_then(|record| record.confirmed_until_utc),
         default_basename,
         default_file_exists,
         export_dir,

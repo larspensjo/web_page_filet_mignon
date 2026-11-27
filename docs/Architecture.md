@@ -119,6 +119,20 @@ a run is in progress. Opening uses in-memory window data and one file-exists che
 The click gate, ready data and bridge hand-off log the same request ID. Desktop snapshots
 expose `archive_enabled`, `archive_export_notice` and `run_state`
 (`Idle`, `Active`, or `Stopping { in_flight }`) as IPC fields.
+The reducer selects the loaded portfolio record with the latest `confirmed_until_utc`
+and includes it in `OpenArchiveDialog`. Desktop IPC 19 delivers its confirmed timestamp
+as `portfolio_start_utc` in the channel-2 `ShowArchiveDialog` command. The value is null
+when no loaded record has a confirmed start, including checkpoint files whose portfolio
+records all lack `confirmed_until_utc`. The dialog takes this information from the loaded
+checkpoint alone. It displays one note above the checkpoint box.
+
+- With a confirmed start, "The morning brief is not affected: its next archive starts at
+  \<date and time, local> or later." The date is a lower bound: the record's start moves to the
+  last archive's end only at the next morning run after AI_portfolio's processed mark confirms it,
+  and the desktop cannot read that mark.
+- With no confirmed start, "No morning archive has been made yet. The first one starts where
+  the last processed archive ended, or at the checkpoint if there is none, so ticking the box
+  below may move where it starts."
 
 After an archive export requests a new checkpoint, its matching successful checkpoint
 write switches the desktop job list to Since checkpoint and persists that mode. This
@@ -134,8 +148,10 @@ The reducer builds the export request from the pinned selection and the half-ope
 fetch window `[since, until)`. `since` keeps its exact instant and `until` is the
 submission time rounded up to the second. The exporter applies the same bounds
 before URL deduplication and coverage counting. Schema 2 records the bounds in
-the trailing index, with `window_until_utc` present for every request. A desktop
-export requests a checkpoint save at `until` only when the checkbox is ticked.
+the trailing index, with `window_until_utc` present for every request. The checkbox
+reads "Move the checkpoint: later desktop exports leave out everything before now."
+It defaults to off on each open. A successful export requests a checkpoint save at
+`until` only when the checkbox is ticked.
 The desktop sends an output basename and the engine also accepts an explicit
 external target. The corpus and its manifest stay in `output/`.
 
@@ -198,7 +214,7 @@ match and the shared frontmatter date is valid and strictly before the checkpoin
 Linked files and all files without that proof use the normal read and filter path:
 files unknown to the index, changed files, non-articles and archive artifacts, and articles
 with a missing or malformed date. With no checkpoint, or an empty index, every file is read.
-Export feedback is the desktop IPC 18 `archive_export_notice`: Working (with read progress),
+The desktop IPC field `archive_export_notice` reports Working (with read progress),
 Done or Failed. Done and Failed persist through the following checkpoint save until the next
 Archive press. The checkpoint status line no longer carries export text.
 The worker logs the hint count, files read and files skipped.

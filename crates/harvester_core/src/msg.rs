@@ -8,7 +8,7 @@ use harvester_engine::llm::QuotaOrigin;
 use harvester_engine::ExtractedLink;
 use serde::{Deserialize, Serialize};
 
-use crate::morning_archive::{PortfolioRecords, TargetObservation};
+use crate::morning_archive::{PortfolioRecord, PortfolioRecords, TargetObservation};
 use crate::state::{AiAvailability, ArchiveTokenEstimates};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,6 +51,8 @@ pub enum Msg {
         request_id: u64,
         article_count: usize,
         since_utc: Option<DateTime<Utc>>,
+        // Boxed so the dialog-ready message does not enlarge every Msg.
+        portfolio_record: Option<Box<PortfolioRecord>>,
         default_basename: String,
         default_file_exists: bool,
         export_dir: PathBuf,

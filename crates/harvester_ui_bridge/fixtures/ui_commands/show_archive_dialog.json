@@ -3,6 +3,7 @@
     "request_id": 1,
     "article_count": 2,
     "since_utc": null,
+    "portfolio_start_utc": "2023-11-14T22:13:20Z",
     "default_basename": "archive.md",
     "default_file_exists": true,
     "export_dir": "output",

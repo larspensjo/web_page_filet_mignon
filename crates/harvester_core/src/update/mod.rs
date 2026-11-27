@@ -328,9 +328,12 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 portfolio,
             },
         ),
-        Msg::BriefingCheckpointLoaded { since_utc, .. } => {
+        Msg::BriefingCheckpointLoaded {
+            since_utc,
+            portfolio,
+        } => {
             state.restored_checkpoint_ready = true;
-            briefing::handle_checkpoint_loaded(&mut state, since_utc)
+            briefing::handle_checkpoint_loaded(&mut state, since_utc, portfolio)
         }
         Msg::BriefingCheckpointLoadFailed { reason } if state.morning_archive.is_some() => {
             morning::checkpoint_load_failed(&mut state, &reason);
@@ -338,7 +341,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::BriefingCheckpointLoadFailed { .. } => {
             state.restored_checkpoint_ready = true;
-            briefing::handle_checkpoint_loaded(&mut state, None)
+            briefing::handle_checkpoint_loaded(&mut state, None, Default::default())
         }
         Msg::BriefingCheckpointSaveSucceeded { save_id } => {
             briefing::handle_checkpoint_save_succeeded(&mut state, save_id)
@@ -393,6 +396,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             request_id,
             article_count,
             since_utc,
+            portfolio_record,
             default_basename,
             default_file_exists,
             export_dir,
@@ -408,6 +412,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             request_id,
             article_count,
             since_utc,
+            portfolio_record.map(|record| *record),
             default_basename,
             default_file_exists,
             export_dir,

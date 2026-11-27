@@ -229,6 +229,7 @@ export type ArchiveDialogRequest = {
 	request_id: number;
 	article_count: number;
 	since_utc: string | null;
+	portfolio_start_utc: string | null;
 	default_basename: string;
 	default_file_exists: boolean;
 	export_dir: string;

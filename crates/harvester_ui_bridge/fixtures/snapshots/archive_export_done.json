@@ -1,6 +1,6 @@
 {
   "generation": 1,
-  "schema_version": 18,
+  "schema_version": 19,
   "view": {
     "ai_unavailable_message": null,
     "archive_enabled": true,

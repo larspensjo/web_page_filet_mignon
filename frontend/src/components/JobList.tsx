@@ -6,7 +6,7 @@ import type {
 	SignalCandidateRow,
 } from "../ipc/types";
 import {
-	formatFetchedTime,
+	formatLocalDateTime,
 	isFailureOutcome,
 	jobTitle,
 	priorityClass,
@@ -32,7 +32,7 @@ function JobRowMetadata({ job }: { job: JobListRowView }) {
 		<div className="row-metadata job-row-metadata">
 			{job.fetched_utc && (
 				<span className="fetched-time">
-					{formatFetchedTime(job.fetched_utc)}
+					{formatLocalDateTime(job.fetched_utc)}
 				</span>
 			)}
 			{failed && <span className="pill failure-marker">Failed</span>}

@@ -1,9 +1,11 @@
 use super::summary_cache_support::log_summary_cache_run_summary;
+use crate::morning_archive::PortfolioRecords;
 use crate::{AppState, Effect};
 use engine_logging::{engine_info, engine_warn};
 pub(super) fn handle_checkpoint_loaded(
     state: &mut AppState,
     since_utc: Option<String>,
+    portfolio: PortfolioRecords,
 ) -> Vec<Effect> {
     let parsed = since_utc
         .as_deref()
@@ -18,6 +20,7 @@ pub(super) fn handle_checkpoint_loaded(
             }
         });
     state.set_briefing_since_utc(parsed);
+    state.set_briefing_portfolio(portfolio);
     state.clear_briefing_checkpoint_save_tracking();
     vec![]
 }

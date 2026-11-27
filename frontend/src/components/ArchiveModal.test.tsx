@@ -4,10 +4,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { dispatchIntent } from "../ipc/intent";
 import type { ArchiveDialogRequest, UiCommand } from "../ipc/types";
 import { ArchiveModal, isSafeArchiveBasename } from "./ArchiveModal";
+import { formatLocalDateTime } from "./jobPresentation";
 
 vi.mock("../ipc/intent", () => ({ dispatchIntent: vi.fn() }));
 
 const fixture = (showArchiveDialog as unknown as UiCommand).ShowArchiveDialog;
+const CHECKPOINT_LABEL =
+	"Move the checkpoint: later desktop exports leave out everything before now.";
+const FIRST_ARCHIVE_NOTE =
+	"No morning archive has been made yet. The first one starts where the last processed archive ended, or at the checkpoint if there is none, so ticking the box below may move where it starts.";
 
 function renderModal(
 	overrides: Partial<ArchiveDialogRequest> = {},
@@ -35,6 +40,7 @@ describe("ArchiveModal", () => {
 		expect(fixture).toMatchObject({
 			request_id: expect.any(Number),
 			article_count: expect.any(Number),
+			portfolio_start_utc: expect.any(String),
 			default_basename: expect.any(String),
 			default_file_exists: expect.any(Boolean),
 			export_dir: expect.any(String),
@@ -74,16 +80,47 @@ describe("ArchiveModal", () => {
 		).toBeDisabled();
 	});
 
+	it("uses the approved checkpoint label and leaves the box off by default", () => {
+		renderModal();
+		expect(
+			screen.getByRole("checkbox", { name: CHECKPOINT_LABEL }),
+		).not.toBeChecked();
+	});
+
+	it("states the confirmed start of the next morning archive", () => {
+		renderModal();
+		const localStart = formatLocalDateTime("2023-11-14T22:13:20Z");
+		expect(
+			screen.getByText(
+				`The morning brief is not affected: its next archive starts at ${localStart} or later.`,
+			),
+		).toHaveClass("modal-note");
+		expect(screen.queryByText(FIRST_ARCHIVE_NOTE)).not.toBeInTheDocument();
+	});
+
+	it("explains the first morning archive when there is no confirmed start", () => {
+		renderModal({ portfolio_start_utc: null });
+		const note = screen.getByText(FIRST_ARCHIVE_NOTE);
+		const checkbox = screen.getByRole("checkbox", { name: CHECKPOINT_LABEL });
+		expect(note).toHaveClass("modal-note");
+		expect(note.nextElementSibling).toBe(checkbox.closest("label"));
+		expect(checkbox).not.toBeChecked();
+		expect(
+			screen.queryByText(/^The morning brief is not affected:/),
+		).not.toBeInTheDocument();
+	});
+
+	it("formats the archive start across midnight in a fixed time zone", () => {
+		expect(
+			formatLocalDateTime("2023-11-14T00:13:20Z", "America/New_York"),
+		).toBe("13 Nov 2023, 19:13");
+	});
+
 	it("submits the fixture's request id with the form values and closes", () => {
 		const onClose = renderModal();
 		fireEvent.change(screen.getByLabelText("Output file"), {
 			target: { value: "weekly.md" },
 		});
-		fireEvent.click(
-			screen.getByRole("checkbox", {
-				name: "Set checkpoint to now after export",
-			}),
-		);
 		fireEvent.click(screen.getByRole("button", { name: /^Export/ }));
 		expect(dispatchIntent).toHaveBeenCalledWith({
 			type: "SubmitArchiveDialog",
@@ -96,6 +133,16 @@ describe("ArchiveModal", () => {
 			},
 		});
 		expect(onClose).toHaveBeenCalled();
+	});
+
+	it("requests a checkpoint when its box is ticked", () => {
+		renderModal();
+		fireEvent.click(screen.getByRole("checkbox", { name: CHECKPOINT_LABEL }));
+		fireEvent.click(screen.getByRole("button", { name: /^Export/ }));
+		expect(dispatchIntent).toHaveBeenCalledWith({
+			type: "SubmitArchiveDialog",
+			payload: expect.objectContaining({ set_checkpoint: true }),
+		});
 	});
 
 	it("refuses to export with an unsafe basename or an empty corpus", () => {

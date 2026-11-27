@@ -1,4 +1,85 @@
 use super::*;
+use crate::morning_archive::PortfolioRecord;
+
+#[test]
+fn archive_dialog_carries_the_portfolio_record_with_the_latest_confirmation() {
+    let latest = PortfolioRecord {
+        confirmed_until_utc: Some("2026-11-25T07:00:00.123456Z".parse().unwrap()),
+        last_archive_until_utc: Some("2026-11-26T07:00:00Z".parse().unwrap()),
+        ..Default::default()
+    };
+    let older = PortfolioRecord {
+        confirmed_until_utc: Some("2026-11-24T07:00:00Z".parse().unwrap()),
+        last_archive_until_utc: Some("2026-11-27T07:00:00Z".parse().unwrap()),
+        ..Default::default()
+    };
+    let unconfirmed = PortfolioRecord {
+        pending_until_utc: Some("2026-11-28T07:00:00Z".parse().unwrap()),
+        ..Default::default()
+    };
+    let (state, _) = update(
+        AppState::new(),
+        Msg::BriefingCheckpointLoaded {
+            since_utc: Some("2026-11-27T08:00:00Z".into()),
+            portfolio: [
+                ("a".into(), latest.clone()),
+                ("b".into(), older),
+                ("c".into(), unconfirmed),
+            ]
+            .into(),
+        },
+    );
+    let (_, effects) = update(state, Msg::ArchiveClicked);
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::OpenArchiveDialog { portfolio_record: Some(record), .. }] if record == &latest
+    ));
+}
+
+#[test]
+fn archive_dialog_treats_a_record_without_a_confirmed_start_as_absent() {
+    let (state, _) = update(
+        AppState::new(),
+        Msg::BriefingCheckpointLoaded {
+            since_utc: Some("2026-11-27T08:00:00Z".into()),
+            portfolio: [(
+                "a".into(),
+                PortfolioRecord {
+                    pending_until_utc: Some("2026-11-28T07:00:00Z".parse().unwrap()),
+                    ..Default::default()
+                },
+            )]
+            .into(),
+        },
+    );
+    let (_, effects) = update(state, Msg::ArchiveClicked);
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::OpenArchiveDialog {
+            portfolio_record: None,
+            ..
+        }]
+    ));
+}
+
+#[test]
+fn archive_dialog_carries_no_record_when_the_checkpoint_has_none() {
+    let (state, _) = update(
+        AppState::new(),
+        Msg::BriefingCheckpointLoaded {
+            since_utc: Some("2026-11-27T08:00:00Z".into()),
+            portfolio: Default::default(),
+        },
+    );
+    let (_, effects) = update(state, Msg::ArchiveClicked);
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::OpenArchiveDialog {
+            portfolio_record: None,
+            ..
+        }]
+    ));
+}
 
 #[test]
 fn archive_dialog_ready_ignores_stale_request() {
@@ -10,6 +91,7 @@ fn archive_dialog_ready_ignores_stale_request() {
             request_id: 99,
             article_count: 0,
             since_utc: None,
+            portfolio_record: None,
             default_basename: "archive.md".to_string(),
             default_file_exists: false,
             export_dir: std::path::PathBuf::from("/tmp"),
@@ -33,12 +115,17 @@ fn archive_dialog_ready_emits_show_dialog_for_current_request() {
     let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
     let (state, _) = update(state, Msg::ArchiveClicked);
     let request_id = state.archive_request_id();
+    let portfolio_start = "2026-11-25T07:00:00.123456Z".parse().unwrap();
     let (state, effects) = update(
         state,
         Msg::ArchiveDialogReady {
             request_id,
             article_count: 1,
             since_utc: None,
+            portfolio_record: Some(Box::new(PortfolioRecord {
+                confirmed_until_utc: Some(portfolio_start),
+                ..Default::default()
+            })),
             default_basename: "archive.md".to_string(),
             default_file_exists: false,
             export_dir: std::path::PathBuf::from("/tmp"),
@@ -62,6 +149,7 @@ fn archive_dialog_ready_emits_show_dialog_for_current_request() {
             request_id,
             article_count,
             since_utc,
+            portfolio_start_utc,
             default_basename,
             default_file_exists,
             export_dir,
@@ -70,6 +158,7 @@ fn archive_dialog_ready_emits_show_dialog_for_current_request() {
             assert_eq!(request_id, 1);
             assert_eq!(article_count, 1);
             assert!(since_utc.is_none());
+            assert_eq!(portfolio_start_utc, Some(portfolio_start));
             assert_eq!(default_basename, "archive.md");
             assert!(!default_file_exists);
             assert_eq!(export_dir, std::path::PathBuf::from("/tmp"));

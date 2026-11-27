@@ -202,6 +202,19 @@ Buttons should clearly express priority and intent.
   detail line summarizing them; the headline stays "Run finished".
 - The existing `ai_unavailable_message` is visible below the Run controls. API-key and ordinary AI-unavailable notices use muted status text. A saved-result store refusal uses the reserved warning red, names its file, explains the reason and recovery action, and leaves intake available.
 
+### Archive export dialog
+
+- Use the `modal-facts` list for article counts, the current checkpoint, and export estimates.
+- Open with **Move the checkpoint: later desktop exports leave out everything before now.**
+  unchecked. Place the morning archive statement above the checkbox using the muted `modal-note`
+  style and associate it with the checkbox as its description.
+- When a loaded morning record has a confirmed start, show "The morning brief is not affected:
+  its next archive starts at \<date and time, local> or later." Use the latest confirmed timestamp;
+  it is a lower bound, because the desktop cannot see AI_portfolio's processed mark.
+- When no loaded morning record has a confirmed start, show "No morning archive has been made
+  yet. The first one starts where the last processed archive ended, or at the checkpoint if there
+  is none, so ticking the box below may move where it starts."
+
 ## Links
 
 Links should feel clearly interactive without introducing a second accent system or adding visual noise to dense reading surfaces.

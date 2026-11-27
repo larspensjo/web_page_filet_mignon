@@ -5,7 +5,7 @@ import type {
 	ArchivePartialCoverageView,
 	ArchiveTokenEstimates,
 } from "../ipc/types";
-import { formatCompactTokens } from "./jobPresentation";
+import { formatCompactTokens, formatLocalDateTime } from "./jobPresentation";
 import { Modal } from "./Modal";
 
 type ArchiveModalProps = {
@@ -14,6 +14,13 @@ type ArchiveModalProps = {
 	archiveEnabled: boolean;
 	onClose: () => void;
 };
+
+const CONFIRMED_MORNING_START = (localStart: string) =>
+	`The morning brief is not affected: its next archive starts at ${localStart} or later.`;
+const FIRST_MORNING_ARCHIVE_START =
+	"No morning archive has been made yet. The first one starts where the last processed archive ended, or at the checkpoint if there is none, so ticking the box below may move where it starts.";
+const CHECKPOINT_LABEL =
+	"Move the checkpoint: later desktop exports leave out everything before now.";
 
 /** Mirrors core's `is_safe_archive_basename`; core still rejects on its own. */
 export function isSafeArchiveBasename(name: string): boolean {
@@ -82,7 +89,7 @@ export function ArchiveModal({
 	const [useSignalCandidates, setUseSignalCandidates] = useState(
 		request.signal_candidate_default === "OnAllSettled",
 	);
-	const [setCheckpoint, setSetCheckpoint] = useState(true);
+	const [setCheckpoint, setSetCheckpoint] = useState(false);
 
 	const basenameValid = isSafeArchiveBasename(basename);
 	const candidatesAvailable = request.signal_candidate_count > 0;
@@ -92,6 +99,7 @@ export function ArchiveModal({
 	const overwrite =
 		request.default_file_exists && basename === request.default_basename;
 	const notice = candidateNotice(request);
+	const morningStart = request.portfolio_start_utc;
 	const exportCount = candidatesOn
 		? request.signal_candidate_count
 		: request.article_count;
@@ -236,13 +244,19 @@ export function ArchiveModal({
 					/>
 					<span>Use signal-candidate selection</span>
 				</label>
+				<p className="modal-note" id="archive-checkpoint-note">
+					{morningStart === null
+						? FIRST_MORNING_ARCHIVE_START
+						: CONFIRMED_MORNING_START(formatLocalDateTime(morningStart))}
+				</p>
 				<label className="modal-check">
 					<input
 						type="checkbox"
 						checked={setCheckpoint}
+						aria-describedby="archive-checkpoint-note"
 						onChange={(event) => setSetCheckpoint(event.target.checked)}
 					/>
-					<span>Set checkpoint to now after export</span>
+					<span>{CHECKPOINT_LABEL}</span>
 				</label>
 
 				<div className="modal-actions">
