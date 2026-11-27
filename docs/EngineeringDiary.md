@@ -2985,3 +2985,10 @@ Change: Read-only loads recover the desktop checkpoint when possible. Writes mov
 Lessons Learned: A parse failure permits preserving the original bytes and recovering individual fields. An I/O failure leaves the durable record unknown and must prevent reseeding. Apply the production checkpoint merge in simulations that exercise crash recovery.
 Prevention: Regression tests cover CLI resets, backup-name collisions, transient read failures, late morning configuration, scored summary excusal, and multiple failures on a blocked morning.
 Refs: crates/harvester_io/src/persistence.rs, crates/harvester_core/src/update/tests/morning_archive_tests.rs
+
+## 2026-11-27 - Batch archive output contract
+Type: Implementation
+Context: An unattended batch needs a stable outcome when it publishes an archive, skips an empty selection, or loses the worker reply.
+Change: The batch host configures the archive window before hydration replies, waits for the reducer's publication and checkpoint outcome, and emits one final result line after flushing and persisting. Lost replies use the target's validated index and kept-file details recorded during publication. A results flush failure preserves an earlier export reason. The contract child uses a canned provider, a marked temporary corpus, and synthetic prompt contexts.
+Lessons Learned: A matching archive bound can attest publication only when it differs from the previous target's bound. Successive runs in the same second wait for distinct request bounds. Recovery must wait while a worker can still replace the target, even when one publication step outlasts the watchdog. Substituting the provider leaves the real configuration loader in place. A temporary fixture without the required triage context reports `saved_results_unavailable`. The unavailable-readiness case removes that context, and unexpected exits include the child's engine log.
+Refs: crates/harvester_batch/src/runner/archive.rs, crates/harvester_batch/tests/archive_out_contract.rs, crates/harvester_batch/tests/archive_out_support/mod.rs, docs/ArchiveExportFormat.md

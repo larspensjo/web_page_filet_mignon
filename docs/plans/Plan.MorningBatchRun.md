@@ -733,7 +733,7 @@ Printed by the binary for every morning outcome it reaches, and by the launcher 
 | `previous_kept` | string or null | kept-aside path when an unconfirmed target was kept | agreed |
 | `previous_superseded` | boolean | the new window starts at or before the kept archive's start; false when nothing kept | addition, to confirm |
 | `cost_usd` | number or null | `cost_microdollars / 1e6`, six decimals; null when the binary did not reach the run | agreed |
-| `cost_basis` | string | constant `"price-table estimate of this run's OpenAI requests; Brave Search requests not included"` | agreed (string chosen here) |
+| `cost_basis` | string | constant token `"openai_price_table"` (estimate from a price table of this run's OpenAI requests; Brave not included) | agreed with ai-portfolio-59 2026-11-27 |
 | `archive_schema` | `2` | export schema | agreed |
 | `since_utc` | string or null | window start per X5 (exact instant); null when the run ended before the window was resolved | agreed (null case to confirm) |
 | `until_utc` | string or null | export request time rounded up; null when no export was requested | agreed (null case to confirm) |
@@ -759,7 +759,7 @@ unknown tokens.
 Example:
 
 ```text
-HARVESTER_RESULT {"v":1,"status":"exported","articles":112,"path":"C:\\Users\\larsp\\src\\AI_portfolio\\archive.md","previous_kept":null,"previous_superseded":false,"cost_usd":0.412305,"cost_basis":"price-table estimate of this run's OpenAI requests; Brave Search requests not included","archive_schema":2,"since_utc":"2026-11-26T06:10:31Z","until_utc":"2026-11-27T06:12:04Z","failed_sources":1,"backlog_articles":0,"lock_holder":null,"reason":null}
+HARVESTER_RESULT {"v":1,"status":"exported","articles":112,"path":"C:\\Users\\larsp\\src\\AI_portfolio\\archive.md","previous_kept":null,"previous_superseded":false,"cost_usd":0.412305,"cost_basis":"openai_price_table","archive_schema":2,"since_utc":"2026-11-26T06:10:31Z","until_utc":"2026-11-27T06:12:04Z","failed_sources":1,"backlog_articles":0,"lock_holder":null,"reason":null}
 ```
 
 ## Exit codes

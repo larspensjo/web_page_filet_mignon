@@ -1,14 +1,15 @@
-use super::{batch_host_llm_defaults, BATCH_AI_DISABLED_WARNING};
+use super::batch_host_llm_defaults;
 use crate::cli::Args;
+use crate::services::RunnerBuilder;
 use engine_logging::engine_info;
 use harvester_core::signal_candidate::DEFAULT_SELECTION_THRESHOLD;
 use harvester_core::{update, AiAvailability, AppState, Effect, Msg};
+#[cfg(test)]
+use harvester_io::{credentials::StoredKeyAccess, host_bootstrap::read_startup_key_outcomes};
 use harvester_io::{
-    credentials::{CredentialEntry, StoredKeyAccess, StoredKeyReads},
-    host_bootstrap::{
-        build_effect_runner, hydrate_state_from_disk, read_startup_key_outcomes, HostKeys,
-    },
-    EffectRunner, NoOpPlatformHandler, PersistenceWorker, RuntimePaths,
+    credentials::{CredentialEntry, StoredKeyReads},
+    host_bootstrap::{hydrate_state_from_disk, HostKeys},
+    EffectRunner, RuntimePaths,
 };
 use std::sync::mpsc;
 
@@ -27,11 +28,15 @@ pub(crate) fn apply_llm_availability(state: AppState, availability: AiAvailabili
     update(state, Msg::AiAvailabilityDetected { availability }).0
 }
 
-pub(super) fn read_startup_keys(
+#[cfg(test)]
+fn read_startup_keys(
     access: Option<&StoredKeyAccess>,
     reader: impl FnOnce(&StoredKeyAccess) -> StoredKeyReads,
 ) -> HostKeys {
-    let reads = read_startup_key_outcomes(access, reader);
+    report_startup_keys(read_startup_key_outcomes(access, reader))
+}
+
+pub(super) fn report_startup_keys(reads: StoredKeyReads) -> HostKeys {
     println!("{}", reads.openai.status_line(CredentialEntry::OpenAi));
     println!("{}", reads.brave.status_line(CredentialEntry::BraveSearch));
     reads.into()
@@ -42,37 +47,31 @@ pub(crate) fn prepare_runtime(
     args: &Args,
     msg_tx: mpsc::Sender<Msg>,
     keys: HostKeys,
-) -> Result<(AppState, EffectRunner), String> {
+    build_runner: Box<RunnerBuilder>,
+) -> Result<(AppState, EffectRunner, Vec<Effect>), String> {
     // Hydrate state
     engine_info!("[batch] Hydrating state from disk");
-    let (mut state, startup_effects) = hydrate_batch_state(paths, args);
+    let (mut state, mut startup_effects) = hydrate_batch_state(paths, args);
+    if let Some(target) = &args.archive_out {
+        let (configured, effects) = update(
+            state,
+            Msg::BatchArchiveConfigured {
+                target: target.clone(),
+            },
+        );
+        state = configured;
+        startup_effects.extend(effects);
+    }
 
     if let Some(reason) = state.result_store_failure() {
         eprintln!("AI features unavailable: {reason}");
     }
 
     engine_info!("[batch] Building EffectRunner");
-    let platform_handler = Box::new(NoOpPlatformHandler);
-    let defaults = batch_host_llm_defaults();
-    let (effect_runner, _, availability) = build_effect_runner(
-        paths,
-        msg_tx,
-        args.llm_concurrency,
-        &defaults,
-        platform_handler,
-        Box::new(PersistenceWorker::new(
-            paths.state_path.clone(),
-            paths.blacklist_path.clone(),
-        )),
-        keys,
-        BATCH_AI_DISABLED_WARNING,
-    )?;
+    let (effect_runner, _, availability) =
+        build_runner(paths, args, msg_tx, keys, &batch_host_llm_defaults())?;
     state = apply_llm_availability(state, availability);
-    if !startup_effects.is_empty() {
-        effect_runner.enqueue(startup_effects);
-    }
-
-    Ok((state, effect_runner))
+    Ok((state, effect_runner, startup_effects))
 }
 
 pub(crate) fn hydrate_batch_state(paths: &RuntimePaths, args: &Args) -> (AppState, Vec<Effect>) {

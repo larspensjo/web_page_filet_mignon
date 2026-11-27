@@ -1405,31 +1405,55 @@ struct RoutingCannedProvider {
     measurements: Arc<Mutex<Measurements>>,
 }
 
+// Shared by the archive child process and the replay example.
+#[allow(dead_code)]
+pub fn routing_canned_provider(url: &str, priority: u8) -> Arc<dyn LlmProvider> {
+    let mut routes = ProviderRoutes::default();
+    routes
+        .url_to_priority
+        .insert(normalize_url_for_dedupe(url), priority);
+    routes
+        .prepared_text_to_url
+        .insert(String::new(), url.to_owned());
+    Arc::new(RoutingCannedProvider {
+        latency: Duration::ZERO,
+        routes: Arc::new(routes),
+        measurements: Arc::new(Mutex::new(Measurements::default())),
+    })
+}
+
+pub fn canned_prompt_kind(request: &LlmRequest) -> &'static str {
+    let system = request
+        .messages()
+        .first()
+        .map(|message| message.content().to_ascii_lowercase())
+        .unwrap_or_default();
+    let user = request
+        .messages()
+        .get(1)
+        .map(|message| message.content())
+        .unwrap_or_default();
+    if system.contains("signallog") || user.to_ascii_lowercase().contains("signallog candidate") {
+        "ArticleSignalCandidate"
+    } else if system.contains("triage") {
+        "ArticleTriage"
+    } else {
+        "ArticleSummary"
+    }
+}
+
 #[async_trait::async_trait]
 impl openai_provider_kit::LlmProvider for RoutingCannedProvider {
     async fn complete(&self, request: &LlmRequest) -> Result<LlmResponse, LlmError> {
         if !self.latency.is_zero() {
             tokio::time::sleep(self.latency).await;
         }
-        let system = request
-            .messages()
-            .first()
-            .map(|message| message.content().to_ascii_lowercase())
-            .unwrap_or_default();
         let user = request
             .messages()
             .get(1)
             .map(|message| message.content())
             .unwrap_or_default();
-        let prompt_kind = if system.contains("signallog")
-            || user.to_ascii_lowercase().contains("signallog candidate")
-        {
-            "ArticleSignalCandidate"
-        } else if system.contains("triage") {
-            "ArticleTriage"
-        } else {
-            "ArticleSummary"
-        };
+        let prompt_kind = canned_prompt_kind(request);
         let url = extract_url(user).or_else(|| {
             self.routes
                 .prepared_text_to_url

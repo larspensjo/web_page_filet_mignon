@@ -148,6 +148,17 @@ fn parse(raw: &str) -> Option<DateTime<Utc>> {
 }
 
 pub(crate) fn read_archive_index(reader: impl BufRead) -> io::Result<ArchiveIndex> {
+    read_archive_index_and_count(reader).map(|(index, _)| index)
+}
+
+/// Return the validated document count when the target carries the pending upper bound.
+pub fn published_article_count(target: &Path, pending_until: DateTime<Utc>) -> Option<usize> {
+    let file = File::open(target).ok()?;
+    let (index, count) = read_archive_index_and_count(BufReader::new(file)).ok()?;
+    (index.window_until() == Some(pending_until)).then_some(count)
+}
+
+fn read_archive_index_and_count(reader: impl BufRead) -> io::Result<(ArchiveIndex, usize)> {
     use Position as P;
     let mut position = P::BetweenDocs;
     let mut doc_lines = Vec::new();
@@ -177,7 +188,7 @@ pub(crate) fn read_archive_index(reader: impl BufRead) -> io::Result<ArchiveInde
                 | "===== DOC END ====="
                 | "===== ARCHIVE INDEX ====="
                 | "===== INDEX END =====",
-            ) => return Ok(ArchiveIndex::Corrupt),
+            ) => return Ok((ArchiveIndex::Corrupt, 0)),
             (P::DocHeader, line) => {
                 if line.starts_with("export_schema: ") {
                     versioned_doc = true;
@@ -192,32 +203,33 @@ pub(crate) fn read_archive_index(reader: impl BufRead) -> io::Result<ArchiveInde
             (P::DocBody, _) => P::DocBody,
             (P::IndexHeader, line) => {
                 let Some((key, value)) = line.split_once(": ") else {
-                    return Ok(ArchiveIndex::Corrupt);
+                    return Ok((ArchiveIndex::Corrupt, 0));
                 };
                 index.record(key, value);
                 P::IndexHeader
             }
             (P::IndexRows, line) => {
                 let Some((number, line)) = parse_row(line) else {
-                    return Ok(ArchiveIndex::Corrupt);
+                    return Ok((ArchiveIndex::Corrupt, 0));
                 };
                 if number != rows + 1 || doc_lines.get(rows) != Some(&line) {
-                    return Ok(ArchiveIndex::Corrupt);
+                    return Ok((ArchiveIndex::Corrupt, 0));
                 }
                 rows += 1;
                 P::IndexRows
             }
-            _ => return Ok(ArchiveIndex::Corrupt),
+            _ => return Ok((ArchiveIndex::Corrupt, 0)),
         };
     }
-    Ok(match position {
+    let index = match position {
         P::End => index.finish(rows, doc_lines.len()),
         P::BetweenDocs if !versioned_doc && !doc_lines.is_empty() => ArchiveIndex::Schema1 {
             fetched_from,
             fetched_to,
         },
         _ => ArchiveIndex::Corrupt,
-    })
+    };
+    Ok((index, rows))
 }
 
 fn parse_row(row: &str) -> Option<(usize, usize)> {

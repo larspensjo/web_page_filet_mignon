@@ -82,6 +82,20 @@ The batch launcher builds the working tree and supplies the fixed stored-key
 flag. External scheduling starts a new process for each cycle. Run
 `harvester_batch --help` for browser-page import and checkpoint commands.
 
+The `harvester_batch` binary accepts `--archive-out <absolute path>` for a
+morning archive. The parent directory must exist and the target must be outside
+the batch output directory. The flag conflicts with checkpoint commands and
+browser-page import. A morning run requires the stored OpenAI key. A missing
+Brave key counts as a failed source and other sources still poll.
+
+The binary ends each reported morning outcome with one ASCII line in the form
+`HARVESTER_RESULT {json}`. Exit codes are 0 for `exported`, 10 for
+`nothing_new`, 20 for `cycle_failed`, 21 for `export_failed`, 22 for a held
+output lock, and 2 for `usage_error`. The JSON includes the archive path, window
+bounds, source and article counts, and estimated OpenAI cost. The binary updates
+the checkpoint after publication. Plain runs keep their existing exit codes.
+See [Archive Export Format](docs/ArchiveExportFormat.md#batch-result-line).
+
 Each cycle shows a compact progress block with elapsed time, cost so far, and
 remaining work for source scanning, downloading, triage, summaries and scoring.
 Counts match the desktop and exclude reused work; stopping shows work done.

@@ -33,6 +33,14 @@ pub const COMMAND_LINE_LOCK_IDENTITY: LockIdentity = LockIdentity {
     force_unlock_hint: Some("Use --force-unlock to override."),
 };
 
+#[derive(Debug, thiserror::Error)]
+pub enum LockError {
+    #[error("{message}")]
+    Held { holder: String, message: String },
+    #[error("{0}")]
+    Io(String),
+}
+
 /// Lock metadata stored in the lock file
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LockMetadata {
@@ -144,15 +152,24 @@ pub fn acquire_lock(
     identity: LockIdentity,
     force: bool,
 ) -> Result<LockGuard, String> {
+    acquire_lock_typed(output_dir, identity, force).map_err(|error| error.to_string())
+}
+
+/// Acquire the same lock while distinguishing an active holder from IO failures.
+pub fn acquire_lock_typed(
+    output_dir: &Path,
+    identity: LockIdentity,
+    force: bool,
+) -> Result<LockGuard, LockError> {
     let lock_path = output_dir.join(identity.filename);
 
     // Ensure output directory exists
     fs::create_dir_all(output_dir).map_err(|err| {
-        format!(
+        LockError::Io(format!(
             "Failed to create output directory {}: {}",
             output_dir.display(),
             err
-        )
+        ))
     })?;
 
     // Generate owner token for this lock attempt
@@ -183,10 +200,10 @@ pub fn acquire_lock(
         }
 
         if let Err(err) = fs::remove_file(&lock_path) {
-            return Err(format!(
+            return Err(LockError::Io(format!(
                 "Failed to remove lock path={}: {err}",
                 lock_path.display()
-            ));
+            )));
         }
     }
 
@@ -198,17 +215,17 @@ pub fn acquire_lock(
         Ok(file) => file,
         Err(err) if is_lock_held(&err) => return Err(describe_active_lock(&lock_path, identity)),
         Err(err) if err.kind() == io::ErrorKind::PermissionDenied => {
-            return Err(format!(
+            return Err(LockError::Io(format!(
                 "Permission denied writing lock path={}",
                 lock_path.display()
-            ));
+            )));
         }
         Err(err) => {
-            return Err(format!(
+            return Err(LockError::Io(format!(
                 "Failed to create lock path={}: {}",
                 lock_path.display(),
                 err
-            ))
+            )))
         }
     };
 
@@ -241,23 +258,23 @@ pub fn acquire_lock(
     };
 
     let metadata_str = serde_json::to_string_pretty(&metadata).map_err(|err| {
-        format!(
+        LockError::Io(format!(
             "Failed to serialize lock metadata path={}: {err}",
             lock_path.display()
-        )
+        ))
     })?;
 
     file.write_all(metadata_str.as_bytes()).map_err(|err| {
-        format!(
+        LockError::Io(format!(
             "Failed to write lock metadata path={}: {err}",
             lock_path.display()
-        )
+        ))
     })?;
     file.flush().map_err(|err| {
-        format!(
+        LockError::Io(format!(
             "Failed to flush lock metadata path={}: {err}",
             lock_path.display()
-        )
+        ))
     })?;
 
     engine_info!(
@@ -286,8 +303,8 @@ fn read_lock_metadata(lock_path: &Path) -> Option<LockMetadata> {
 ///
 /// Re-reads the metadata so a holder that had not finished writing it when this
 /// acquisition began is still reported by identity where possible.
-fn describe_active_lock(lock_path: &Path, identity: LockIdentity) -> String {
-    match read_lock_metadata(lock_path) {
+fn describe_active_lock(lock_path: &Path, identity: LockIdentity) -> LockError {
+    let (holder, message) = match read_lock_metadata(lock_path) {
         Some(meta) => {
             let hint = identity
                 .force_unlock_hint
@@ -298,30 +315,31 @@ fn describe_active_lock(lock_path: &Path, identity: LockIdentity) -> String {
             } else {
                 &meta.host_description
             };
-            format!(
+            let holder = format!("{host} (pid: {}, started: {})", meta.pid, meta.started_utc);
+            let message = format!(
                 "Output folder is already in use by {} (pid: {}, started: {}, lock: {}).{}",
                 host,
                 meta.pid,
                 meta.started_utc,
                 lock_path.display(),
                 hint
-            )
+            );
+            (holder, message)
         }
-        None => identity
-            .force_unlock_hint
-            .map(|hint| {
-                format!(
-                    "Lock path={} exists but is unreadable. {hint}",
-                    lock_path.display()
-                )
-            })
-            .unwrap_or_else(|| {
-                format!(
-                    "Lock path={} exists but is unreadable.",
-                    lock_path.display()
-                )
-            }),
-    }
+        None => {
+            let holder = "another Harvester host (lock metadata unreadable)".to_owned();
+            let mut message = format!(
+                "Lock path={} exists but is unreadable.",
+                lock_path.display()
+            );
+            if let Some(hint) = identity.force_unlock_hint {
+                message.push(' ');
+                message.push_str(hint);
+            }
+            (holder, message)
+        }
+    };
+    LockError::Held { holder, message }
 }
 
 /// Open the lock file so that the operating system owns the exclusion.
@@ -672,5 +690,18 @@ mod tests {
 
         drop(desktop_guard);
         assert!(!lock_path.exists());
+    }
+
+    #[test]
+    fn typed_lock_refusal_carries_the_active_holder() {
+        let dir = tempdir().unwrap();
+        let _guard = acquire_batch_lock(dir.path(), false).unwrap();
+        let error = acquire_lock_typed(dir.path(), DESKTOP_LOCK_IDENTITY, false).unwrap_err();
+        let LockError::Held { holder, .. } = error else {
+            panic!("expected an active lock refusal, got {error}");
+        };
+        assert!(holder.contains(BATCH_LOCK.actor_description));
+        assert!(holder.contains(&format!("pid: {}", std::process::id())));
+        assert!(holder.contains("started:"));
     }
 }

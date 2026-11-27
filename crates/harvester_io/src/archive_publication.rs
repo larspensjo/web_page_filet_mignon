@@ -7,6 +7,7 @@ use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, Metadata};
 use std::io::{self, BufRead, BufReader, Seek, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 const STALE_TEMP_AGE: Duration = Duration::from_secs(3600);
@@ -37,7 +38,7 @@ pub enum PreviousArchiveDisposition {
     KeepAside,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArchivePublication {
     pub previous_kept: Option<PathBuf>,
     pub previous_since_utc: Option<DateTime<Utc>>,
@@ -54,7 +55,7 @@ pub struct ArchivePublicationError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PublishStep {
+pub enum PublishStep {
     CleanedStaleTemps,
     SyncedNewArchive,
     CheckedTarget,
@@ -64,14 +65,36 @@ enum PublishStep {
     ReportedCompletion,
 }
 
+/// Synchronous observation of completed publication steps.
+pub type ArchivePublicationObserver = Arc<dyn Fn(PublishStep) + Send + Sync>;
+
 pub fn publish_archive(
     target: &Path,
     archive: &[u8],
     disposition: PreviousArchiveDisposition,
 ) -> Result<ArchivePublication, ArchivePublicationError> {
-    publish_archive_with(target, archive, disposition, SystemTime::now(), |_| Ok(()))
+    publish_archive_observed(target, archive, disposition, |_, _| {})
 }
 
+pub(crate) fn publish_archive_observed(
+    target: &Path,
+    archive: &[u8],
+    disposition: PreviousArchiveDisposition,
+    mut observe: impl FnMut(PublishStep, &ArchivePublication),
+) -> Result<ArchivePublication, ArchivePublicationError> {
+    publish_archive_impl(
+        target,
+        archive,
+        disposition,
+        SystemTime::now(),
+        |step, publication| {
+            observe(step, publication);
+            Ok(())
+        },
+    )
+}
+
+#[cfg(test)]
 fn publish_archive_with(
     target: &Path,
     archive: &[u8],
@@ -79,21 +102,35 @@ fn publish_archive_with(
     now: SystemTime,
     mut after_step: impl FnMut(PublishStep) -> io::Result<()>,
 ) -> Result<ArchivePublication, ArchivePublicationError> {
+    publish_archive_impl(target, archive, disposition, now, |step, _| {
+        after_step(step)
+    })
+}
+
+fn publish_archive_impl(
+    target: &Path,
+    archive: &[u8],
+    disposition: PreviousArchiveDisposition,
+    now: SystemTime,
+    mut after_step: impl FnMut(PublishStep, &ArchivePublication) -> io::Result<()>,
+) -> Result<ArchivePublication, ArchivePublicationError> {
     engine_info!(
         "[archive-publication] starting target={} disposition={disposition:?}",
         target.display()
     );
-    let mut previous_kept = None;
-    let mut previous_since_utc = None;
+    let mut publication = ArchivePublication {
+        previous_kept: None,
+        previous_since_utc: None,
+    };
     let result: io::Result<()> = (|| {
         let paths = PublicationPaths::new(target)?;
         paths.remove_stale_temps(now)?;
-        after_step(PublishStep::CleanedStaleTemps)?;
+        after_step(PublishStep::CleanedStaleTemps, &publication)?;
 
         let mut new = stage_atomic_file(target)?;
         new.write_all(archive)?;
         new.as_file().sync_all()?;
-        after_step(PublishStep::SyncedNewArchive)?;
+        after_step(PublishStep::SyncedNewArchive, &publication)?;
 
         let previous = match File::open(target) {
             Ok(file) => {
@@ -110,34 +147,34 @@ fn publish_archive_with(
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => return Err(error),
         };
-        after_step(PublishStep::CheckedTarget)?;
+        after_step(PublishStep::CheckedTarget, &publication)?;
 
         if let Some((mut file, current)) = previous {
-            previous_since_utc =
+            publication.previous_since_utc =
                 crate::archive_observation::read_archive_index(BufReader::new(&mut file))
                     .ok()
                     .and_then(|index| index.archive_start());
             file.rewind()?;
-            previous_kept = Some(paths.keep_previous(file, current, &mut after_step)?);
+            let kept = paths.keep_previous(file, current, || {
+                after_step(PublishStep::SyncedKeptArchive, &publication)
+            })?;
+            publication.previous_kept = Some(kept);
         }
-        after_step(PublishStep::KeptPrevious)?;
+        after_step(PublishStep::KeptPrevious, &publication)?;
 
         replace_atomic_file(new, target)?;
-        after_step(PublishStep::ReplacedTarget)?;
-        engine_info!("[archive-publication] completed target={} disposition={disposition:?} previous_kept={previous_kept:?}", target.display());
-        after_step(PublishStep::ReportedCompletion)
+        after_step(PublishStep::ReplacedTarget, &publication)?;
+        engine_info!("[archive-publication] completed target={} disposition={disposition:?} previous_kept={:?}", target.display(), publication.previous_kept);
+        after_step(PublishStep::ReportedCompletion, &publication)
     })();
     match result {
-        Ok(()) => Ok(ArchivePublication {
-            previous_kept,
-            previous_since_utc,
-        }),
+        Ok(()) => Ok(publication),
         Err(source) => {
-            engine_warn!("[archive-publication] failed target={} disposition={disposition:?} previous_kept={previous_kept:?} reason={source}", target.display());
+            engine_warn!("[archive-publication] failed target={} disposition={disposition:?} previous_kept={:?} reason={source}", target.display(), publication.previous_kept);
             Err(ArchivePublicationError {
                 source,
-                previous_kept,
-                previous_since_utc,
+                previous_kept: publication.previous_kept,
+                previous_since_utc: publication.previous_since_utc,
             })
         }
     }
@@ -241,7 +278,7 @@ impl<'a> PublicationPaths<'a> {
         &self,
         file: File,
         current: ArchiveTargetObservation,
-        after_step: &mut impl FnMut(PublishStep) -> io::Result<()>,
+        after_sync: impl FnOnce() -> io::Result<()>,
     ) -> io::Result<PathBuf> {
         let mut previous = BufReader::new(file);
         let mut candidates = Vec::new();
@@ -284,7 +321,7 @@ impl<'a> PublicationPaths<'a> {
         previous.rewind()?;
         io::copy(&mut previous, &mut temp)?;
         temp.as_file().sync_all()?;
-        after_step(PublishStep::SyncedKeptArchive)?;
+        after_sync()?;
         loop {
             match temp.persist_noclobber(&path) {
                 Ok(_) => return Ok(path),

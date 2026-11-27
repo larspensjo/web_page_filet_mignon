@@ -20,6 +20,7 @@ pub(crate) struct MorningArchive {
     target_key: String,
     loaded: Option<BriefingCheckpoint>,
     observed: Option<(TargetObservation, DateTime<Utc>)>,
+    previous_until_utc: Option<DateTime<Utc>>,
     window: Option<ResolvedWindow>,
     ready: bool,
     pending: Option<(u64, SavePurpose)>,
@@ -52,6 +53,42 @@ impl AppState {
         self.morning_archive.as_ref()?.outcome.as_ref()
     }
 
+    pub fn batch_archive_since_utc(&self) -> Option<DateTime<Utc>> {
+        Some(self.morning_archive.as_ref()?.window.as_ref()?.since_utc)
+    }
+
+    pub fn batch_archive_previous_until_utc(&self) -> Option<DateTime<Utc>> {
+        self.morning_archive.as_ref()?.previous_until_utc
+    }
+
+    /// A worker acknowledgement is outstanding for this publication.
+    pub fn batch_archive_publication(&self) -> Option<(u64, ArchiveWindow)> {
+        let (request_id, outcome) = self.morning_archive.as_ref()?.publishing.as_ref()?;
+        Some((*request_id, outcome.window?))
+    }
+
+    pub fn batch_archive_pending_record_save(&self) -> Option<u64> {
+        self.morning_archive
+            .as_ref()?
+            .pending
+            .as_ref()
+            .map(|(id, _)| *id)
+    }
+
+    pub fn batch_archive_failed_sources(&self) -> usize {
+        self.batch_archive_poll_counts().1
+    }
+
+    fn batch_archive_poll_counts(&self) -> (usize, usize) {
+        self.run_progress().map_or((0, 0), |run| {
+            let scan = run.stage(PipelineStage::ScanningSources);
+            (
+                scan.completed.saturating_add(scan.failed) as usize,
+                scan.failed as usize,
+            )
+        })
+    }
+
     pub(crate) fn archive_processing_window_available(&self) -> bool {
         self.morning_archive.is_none() || self.batch_archive_window_ready()
     }
@@ -82,6 +119,7 @@ pub(super) fn configure(state: &mut AppState, target: PathBuf) -> Vec<Effect> {
         target_key: target_key(&target),
         loaded: None,
         observed: None,
+        previous_until_utc: None,
         window: None,
         pending: None,
         publishing: None,
@@ -144,6 +182,9 @@ pub(super) fn observed(
     };
     if morning.window.is_some() || morning.outcome.is_some() {
         return Vec::new();
+    }
+    if let crate::morning_archive::ObservedArchive::Present { index, .. } = observation.archive {
+        morning.previous_until_utc = index.window_until();
     }
     morning.observed = Some((observation, now));
     try_resolve(state)
@@ -352,13 +393,7 @@ pub(super) fn request(
     }
     let resolved = morning.window.as_ref().expect("ready window");
     let window = ArchiveWindow::from_submission(Some(resolved.since_utc), submitted_at);
-    let (sources_scanned, failed_sources) = state.run_progress().map_or((0, 0), |run| {
-        let scan = run.stage(PipelineStage::ScanningSources);
-        (
-            scan.completed.saturating_add(scan.failed) as usize,
-            scan.failed as usize,
-        )
-    });
+    let (sources_scanned, failed_sources) = state.batch_archive_poll_counts();
     let facts = GateFacts {
         interrupted: morning.interrupted,
         result_store_refused: state.result_store_failure().is_some(),

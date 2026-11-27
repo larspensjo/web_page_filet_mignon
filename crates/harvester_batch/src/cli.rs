@@ -1,6 +1,7 @@
 use clap::Parser;
 use harvester_io::default_sources_path;
-use std::path::PathBuf;
+use std::ffi::OsString;
+use std::path::{Component, Path, PathBuf};
 
 const DEFAULT_LLM_CONCURRENCY: usize = 10;
 const MAX_LLM_CONCURRENCY: usize = harvester_engine::llm::MAX_LLM_CONCURRENT_REQUESTS;
@@ -56,6 +57,13 @@ pub struct Args {
     #[arg(long, value_name = "PATH")]
     pub import_saved_web_dir: Option<PathBuf>,
 
+    /// Export the morning signal archive to an absolute path outside the output directory
+    #[arg(long, value_name = "PATH", conflicts_with_all = [
+        "set_checkpoint", "set_checkpoint_now", "clear_checkpoint",
+        "show_checkpoint", "import_saved_web_dir"
+    ])]
+    pub archive_out: Option<PathBuf>,
+
     /// Minimum signal_score (0..=100) for inclusion. Default 60.
     #[arg(long, value_parser = clap::value_parser!(u8).range(0..=100), value_name = "0..=100")]
     pub signal_candidate_threshold: Option<u8>,
@@ -71,6 +79,16 @@ pub enum CheckpointCommand {
 }
 
 impl Args {
+    pub fn try_parse_cli<I, S>(args: I) -> Result<Self, clap::Error>
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<OsString> + Clone,
+    {
+        let mut args = <Self as Parser>::try_parse_from(args)?;
+        args.clamp_values();
+        Ok(args)
+    }
+
     /// Parse command-line arguments with automatic clamping of values.
     pub fn parse() -> Self {
         let mut args = <Args as Parser>::parse();
@@ -134,9 +152,95 @@ impl Args {
     }
 }
 
+pub(crate) fn validate_archive_out(target: &Path, output: &Path) -> Result<(), String> {
+    let (Some(parent), Some(name)) = (target.parent(), target.file_name()) else {
+        return Err("Expected an absolute path to an archive file".into());
+    };
+    if !target.is_absolute() {
+        return Err("Expected an absolute path to an archive file".into());
+    }
+    let parent = parent
+        .canonicalize()
+        .ok()
+        .filter(|path| path.is_dir())
+        .ok_or_else(|| "The archive parent directory must exist".to_owned())?;
+    let output = resolve_output_path(output)
+        .map_err(|error| format!("Cannot resolve output directory: {error}"))?;
+    let destination = parent.join(name);
+    if is_within(&destination, &output)
+        || target
+            .canonicalize()
+            .is_ok_and(|path| is_within(&path, &output))
+    {
+        return Err("The archive target must be outside the output directory".into());
+    }
+    Ok(())
+}
+
+fn resolve_output_path(path: &Path) -> std::io::Result<PathBuf> {
+    let absolute = std::path::absolute(path)?;
+    let mut missing = Vec::new();
+    for ancestor in absolute.ancestors() {
+        match ancestor.canonicalize() {
+            Ok(mut resolved) => {
+                for name in missing.into_iter().rev() {
+                    match name {
+                        Component::ParentDir => {
+                            resolved.pop();
+                        }
+                        Component::Normal(name) => resolved.push(name),
+                        _ => {}
+                    }
+                }
+                return Ok(resolved);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                missing.extend(ancestor.components().next_back());
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(std::io::ErrorKind::NotFound.into())
+}
+
+fn is_within(path: &Path, base: &Path) -> bool {
+    if cfg!(windows) {
+        use harvester_core::morning_archive::target_key;
+        let path = target_key(path);
+        let base = target_key(base);
+        path == base || path.starts_with(&format!("{base}\\"))
+    } else {
+        path.starts_with(base)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn archive_out_parses_and_conflicts_with_checkpoint_and_import_commands() {
+        let args = Args::try_parse_from(["batch", "--archive-out=archive.md"]).unwrap();
+        assert_eq!(args.archive_out, Some(PathBuf::from("archive.md")));
+        for command in [
+            &["--set-checkpoint", "2025-01-01T00:00:00Z"][..],
+            &["--set-checkpoint-now"],
+            &["--clear-checkpoint"],
+            &["--show-checkpoint"],
+            &["--import-saved-web-dir", "saved"],
+            &["--show-briefing-since"],
+        ] {
+            let result = Args::try_parse_from(
+                ["batch", "--archive-out", "archive.md"]
+                    .into_iter()
+                    .chain(command.iter().copied()),
+            );
+            assert_eq!(
+                result.unwrap_err().kind(),
+                clap::error::ErrorKind::ArgumentConflict
+            );
+        }
+    }
 
     #[test]
     fn checkpoint_command_none_when_no_flags() {

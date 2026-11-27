@@ -1,10 +1,12 @@
 use super::live_progress::LiveSystemBatchProgress;
 use super::CycleStartWorkReporter;
-use crate::no_progress::{pipeline_operation, NoProgressWatchdog};
+use crate::no_progress::{pipeline_operation, NoProgressWatchdog, NO_PROGRESS_TIMEOUT};
 use chrono::Utc;
 use engine_logging::{engine_debug, engine_info};
 use harvester_core::{update, AppState, BatchObservation, Msg};
-use harvester_io::{host_bootstrap::pump_pre_triage_refresh, EffectRunner};
+use harvester_io::host_bootstrap::pump_pre_triage_refresh;
+#[cfg(test)]
+use harvester_io::EffectRunner;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -21,6 +23,8 @@ pub(crate) enum CycleOutcome {
 pub(crate) struct DispatchLoopOptions {
     pub(crate) tick_interval: Duration,
     pub(crate) receive_timeout: Duration,
+    pub(crate) watchdog_timeout: Duration,
+    pub(crate) drain_on_interrupt: bool,
 }
 
 impl Default for DispatchLoopOptions {
@@ -28,6 +32,8 @@ impl Default for DispatchLoopOptions {
         Self {
             tick_interval: Duration::from_millis(75),
             receive_timeout: Duration::from_millis(100),
+            watchdog_timeout: NO_PROGRESS_TIMEOUT,
+            drain_on_interrupt: false,
         }
     }
 }
@@ -128,6 +134,7 @@ pub(crate) fn should_log_batch_msg(msg: &Msg) -> bool {
 
 /// Reduce startup metadata and the restored article window before the first
 /// cycle reports unfinished work or requests intake.
+#[cfg(test)]
 pub(super) fn prepare_startup_window(
     state: &mut AppState,
     msg_rx: &mpsc::Receiver<Msg>,
@@ -144,11 +151,34 @@ pub(super) fn prepare_startup_window_with_sink(
     effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
     reducer_observer: &mut dyn FnMut(&str, Duration, &AppState),
 ) -> Result<(), String> {
+    wait_for_startup(
+        state,
+        msg_rx,
+        effect_sink,
+        reducer_observer,
+        None,
+        NO_PROGRESS_TIMEOUT,
+    )
+}
+
+pub(super) fn wait_for_startup(
+    state: &mut AppState,
+    msg_rx: &mpsc::Receiver<Msg>,
+    effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
+    reducer_observer: &mut dyn FnMut(&str, Duration, &AppState),
+    morning_shutdown: Option<&AtomicBool>,
+    watchdog_timeout: Duration,
+) -> Result<(), String> {
     let mut templates_loaded = false;
     let mut metadata_loaded = false;
     let mut contexts_loaded = false;
-    let mut watchdog = NoProgressWatchdog::new(Instant::now());
+    let mut watchdog = NoProgressWatchdog::with_timeout(Instant::now(), watchdog_timeout);
     loop {
+        if morning_shutdown.is_some_and(|shutdown| {
+            shutdown.load(Ordering::Relaxed) || state.batch_archive_outcome().is_some()
+        }) {
+            return Ok(());
+        }
         let mut received_message = false;
         match msg_rx.recv_timeout(Duration::from_millis(100)) {
             Ok(msg) => {
@@ -190,9 +220,11 @@ pub(super) fn prepare_startup_window_with_sink(
         if !effects.is_empty() {
             effect_sink(effects);
         }
+        let window_ready = morning_shutdown.is_none() || state.batch_archive_window_ready();
         if templates_loaded
             && metadata_loaded
             && contexts_loaded
+            && window_ready
             && !state.pipeline_activity().intake_refresh_pending
         {
             return Ok(());
@@ -276,7 +308,8 @@ fn run_dispatch_loop_with_sink_inner(
     let mut iterations = 0;
     let mut last_tick = Instant::now();
     let mut cycle_start_work = CycleStartWorkReporter::default();
-    let mut watchdog = NoProgressWatchdog::new(Instant::now());
+    let mut watchdog = NoProgressWatchdog::with_timeout(Instant::now(), options.watchdog_timeout);
+    let mut stopping = false;
 
     if let Some(line) = cycle_start_work.pending_count_line(state) {
         if let Some(p) = progress.as_deref_mut() {
@@ -292,14 +325,17 @@ fn run_dispatch_loop_with_sink_inner(
         iterations += 1;
 
         // Check for shutdown signal
-        if shutdown_flag.load(Ordering::Relaxed) {
+        if !stopping && shutdown_flag.load(Ordering::Relaxed) {
             engine_info!("[batch] Shutdown signal detected in dispatch loop");
             if let Some(p) = progress.as_deref_mut() {
                 p.set_stopping(true);
                 p.paint(state, state.llm_quota().usage.cost_microdollars, true);
             }
-            let obs = state.batch_observation();
-            return Ok(classify_cycle_outcome(&obs));
+            if !options.drain_on_interrupt {
+                return Ok(classify_cycle_outcome(&state.batch_observation()));
+            }
+            stopping = true;
+            reduce_and_dispatch(state, Msg::StopFinishClicked, effect_sink, reducer_observer);
         }
 
         // Receive at least one message with timeout, then drain a bounded batch.
@@ -411,6 +447,19 @@ fn run_dispatch_loop_with_sink_inner(
             state.pipeline_has_in_flight_work(),
             || pipeline_operation(state),
         )?;
+    }
+}
+
+pub(super) fn reduce_and_dispatch(
+    state: &mut AppState,
+    message: Msg,
+    effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
+    observer: &mut dyn FnMut(&str, Duration, &AppState),
+) {
+    let (next, effects) = reduce_timed_owned(std::mem::take(state), message, observer);
+    *state = next;
+    if !effects.is_empty() {
+        effect_sink(effects);
     }
 }
 

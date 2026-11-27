@@ -13,6 +13,7 @@ use harvester_engine::{
     EngineConfig, EngineEvent, EngineHandle, FailureKind, FetchSettings, UrlPolicy,
 };
 
+mod archive_progress;
 mod configuration;
 mod dispatch;
 mod poll;
@@ -122,7 +123,15 @@ pub struct EffectRunner {
     /// Host-selected sink for reducer-emitted runtime persistence snapshots.
     persistence_sink: Box<dyn RuntimePersistenceSink>,
     file_write_observer: Option<FileWriteObserver>,
+    archive_publication_observer: Option<crate::archive_publication::ArchivePublicationObserver>,
+    archive_receipts: Arc<Mutex<ArchiveReceipts>>,
     result_sink: Box<dyn crate::result_sink::ResultSink>,
+}
+
+#[derive(Default)]
+struct ArchiveReceipts {
+    publication: Option<archive_progress::PublicationProgress>,
+    record_save: Option<(u64, Result<(), String>)>,
 }
 
 impl EffectRunner {
@@ -264,6 +273,8 @@ impl EffectRunner {
             result_sink,
             persistence_sink,
             file_write_observer,
+            archive_publication_observer: None,
+            archive_receipts: Arc::default(),
         };
         runner.spawn_event_loop(msg_tx);
         runner
@@ -308,6 +319,8 @@ impl EffectRunner {
             result_sink,
             persistence_sink,
             file_write_observer: None,
+            archive_publication_observer: None,
+            archive_receipts: Arc::default(),
         };
         runner.spawn_event_loop(msg_tx);
         runner
@@ -322,6 +335,51 @@ impl EffectRunner {
         self.result_sink = sink;
         self
     }
+
+    pub fn with_archive_publication_observer(
+        mut self,
+        observer: crate::archive_publication::ArchivePublicationObserver,
+    ) -> Self {
+        self.archive_publication_observer = Some(observer);
+        self
+    }
+
+    /// The last completed step and whether the worker can still replace the target.
+    pub fn archive_publication_progress(&self, request_id: u64) -> Option<(Instant, bool)> {
+        self.archive_receipts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .publication
+            .as_ref()
+            .filter(|progress| progress.request_id == request_id)
+            .map(|progress| (progress.last_step_at, progress.can_still_publish))
+    }
+
+    /// Kept-file facts are recorded as soon as the copy has its final name.
+    pub fn archive_publication_previous(
+        &self,
+        request_id: u64,
+    ) -> Option<crate::archive_publication::ArchivePublication> {
+        self.archive_receipts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .publication
+            .as_ref()
+            .filter(|progress| progress.request_id == request_id)
+            .and_then(|progress| progress.previous.clone())
+    }
+
+    /// The completed checkpoint write can be observed when its reply channel closes.
+    pub fn portfolio_save_receipt(&self, save_id: u64) -> Option<Result<(), String>> {
+        self.archive_receipts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .record_save
+            .as_ref()
+            .filter(|(id, _)| *id == save_id)
+            .map(|(_, result)| result.clone())
+    }
+
     pub fn flush_results(&self) -> std::io::Result<()> {
         self.result_sink.flush()
     }

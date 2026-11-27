@@ -1,4 +1,6 @@
-use crate::cli::{Args, CheckpointCommand};
+use crate::archive_result::{ArchiveResult, Status};
+use crate::cli::{validate_archive_out, Args, CheckpointCommand};
+use crate::{HostServices, InterruptHandler};
 use chrono::Utc;
 use crossterm::{cursor::Show, QueueableCommand};
 use engine_logging::{engine_info, engine_warn};
@@ -6,9 +8,11 @@ use harvester_core::{AppState, BatchObservation, Msg};
 use harvester_engine::llm::{ModelId, ProviderKind, OPENAI_MODEL_GPT_4O_MINI};
 use harvester_io::{
     acquire_lock,
-    credentials::{read_host_keys, StoredKeyAccess},
+    credentials::{KeyReadOutcome, StoredKeyAccess},
     host_bootstrap::HostLlmDefaults,
-    load_briefing_checkpoint, load_sources, save_blacklist, save_briefing_checkpoint, RuntimePaths,
+    load_briefing_checkpoint, load_sources,
+    run_lock::{acquire_lock_typed, LockError},
+    save_blacklist, save_briefing_checkpoint, EffectRunner, RuntimePaths,
     COMMAND_LINE_LOCK_IDENTITY,
 };
 use std::io::{IsTerminal, Write};
@@ -17,6 +21,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+mod archive;
 mod bootstrap;
 mod dispatch_loop;
 mod live_progress;
@@ -32,11 +37,13 @@ pub(crate) fn batch_host_llm_defaults() -> HostLlmDefaults {
 }
 
 pub(crate) use bootstrap::{apply_llm_availability, apply_signal_candidate_selection_settings};
+#[cfg(test)]
 use dispatch_loop::prepare_startup_window;
 #[cfg(test)]
 use dispatch_loop::run_dispatch_loop;
 #[cfg(test)]
 use dispatch_loop::run_dispatch_loop_with_tick_interval;
+use dispatch_loop::{reduce_and_dispatch, run_dispatch_loop_with_state_observer, wait_for_startup};
 pub(crate) use dispatch_loop::{
     should_log_batch_msg, summarize_batch_msg, CycleOutcome, DispatchLoopOptions,
     MAX_DISPATCH_INBOX_BATCH,
@@ -111,6 +118,41 @@ fn determine_exit_code(total_failure_cycles: usize) -> i32 {
 
 /// Run one poll, download and synchronous processing cycle, then exit.
 pub fn run(args: Args, stored_keys: Option<StoredKeyAccess>) -> Result<i32, String> {
+    run_with_services(args, HostServices::with_stored_access(stored_keys))
+}
+
+pub(crate) fn run_with_services(args: Args, services: HostServices) -> Result<i32, String> {
+    let target = args.archive_out.clone();
+    let outcome = run_host(args, services)?;
+    match outcome {
+        HostOutcome::Plain(code) => Ok(code),
+        HostOutcome::Archive(result) => {
+            engine_info!(
+                "[morning-archive] target={} status={} reason={}",
+                target
+                    .as_deref()
+                    .map_or_else(String::new, |path| path.display().to_string()),
+                result.status.as_str(),
+                result.reason.unwrap_or("none")
+            );
+            println!("{}", result.line());
+            Ok(result.status.exit_code())
+        }
+    }
+}
+
+enum HostOutcome {
+    Plain(i32),
+    Archive(ArchiveResult),
+}
+
+impl From<ArchiveResult> for HostOutcome {
+    fn from(result: ArchiveResult) -> Self {
+        Self::Archive(result)
+    }
+}
+
+fn run_host(args: Args, services: HostServices) -> Result<HostOutcome, String> {
     engine_info!("[batch] Starting harvester_batch");
     engine_info!("[batch] output_dir: {:?}", args.output_dir);
     engine_info!("[batch] sources: {:?}", args.sources_path());
@@ -127,13 +169,28 @@ pub fn run(args: Args, stored_keys: Option<StoredKeyAccess>) -> Result<i32, Stri
         args.contexts_dir.clone(),
         args.prompts_dir.clone(),
     );
+    let morning = args.archive_out.is_some();
+    let checkpoint_command = args.checkpoint_command();
+    if let Some(target) = &args.archive_out {
+        if !matches!(&checkpoint_command, Ok(None)) || args.import_saved_web_dir.is_some() {
+            return Ok(ArchiveResult::new(Status::UsageError, Some("invalid_arguments")).into());
+        }
+        if let Err(error) = validate_archive_out(target, &paths.output_dir) {
+            engine_warn!(
+                "[morning-archive] target={} reason=invalid_archive_out detail={error}",
+                target.display()
+            );
+            eprintln!("harvester_batch: {error}");
+            return Ok(ArchiveResult::new(Status::UsageError, Some("invalid_archive_out")).into());
+        }
+    }
 
     // Handle checkpoint commands before entering the batch loop.
-    match args.checkpoint_command()? {
+    match checkpoint_command? {
         Some(CheckpointCommand::Show) => {
             let val = load_briefing_checkpoint(&paths.briefing_checkpoint_path);
             println!("{}", val.as_deref().unwrap_or("NONE"));
-            return Ok(0);
+            return Ok(HostOutcome::Plain(0));
         }
         Some(cmd) => {
             let _lock_guard = acquire_lock(
@@ -142,25 +199,52 @@ pub fn run(args: Args, stored_keys: Option<StoredKeyAccess>) -> Result<i32, Stri
                 args.force_unlock,
             )?;
             execute_checkpoint_write(cmd, &paths)?;
-            return Ok(0);
+            return Ok(HostOutcome::Plain(0));
         }
         None => {}
     }
 
     engine_info!("[batch] Acquiring lock");
-    let _lock_guard = acquire_lock(
+    let _lock_guard = match acquire_lock_typed(
         &paths.output_dir,
         COMMAND_LINE_LOCK_IDENTITY,
         args.force_unlock,
-    )?;
+    ) {
+        Ok(guard) => guard,
+        Err(error) if morning => {
+            eprintln!("harvester_batch: {error}");
+            return Ok(match error {
+                LockError::Held { holder, .. } => {
+                    let mut result = ArchiveResult::new(Status::Locked, None);
+                    result.lock_holder = Some(holder);
+                    result.into()
+                }
+                error @ LockError::Io(_) => {
+                    engine_warn!("[batch] failed to acquire output lock: {error}");
+                    ArchiveResult::new(Status::CycleFailed, Some("startup_stalled")).into()
+                }
+            });
+        }
+        Err(error) => return Err(error.to_string()),
+    };
 
     // Install signal handler immediately after lock acquisition so Ctrl-C always
     // reaches the shared graceful-shutdown path for every execution mode.
     let shutdown_flag = Arc::new(AtomicBool::new(false));
     let interactive = std::io::stdout().is_terminal() && std::io::stderr().is_terminal();
-    install_signal_handler(Arc::clone(&shutdown_flag), interactive);
+    (services.install_interrupt)(signal_handler(Arc::clone(&shutdown_flag), interactive));
 
-    let keys = bootstrap::read_startup_keys(stored_keys.as_ref(), read_host_keys);
+    let keys = bootstrap::report_startup_keys((services.read_keys)());
+    if morning {
+        let reason = match &keys.openai {
+            KeyReadOutcome::Found { .. } => None,
+            KeyReadOutcome::Unreadable { .. } => Some("credential_unreadable"),
+            _ => Some("missing_openai_key"),
+        };
+        if let Some(reason) = reason {
+            return Ok(ArchiveResult::new(Status::UsageError, Some(reason)).into());
+        }
+    }
 
     // Import mode: branch before source loading
     if let Some(import_dir) = &args.import_saved_web_dir {
@@ -171,7 +255,8 @@ pub fn run(args: Args, stored_keys: Option<StoredKeyAccess>) -> Result<i32, Stri
             import_dir.clone(),
             Arc::clone(&shutdown_flag),
             keys,
-        );
+        )
+        .map(HostOutcome::Plain);
     }
 
     // Validate source configuration
@@ -189,9 +274,58 @@ pub fn run(args: Args, stored_keys: Option<StoredKeyAccess>) -> Result<i32, Stri
     if interactive {
         println!("{}", format_startup_notice("one cycle"));
     }
-    let (mut state, effect_runner) =
-        bootstrap::prepare_runtime(&paths, &args, msg_tx.clone(), keys)?;
-    prepare_startup_window(&mut state, &msg_rx, &effect_runner)?;
+    let (mut state, effect_runner, startup_effects) = match bootstrap::prepare_runtime(
+        &paths,
+        &args,
+        msg_tx.clone(),
+        keys,
+        services.build_runner,
+    ) {
+        Ok(runtime) => runtime,
+        Err(error) if morning => {
+            engine_warn!("[batch] failed to prepare runtime: {error}");
+            return Ok(ArchiveResult::new(Status::CycleFailed, Some("startup_stalled")).into());
+        }
+        Err(error) => return Err(error),
+    };
+    // Morning pipeline requests go directly through the reducer. The host's
+    // sender must not keep a broken worker channel artificially open.
+    let plain_tx = if morning {
+        drop(msg_tx);
+        None
+    } else {
+        Some(msg_tx)
+    };
+    let mut effect_sink = |effects| (services.route_effects)(&effect_runner, effects);
+    let mut reducer_observer = effect_runner.reducer_observer("batch");
+    effect_sink(startup_effects);
+    let startup_result = wait_for_startup(
+        &mut state,
+        &msg_rx,
+        &mut effect_sink,
+        &mut reducer_observer,
+        morning.then_some(shutdown_flag.as_ref()),
+        services.watchdog_timeout,
+    );
+    if morning {
+        let startup_outcome = if shutdown_flag.load(Ordering::Relaxed) {
+            Some(archive::cycle_failure(&state, "interrupted"))
+        } else if let Some(outcome) = state.batch_archive_outcome() {
+            let mut result = ArchiveResult::from_outcome(outcome);
+            result.since_utc = state.batch_archive_since_utc();
+            Some(result)
+        } else if let Err(error) = &startup_result {
+            engine_warn!("[batch] startup stalled: {error}");
+            Some(archive::cycle_failure(&state, "startup_stalled"))
+        } else {
+            None
+        };
+        if let Some(result) = startup_outcome {
+            let _ = drain_and_persist(&paths, &state, effect_runner);
+            return Ok(result.into());
+        }
+    }
+    startup_result?;
     let run_started_at = Instant::now();
     let mut cycle_baseline = CycleCounterBaseline::from_observation(&state.batch_observation());
     let mut progress = LiveBatchProgress::new(interactive);
@@ -199,21 +333,11 @@ pub fn run(args: Args, stored_keys: Option<StoredKeyAccess>) -> Result<i32, Stri
         println!("[batch] started mode=one-cycle");
     }
     progress.paint(&state, state.llm_quota().usage.cost_microdollars, true);
-    let mut effect_sink = |effects| effect_runner.enqueue(effects);
-    let mut reducer_observer = effect_runner.reducer_observer("batch");
     let mut cycle_counts = CycleCounts::default();
     let mut cycle_outcome = CycleOutcome::Success;
     let mut poll_summary = PollSummaryReporter::default();
-    execute_cycle_with_sink(
-        &mut state,
-        &paths,
-        &msg_tx,
-        &msg_rx,
-        &mut effect_sink,
-        &mut reducer_observer,
-        &shutdown_flag,
-        &mut progress,
-        |outcome, state, progress| {
+    let mut after_dispatch =
+        |outcome, state: &AppState, progress: &mut live_progress::LiveSystemBatchProgress| {
             cycle_outcome = outcome;
             let obs = state.batch_observation();
             cycle_counts = cycle_baseline.measure_cycle_and_advance(&obs);
@@ -222,15 +346,71 @@ pub fn run(args: Args, stored_keys: Option<StoredKeyAccess>) -> Result<i32, Stri
                 println!("{summary}");
                 progress.resume(state, state.llm_quota().usage.cost_microdollars);
             }
-        },
-        None,
-    )?;
-    // Flush and stop the ordered persistence sinks before the final synchronous save.
-    engine_info!("[batch] Graceful shutdown: draining effects and persisting final state");
-    let result_save_error = effect_runner.flush_results().err();
-    drop(effect_runner);
-    drop(msg_rx);
-    persist_final_cycle_state(&paths, &state, None);
+        };
+    let archive_result = if let Some(target) = args.archive_out.as_deref() {
+        reduce_and_dispatch(
+            &mut state,
+            Msg::PipelineRunRequested {
+                scope: harvester_core::PipelineRunScope::Full,
+            },
+            &mut effect_sink,
+            &mut reducer_observer,
+        );
+        let dispatched = run_dispatch_loop_with_state_observer(
+            &mut state,
+            &msg_rx,
+            &mut effect_sink,
+            &mut reducer_observer,
+            &shutdown_flag,
+            DispatchLoopOptions {
+                drain_on_interrupt: true,
+                watchdog_timeout: services.watchdog_timeout,
+                ..DispatchLoopOptions::default()
+            },
+            Some(&mut progress),
+        );
+        let mut result = match dispatched {
+            Ok(outcome) => {
+                after_dispatch(outcome, &state, &mut progress);
+                archive::finish_archive(
+                    &mut state,
+                    target,
+                    &msg_rx,
+                    &effect_runner,
+                    &mut effect_sink,
+                    &mut reducer_observer,
+                    &shutdown_flag,
+                    services.watchdog_timeout,
+                )
+            }
+            Err(error) => {
+                engine_warn!("[batch] cycle stalled: {error}");
+                let reason = if shutdown_flag.load(Ordering::Relaxed) {
+                    "interrupted"
+                } else {
+                    "cycle_stalled"
+                };
+                archive::cycle_failure(&state, reason)
+            }
+        };
+        result.cost_microdollars = Some(state.llm_quota().usage.cost_microdollars);
+        Some(result)
+    } else {
+        execute_cycle_with_sink(
+            &mut state,
+            &paths,
+            plain_tx.as_ref().expect("plain cycle sender"),
+            &msg_rx,
+            &mut effect_sink,
+            &mut reducer_observer,
+            &shutdown_flag,
+            &mut progress,
+            after_dispatch,
+            None,
+        )?;
+        None
+    };
+    let result_save_error = drain_and_persist(&paths, &state, effect_runner);
     progress.set_stopping(shutdown_flag.load(Ordering::Relaxed));
     progress.paint(&state, state.llm_quota().usage.cost_microdollars, true);
     progress.suspend_for_output();
@@ -244,7 +424,16 @@ pub fn run(args: Args, stored_keys: Option<StoredKeyAccess>) -> Result<i32, Stri
     );
     progress.finish();
     engine_info!("[batch] Shutdown complete");
-    Ok(exit_code_with_shutdown(
+    if let Some(mut result) = archive_result {
+        if result.status == Status::Exported
+            && result.reason.is_none()
+            && result_save_error.is_some()
+        {
+            result.reason = Some("results_not_saved");
+        }
+        return Ok(result.into());
+    }
+    Ok(HostOutcome::Plain(exit_code_with_shutdown(
         if let Some(reason) = state
             .result_store_failure()
             .map(str::to_owned)
@@ -256,7 +445,23 @@ pub fn run(args: Args, stored_keys: Option<StoredKeyAccess>) -> Result<i32, Stri
             determine_exit_code(usize::from(cycle_outcome == CycleOutcome::TotalFailure))
         },
         shutdown_flag.load(Ordering::Relaxed),
-    ))
+    )))
+}
+
+fn drain_and_persist(
+    paths: &RuntimePaths,
+    state: &AppState,
+    runner: EffectRunner,
+) -> Option<std::io::Error> {
+    engine_info!("[batch] Graceful shutdown: draining effects and persisting final state");
+    let error = runner.flush_results().err();
+    if let Some(error) = &error {
+        engine_warn!("[batch] result flush failed: {error}");
+    }
+    // Stop the ordered persistence sinks before the final synchronous save.
+    drop(runner);
+    persist_final_cycle_state(paths, state, None);
+    error
 }
 
 /// Prepare the same hydrated batch state and startup window for a host that
@@ -487,8 +692,8 @@ fn execute_checkpoint_write(cmd: CheckpointCommand, paths: &RuntimePaths) -> Res
 /// The first interrupt requests the runner's graceful shutdown path. The lock
 /// remains held until `LockGuard` drops after the run returns. A second signal
 /// hard-exits so a stuck network call cannot make the process unkillable.
-fn install_signal_handler(shutdown_flag: Arc<AtomicBool>, interactive: bool) {
-    let handler = move || {
+fn signal_handler(shutdown_flag: Arc<AtomicBool>, interactive: bool) -> InterruptHandler {
+    Box::new(move || {
         if shutdown_flag.swap(true, Ordering::Relaxed) {
             eprintln!("harvester_batch: interrupted again — exiting immediately");
             // The process exits without unwinding on the second interrupt, so
@@ -498,9 +703,7 @@ fn install_signal_handler(shutdown_flag: Arc<AtomicBool>, interactive: bool) {
             std::process::exit(130);
         }
         eprintln!("harvester_batch: interrupted — shutting down; lock remains held");
-    };
-
-    ctrlc::set_handler(handler).expect("Error setting signal handler");
+    })
 }
 
 fn restore_cursor_before_immediate_exit<W: Write>(stdout: &mut W, interactive: bool) {

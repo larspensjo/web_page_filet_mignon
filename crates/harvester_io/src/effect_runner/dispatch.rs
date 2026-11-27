@@ -19,6 +19,7 @@ use harvester_engine::{
     ArchiveReadProgress, ArchiveTarget, ImportOptions,
 };
 
+use super::archive_progress::PublicationJob;
 use super::worker::run_triage_refresh_load;
 use super::{truncate_url_for_log, EffectRunner};
 
@@ -154,6 +155,14 @@ impl EffectRunner {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.paths.output_dir.clone();
                 let corpus_scan_index = Arc::clone(&self.corpus_scan_index);
+                // The reducer has acknowledged the intent before issuing an external export.
+                let publication_job = external.as_ref().map(|_| {
+                    PublicationJob::start(
+                        Arc::clone(&self.archive_receipts),
+                        request_id,
+                        self.archive_publication_observer.clone(),
+                    )
+                });
                 let path = external.as_ref().map_or_else(
                     || output_dir.join(&basename),
                     |external| external.path.clone(),
@@ -203,7 +212,7 @@ impl EffectRunner {
                             });
                         }
                     };
-                    if let Some(external) = external {
+                    if let Some((external, publication_job)) = external.zip(publication_job) {
                         let prepared = prepare_triage_archive_with(
                             &output_dir,
                             ArchiveTarget::External { path: &path },
@@ -220,10 +229,13 @@ impl EffectRunner {
                         let result = match prepared {
                             Ok(prepared) => prepared
                                 .publish(|target, markdown| {
-                                    crate::archive_publication::publish_archive(
+                                    crate::archive_publication::publish_archive_observed(
                                         target,
                                         markdown.as_bytes(),
                                         publication_disposition(&external),
+                                        |step, publication| {
+                                            publication_job.observe(step, publication)
+                                        },
                                     )
                                 })
                                 .map_err(|error| {
@@ -257,6 +269,8 @@ impl EffectRunner {
                                 }
                             }
                         };
+                        // Dropping the job records that the worker can no longer replace the target.
+                        drop(publication_job);
                         if msg_tx.send(reply).is_err() {
                             engine_warn!("[morning-archive] target={} publication acknowledgement lost request_id={request_id}", path.display());
                         }
@@ -603,13 +617,23 @@ impl EffectRunner {
             } => {
                 let msg_tx = self.msg_tx.clone();
                 let path = self.paths.briefing_checkpoint_path.clone();
+                let observer = self.file_write_observer.clone();
+                let archive_receipts = Arc::clone(&self.archive_receipts);
                 thread::spawn(move || {
+                    let started = Instant::now();
                     let result = crate::persistence::save_portfolio_record(
                         &path,
                         &target_key,
                         &record,
                         checkpoint,
                     );
+                    if result.is_ok() {
+                        super::observe_file_write(&observer, &path, started.elapsed());
+                    }
+                    archive_receipts
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .record_save = Some((save_id, result.clone()));
                     if msg_tx
                         .send(Msg::PortfolioRecordSaved { save_id, result })
                         .is_err()

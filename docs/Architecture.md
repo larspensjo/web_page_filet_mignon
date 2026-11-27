@@ -147,9 +147,11 @@ identical copies and attempts to clear matching temporary files over an hour old
 The portfolio owns the processed sidecar. `ArchiveExportFormat.md` defines the
 external contract.
 
-The morning archive core joins checkpoint hydration with a separate observation
-of the target and processed sidecar, in either reply order. Article-window work
-waits for both replies and acknowledgement of any startup record write. A valid
+For `--archive-out`, the batch host acquires the output lock and reduces
+`BatchArchiveConfigured` before dispatching hydration effects. The core joins
+checkpoint hydration with a separate observation of the target and processed
+sidecar, in either reply order. Article-window work and polling wait for both
+replies and acknowledgement of any startup record write. A valid
 sidecar can seed a new target, with the desktop checkpoint as the fallback.
 After seeding, only a valid later confirmation at or before the target's last
 published bound can advance the start. The desktop window uses `since_utc`.
@@ -175,11 +177,18 @@ article-stage failures excuse the article on the next genuine failure. The
 gate resets skipped or recovered articles' streaks, logs each excused URL and
 stage, and leaves eligible current-key scores in control of selection.
 
-The reducer saves publication intent before issuing the export effect. After
-issuance, publication and its checkpoint acknowledgement determine the outcome.
-A successful publication saves its bound in `since_utc` and the last-published
-field and clears the pending bound in one write. The batch command-line host is
-wired in the next phase.
+The reducer saves publication intent before issuing the export effect. The host
+drains a graceful interrupt before export and applies the morning gate. After
+the export effect is issued, publication and its checkpoint acknowledgement
+determine the outcome. A successful publication saves its bound in `since_utc`
+and the last-published field and clears the pending bound in one write.
+
+While the export worker runs, progress replies restart the 60-second watchdog.
+If the publication reply is lost, the host checks whether the target's
+validated index has the pending bound and sends that result through the same
+reducer. The host keeps the effect runner alive through the checkpoint save,
+flushes paid results and persists final state, and then prints the result line
+as its last stdout line.
 
 Archive export previously filtered by checkpoint after a full read. The export worker now
 takes an owned hint snapshot from the process-lifetime root scan index and releases the lock

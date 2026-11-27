@@ -494,6 +494,7 @@ mod tests {
             DispatchLoopOptions {
                 receive_timeout: Duration::ZERO,
                 tick_interval: Duration::ZERO,
+                ..DispatchLoopOptions::default()
             },
             None,
             &mut |count| {

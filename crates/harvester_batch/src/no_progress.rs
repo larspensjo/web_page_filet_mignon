@@ -7,11 +7,19 @@ pub(crate) const NO_PROGRESS_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub(crate) struct NoProgressWatchdog {
     idle_since: Instant,
+    timeout: Duration,
 }
 
 impl NoProgressWatchdog {
     pub(crate) fn new(now: Instant) -> Self {
-        Self { idle_since: now }
+        Self::with_timeout(now, NO_PROGRESS_TIMEOUT)
+    }
+
+    pub(crate) fn with_timeout(now: Instant, timeout: Duration) -> Self {
+        Self {
+            idle_since: now,
+            timeout,
+        }
     }
 
     pub(crate) fn check(
@@ -23,11 +31,11 @@ impl NoProgressWatchdog {
     ) -> Result<(), String> {
         if received_message || in_flight {
             self.idle_since = now;
-        } else if now.saturating_duration_since(self.idle_since) >= NO_PROGRESS_TIMEOUT {
+        } else if now.saturating_duration_since(self.idle_since) >= self.timeout {
             let operation = operation();
             let reason = format!(
                 "No progress for {} seconds while {operation}: no message and no in-flight work",
-                NO_PROGRESS_TIMEOUT.as_secs()
+                self.timeout.as_secs()
             );
             engine_warn!("[no-progress-watchdog] {}", reason);
             return Err(reason);

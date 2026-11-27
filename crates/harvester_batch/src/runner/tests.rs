@@ -36,6 +36,7 @@ fn create_test_args(temp_dir: &TempDir) -> Args {
         clear_checkpoint: false,
         show_checkpoint: false,
         import_saved_web_dir: None,
+        archive_out: None,
         signal_candidate_threshold: None,
     }
 }
@@ -356,6 +357,7 @@ fn dispatch_loop_survives_more_than_ten_thousand_quiet_download_iterations() {
         DispatchLoopOptions {
             tick_interval: Duration::ZERO,
             receive_timeout: Duration::ZERO,
+            ..DispatchLoopOptions::default()
         },
         None,
     )

@@ -275,3 +275,53 @@ moves the original bytes to
 checkpoint, logs both paths and the recovered value, and applies the edit.
 It uses a numbered suffix if the backup name is taken. An I/O read failure
 stops morning startup with `record_unreadable`.
+
+## Batch result line
+
+The binary's `--archive-out` path reports one final stdout line beginning with
+`HARVESTER_RESULT ` followed by an ASCII JSON object, encoded as UTF-8 without a
+BOM. All keys are present, in this order.
+
+| Key | Value |
+| --- | --- |
+| `v` | Result line version, currently 1 |
+| `status` | Outcome from the exit-code table below |
+| `articles` | Document count, or 0 when no archive was published |
+| `path` | Published target path, or null |
+| `previous_kept` | Kept-aside archive path, or null |
+| `previous_superseded` | True when a kept archive's start is at or after the new start |
+| `cost_usd` | This run's model cost estimate with six decimal places, or null if the run did not start |
+| `cost_basis` | `openai_price_table`: a constant token meaning an estimate from a price table of this run's OpenAI requests; Brave Search requests are not included. A different token means a different basis. |
+| `archive_schema` | Archive format version, currently 2 |
+| `since_utc` | Resolved window start, or null before resolution |
+| `until_utc` | Export window end, or null without an export request |
+| `failed_sources` | Sources whose poll failed this run |
+| `backlog_articles` | Unsettled articles that blocked export, or 0 |
+| `excused_articles` | Articles excused after two consecutive failed mornings |
+| `lock_holder` | Host, PID, and start time of the output lock holder when available, or null |
+| `reason` | Fixed outcome token, or null for a clean result |
+
+Window timestamps use the same RFC 3339 UTC spelling as the archive index,
+with a `Z` suffix and any fractional precision of the window start.
+Consumers should accept unfamiliar reason tokens.
+
+For `exported`, a results flush failure supplies `results_not_saved` only when
+the reason is still null. An earlier `checkpoint_not_saved` or `export_ack_lost`
+reason takes precedence.
+
+| Exit code | Status | Effect |
+| --- | --- | --- |
+| 0 | `exported` | Archive published. A failed checkpoint save is reconciled on the next run. |
+| 10 | `nothing_new` | No selected documents or backlog. The target, sidecar and desktop checkpoint stay in place. |
+| 20 | `cycle_failed` | The run could not reach a publishable selection. This includes a graceful interrupt before export. |
+| 21 | `export_failed` | The new archive was not published. |
+| 22 | `locked` | Another host holds the output folder lock. |
+| 2 | `usage_error` | The arguments, stored OpenAI key or initial window are unusable. |
+
+The first interrupt after the export effect is issued leaves publication in
+control of the outcome. A second interrupt or an abrupt termination may leave
+no result line. The next run reconciles the recorded intent against the
+target's index. Completed publication steps reset the acknowledgement
+watchdog. The host waits while the worker can still replace the target. If the
+worker acknowledgement is lost, the host checks the index and reports reason
+`export_ack_lost`. Kept-aside paths are recorded when the copy becomes visible.

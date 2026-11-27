@@ -1,30 +1,14 @@
 //! Thin command-line entry point for the batch library.
 
-use engine_logging::{engine_error, engine_info};
-use harvester_batch::Args;
-use harvester_io::credentials::StoredKeyAccess;
-use std::fs::File;
+use harvester_batch::{initialize_logging, parse_command_line, run_main, HostServices};
 use std::process;
 
 fn main() {
-    let args = Args::parse();
-
-    // Batch runs should always start with a fresh per-run log file.
-    let _ = File::create("engine.log");
-
-    // Batch mode is file-only to keep stderr/stdout clean during scheduled runs.
-    engine_logging::initialize_file_only();
-
-    let stored_keys = StoredKeyAccess::from_launch_flag(args.use_stored_keys);
-    let exit_code = match harvester_batch::run(args, stored_keys) {
-        Ok(code) => code,
-        Err(err) => {
-            engine_error!("[batch] Fatal error: {}", err);
-            eprintln!("harvester_batch: {}", err);
-            2
-        }
+    let args = match parse_command_line() {
+        Ok(args) => args,
+        Err(code) => process::exit(code),
     };
-
-    engine_info!("[batch] Exiting with code {}", exit_code);
-    process::exit(exit_code);
+    initialize_logging();
+    let services = HostServices::production(args.use_stored_keys);
+    process::exit(run_main(args, services));
 }
