@@ -12,7 +12,30 @@ This document describes the overall system shape, centered on a unidirectional d
 
 ### Host credentials and Brave sources
 
-The fixed launch policies build the working tree and pass the hidden
+The fixed launch policies pass the hidden `--use-stored-keys` flag. With no
+arguments, both launchers build the working tree and run it. The batch launcher's
+only other accepted argument is one absolute `--archive-out` target (space or
+equals form; the drive-colon split that `pwsh -File` makes in the equals form is
+rejoined). That morning route never builds the working tree: it keeps its own
+clone at `C:\Users\larsp\src\harvester-morning` of the local `morning` branch, a
+release branch that only the Orchestrator advances, fast-forward only, to a fully
+checked commit on `main` (`scripts/Advance-MorningBranch.ps1`). The launcher
+refuses with an `update_failed` result line (exit 23) when `morning` is missing,
+is not an ancestor of `main`, or the clone is dirty, ahead, diverged or not left
+at the fetched commit; it never resets, cleans, checks out files, stashes or
+rebases. It builds `cargo build --locked -p harvester_batch --bin harvester_batch`
+in the clone with `CARGO_INCREMENTAL=0` (`build_failed`, exit 24, on failure or a
+failed child start), then runs the clone's binary from the main repository with
+absolute output, sources, contexts and prompts paths and
+`HARVESTER_MORNING_COMMIT` set to the commit, which the batch reports as the last
+result-line field. The child's exit code passes through and its result line stays
+last; a newer `main` alone changes nothing.
+
+Limits (approved by the Orchestrator, 2026-11-27): the batch launcher forwards only
+`--archive-out`; it never forwards any other argument, `--force-unlock` or a
+checkpoint command, and refuses them with `usage_error` before any git or cargo call.
+
+Each launch policy passes the hidden
 `--use-stored-keys` flag. At runtime startup, each host derives a `StoredKeyAccess`
 proof from the flag. `harvester_io::credentials` requires the proof to read the
 generic entries `Harvester/OpenAI` and `Harvester/BraveSearch` from Windows
@@ -29,6 +52,10 @@ IDs and the poll worker logs them together once per poll-all. A missing Brave
 key emits `SourcePollFailed` only for Brave sources due for a search. Recently
 searched sources still report `SourcePollSkipped`, and other sources continue
 polling.
+
+Limits (approved by the Orchestrator, 2026-11-27): all Brave sources share the one stored
+entry. A legacy `api_key_env` never fails the sources file or drops another source; a
+per-source key could only return as a new optional field.
 
 ### Run timing
 

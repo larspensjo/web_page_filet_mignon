@@ -3006,3 +3006,18 @@ Context: The unattended morning batch uses stored keys and needs a deliberate re
 Change: The launcher validates and builds the fetched morning tip. The advance command checks ancestry and updates the ref with its expected old value. Both launcher and batch result lines append the known checkout commit.
 Lessons Learned: Check the fetched commit against the validated release tip before merging. Use the verified checkout hash for child process metadata and validate it at the formatter boundary before reporting it.
 Refs: scripts/lib/HarvesterLaunch.psm1, scripts/Advance-MorningBranch.ps1, scripts/tests/HarvesterMorningLaunch.Tests.ps1, crates/harvester_batch/src/archive_result.rs
+
+## 2026-11-27 - Archive target could vanish during replacement
+Type: Bug Fix
+Context: `AtomicFileWriter` removed the target before renaming the new file into place, so a crash or kill between the two steps left no `archive.md` for AI_portfolio, and tempfile's replacing rename (`MoveFileExW`) refused while any reader held the target open.
+Change: Writers now replace by one rename that tolerates open readers (`std::fs::rename`), with bounded permission retries; a kept-aside copy is written and synced before the replacement, so the target name always holds a complete old or new file.
+Lessons Learned: "Write temp, remove target, rename" is not atomic on Windows, and a library's persist call may not use the primitive its documentation suggests. Test publication with a reader holding the target open and with a process exit after each step.
+Prevention: Windows tests hold a reader across replacement; contract tests kill the batch after each publication step and check both names and their contents.
+Refs: crates/harvester_engine/src/persist.rs, crates/harvester_io/src/archive_publication.rs, crates/harvester_batch/tests/archive_out_contract.rs
+
+## 2026-11-27 - A consumer's "processed" mark can be cleared by a later run
+Type: Implementation
+Context: AI_portfolio writes `archive.md.processed` after processing an archive, but its `-SkipHarvest` mode rewrites the same file with `until_utc: null`. Reading the morning window start only from that mark would lose the last confirmed end.
+Change: The Harvester keeps its own per-target record of the confirmed start in `.briefing_checkpoint.ron`; the mark may only move it forward, never past the last published archive, and a null, older, future, missing or unreadable mark changes nothing.
+Lessons Learned: Treat another repository's status file as a signal that can only advance your own durable state, never as the state itself, and keep a positive confirmation separate from "file exists".
+Refs: crates/harvester_core/src/morning_archive.rs, docs/ArchiveExportFormat.md, docs/plans/Plan.MorningBatchRun.md

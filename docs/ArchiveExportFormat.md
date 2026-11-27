@@ -278,6 +278,12 @@ stops morning startup with `record_unreadable`.
 
 ## Batch result line
 
+Contract limits (approved by the Orchestrator, 2026-11-27, agreed with AI_portfolio): the
+result line is printed exactly once, as the last stdout line; within `v` 1 a field is never
+removed, renamed or reordered, and new fields are only appended; the target name is never left
+without a complete archive; the checkpoint is saved only after publication; an unprocessed
+previous archive is kept aside, never a reason to refuse.
+
 The morning launcher and the batch executable's `--archive-out` path report
 their outcomes as a final stdout line beginning with `HARVESTER_RESULT ` followed
 by an ASCII JSON object, encoded as UTF-8 without a BOM. All keys are present,
