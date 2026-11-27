@@ -887,7 +887,10 @@ fn archive_requested_writes_archive_markdown_for_selected_urls() {
         request_id: 7,
         basename: "archive.md".to_string(),
         ordered_urls: vec!["https://example.com/b".to_string()],
-        since_utc: None,
+        window: harvester_engine::ArchiveWindow::from_submission(
+            None,
+            "2026-02-12T00:00:00Z".parse().unwrap(),
+        ),
         requested_checkpoint: None,
         use_summaries: false,
         summaries: HashMap::new(),
@@ -955,6 +958,48 @@ fn archive_requested_writes_archive_markdown_for_selected_urls() {
 }
 
 #[test]
+fn unticked_desktop_archive_export_records_until_without_saving_a_checkpoint() {
+    use harvester_core::{update, AppState};
+
+    let temp = tempdir().unwrap();
+    let (runner, rx) = runner_with_receiver(temp.path());
+    let (state, _) = update(AppState::new(), Msg::ArchiveClicked);
+    let request_id = state.archive_request_id();
+    let (state, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".into(),
+            set_checkpoint: false,
+            submitted_at: "2026-03-22T00:00:00.1Z".parse().unwrap(),
+            use_summaries: false,
+            use_signal_candidates: false,
+        },
+    );
+    assert!(!effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::SaveBriefingCheckpoint { .. })));
+    runner.enqueue(effects);
+    let completed = loop {
+        match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+            msg @ Msg::ArchiveExportCompleted {
+                requested_checkpoint: None,
+                ..
+            } => break msg,
+            Msg::ArchiveExportProgress { .. } => {}
+            other => panic!("unexpected archive export message: {other:?}"),
+        }
+    };
+    let (_, effects) = update(state, completed);
+    assert!(!effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::SaveBriefingCheckpoint { .. })));
+    let archive = fs::read_to_string(temp.path().join("archive.md")).unwrap();
+    assert!(archive.contains("\nwindow_until_utc: 2026-03-22T00:00:01Z\ndoc | line |"));
+    assert!(!archive.contains("\nwindow_since_utc: "));
+}
+
+#[test]
 fn archive_requested_uses_read_hints_from_the_triage_load() {
     const FIXTURE_DIR: &str = "HARVESTER_ARCHIVE_HINTS_TEST_DIR";
     let Some(output) = std::env::var_os(FIXTURE_DIR).map(std::path::PathBuf::from) else {
@@ -1014,7 +1059,10 @@ fn archive_requested_uses_read_hints_from_the_triage_load() {
         request_id: 2,
         basename: "archive.md".into(),
         ordered_urls: vec![new_url.into()],
-        since_utc: Some(since),
+        window: harvester_engine::ArchiveWindow::from_submission(
+            Some(since),
+            "2026-03-23T00:00:00Z".parse().unwrap(),
+        ),
         requested_checkpoint: None,
         use_summaries: false,
         summaries: HashMap::new(),

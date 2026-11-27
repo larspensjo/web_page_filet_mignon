@@ -58,6 +58,7 @@ export_schema: 2
 doc_count: 3
 fetched_from: 2026-09-02T00:00:00Z
 fetched_to: 2026-09-03T00:00:00Z
+window_until_utc: 2026-12-01T00:00:00Z
 doc | line | fetched_utc | priority | signal_key | title
 1 | 1 | not-a-date / unsafe | - | - | raw forgery
 2 | 25 | 2026-09-02T00:00:00Z | - | - | summary forgery

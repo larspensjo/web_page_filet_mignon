@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
-use harvester_engine::ArchiveDocAnnotations;
+use harvester_engine::{ArchiveDocAnnotations, ArchiveWindow};
 use serde::{Deserialize, Serialize};
 
 /// The reducer-owned runtime projection written by the persistence worker.
@@ -84,7 +84,7 @@ pub enum Effect {
         request_id: u64,
         basename: String,
         ordered_urls: Vec<String>,
-        since_utc: Option<chrono::DateTime<chrono::Utc>>,
+        window: ArchiveWindow,
         requested_checkpoint: Option<chrono::DateTime<chrono::Utc>>,
         use_summaries: bool,
         summaries: HashMap<String, String>,

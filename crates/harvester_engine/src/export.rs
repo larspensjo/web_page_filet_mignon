@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, TimeDelta, Timelike, Utc};
 use engine_logging::{engine_info, engine_warn};
 
 use crate::archive_url_key;
@@ -90,10 +90,100 @@ pub struct ExportSummary {
     pub unexported_folded: Option<[usize; 2]>,
 }
 
+/// A rendered archive whose target is untouched until the supplied writer publishes it.
+pub struct PreparedArchive {
+    trace: ExportTrace,
+    summary: ExportSummary,
+    markdown: String,
+}
+
+impl PreparedArchive {
+    pub fn publish<T, E>(
+        mut self,
+        write: impl FnOnce(&Path, &str) -> Result<T, E>,
+    ) -> Result<(ExportSummary, T), E> {
+        self.trace.phase("write-archive");
+        engine_info!(
+            "[archive-export] bytes={} path={}",
+            self.markdown.len(),
+            self.trace.path.display()
+        );
+        let publication = write(&self.trace.path, &self.markdown)?;
+        self.trace.completed = true;
+        engine_info!(
+            "[archive-export] completed docs={} bytes={} path={} elapsed_ms={}",
+            self.summary.doc_count,
+            self.markdown.len(),
+            self.trace.path.display(),
+            self.trace.started.elapsed().as_millis()
+        );
+        Ok((self.summary, publication))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ArchiveReadProgress {
     pub files_checked: usize,
     pub files_total: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArchiveTarget<'a> {
+    InOutput { basename: &'a str },
+    External { path: &'a Path },
+}
+
+/// The exact fetch-time bounds of an archive request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArchiveWindow {
+    since_utc: Option<DateTime<Utc>>,
+    until_utc: DateTime<Utc>,
+}
+
+impl ArchiveWindow {
+    pub fn from_submission(since_utc: Option<DateTime<Utc>>, submitted_at: DateTime<Utc>) -> Self {
+        let remainder = submitted_at.nanosecond() % 1_000_000_000;
+        let until_utc = if remainder == 0 {
+            submitted_at
+        } else {
+            submitted_at + TimeDelta::nanoseconds(i64::from(1_000_000_000 - remainder))
+        };
+        Self::from_bounds(since_utc, until_utc)
+    }
+
+    pub(crate) fn from_bounds(since_utc: Option<DateTime<Utc>>, until_utc: DateTime<Utc>) -> Self {
+        Self {
+            since_utc,
+            until_utc,
+        }
+    }
+
+    pub fn since_utc(self) -> Option<DateTime<Utc>> {
+        self.since_utc
+    }
+
+    pub fn until_utc(self) -> DateTime<Utc> {
+        self.until_utc
+    }
+
+    pub fn contains(self, fetched_utc: Option<&str>) -> bool {
+        fetched_utc
+            .and_then(|date| DateTime::parse_from_rfc3339(date).ok())
+            .is_none_or(|date| {
+                self.since_utc.is_none_or(|since| date >= since) && date < self.until_utc
+            })
+    }
+}
+
+pub fn format_archive_timestamp(instant: DateTime<Utc>) -> String {
+    instant.to_rfc3339_opts(SecondsFormat::AutoSi, true)
+}
+
+pub fn is_safe_archive_basename(name: &str) -> bool {
+    !name.contains(['/', '\\', '\0'])
+        && Path::new(name)
+            .file_name()
+            .is_some_and(|basename| basename == name)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -102,6 +192,8 @@ pub enum ExportError {
     Io(#[from] std::io::Error),
     #[error("persist error: {0}")]
     Persist(#[from] PersistError),
+    #[error("invalid archive basename: {0}")]
+    InvalidBasename(String),
     #[error("frontmatter missing required fields in file {0}")]
     MissingFrontmatter(String),
 }
@@ -158,7 +250,7 @@ pub fn build_triage_archive(
     output_dir: &Path,
     basename: &str,
     ordered_urls: &[String],
-    since_utc: Option<DateTime<Utc>>,
+    window: ArchiveWindow,
     use_summaries: bool,
     summaries: &HashMap<String, String>,
     annotations: &HashMap<String, ArchiveDocAnnotations>,
@@ -167,9 +259,9 @@ pub fn build_triage_archive(
 ) -> Result<ExportSummary, ExportError> {
     build_triage_archive_with(
         output_dir,
-        basename,
+        ArchiveTarget::InOutput { basename },
         ordered_urls,
-        since_utc,
+        window,
         use_summaries,
         summaries,
         annotations,
@@ -183,9 +275,9 @@ pub fn build_triage_archive(
 #[allow(clippy::too_many_arguments)]
 pub fn build_triage_archive_with(
     output_dir: &Path,
-    basename: &str,
+    target: ArchiveTarget<'_>,
     ordered_urls: &[String],
-    since_utc: Option<DateTime<Utc>>,
+    window: ArchiveWindow,
     use_summaries: bool,
     summaries: &HashMap<String, String>,
     annotations: &HashMap<String, ArchiveDocAnnotations>,
@@ -194,8 +286,49 @@ pub fn build_triage_archive_with(
     hints: Option<&ArchiveReadHints>,
     on_progress: &mut dyn FnMut(ArchiveReadProgress),
 ) -> Result<ExportSummary, ExportError> {
+    let prepared = prepare_triage_archive_with(
+        output_dir,
+        target,
+        ordered_urls,
+        window,
+        use_summaries,
+        summaries,
+        annotations,
+        priority_snapshot,
+        folds,
+        hints,
+        on_progress,
+    )?;
+    let (summary, ()) = prepared.publish(write_export_file)?;
+    Ok(summary)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn prepare_triage_archive_with(
+    output_dir: &Path,
+    target: ArchiveTarget<'_>,
+    ordered_urls: &[String],
+    window: ArchiveWindow,
+    use_summaries: bool,
+    summaries: &HashMap<String, String>,
+    annotations: &HashMap<String, ArchiveDocAnnotations>,
+    priority_snapshot: &HashMap<String, u8>,
+    folds: Option<&ArchiveFoldReport>,
+    hints: Option<&ArchiveReadHints>,
+    on_progress: &mut dyn FnMut(ArchiveReadProgress),
+) -> Result<PreparedArchive, ExportError> {
+    let path = match target {
+        ArchiveTarget::InOutput { basename } if is_safe_archive_basename(basename) => {
+            output_dir.join(basename)
+        }
+        ArchiveTarget::InOutput { basename } => {
+            return Err(ExportError::InvalidBasename(basename.to_owned()));
+        }
+        ArchiveTarget::External { path } => path.to_path_buf(),
+    };
+    let since_utc = window.since_utc();
     let mut trace = ExportTrace {
-        path: output_dir.join(basename),
+        path,
         started: Instant::now(),
         phase: "prepare-directory",
         last_file: None,
@@ -206,7 +339,7 @@ pub fn build_triage_archive_with(
     trace.phase("write-manifest");
     write_corpus_manifest(output_dir)?;
     trace.phase("collect-files");
-    let entries = ordered_archive_window_paths(output_dir, basename)?;
+    let entries = ordered_archive_window_paths(output_dir, &trace.path)?;
     let file_count = entries.len();
     engine_info!(
         "[archive-export] files={} path={}",
@@ -239,7 +372,7 @@ pub fn build_triage_archive_with(
         if !skip_read {
             files_read += 1;
             if let Some((_, meta)) = read_archive_window_doc(output_dir, &path)? {
-                if passes_since_filter(&meta, since_utc) {
+                if window.contains(Some(&meta.fetched_utc)) {
                     let normalized = archive_url_key(&meta.url);
                     docs_by_url.entry(normalized).or_insert(meta);
                 }
@@ -390,36 +523,25 @@ pub fn build_triage_archive_with(
         &mut buffer,
         &index_rows,
         &parsed_fetched,
-        since_utc.is_some(),
+        window,
         window_count,
         unexported_by_priority,
         folds.map(|_| unexported_folded),
     );
 
-    trace.phase("write-archive");
-    engine_info!(
-        "[archive-export] bytes={} path={}",
-        buffer.len(),
-        trace.path.display()
-    );
-    let output_path = write_export_file(output_dir, basename, &buffer)?;
-    trace.completed = true;
-    engine_info!(
-        "[archive-export] completed docs={} bytes={} path={} elapsed_ms={}",
-        docs.len(),
-        buffer.len(),
-        output_path.display(),
-        trace.started.elapsed().as_millis()
-    );
-
-    Ok(ExportSummary {
+    let summary = ExportSummary {
         doc_count: docs.len(),
         files_read,
         total_tokens,
-        output_path,
+        output_path: trace.path.clone(),
         window_count: since_utc.is_some().then_some(window_count),
         unexported_by_priority: since_utc.is_some().then_some(unexported_by_priority),
         unexported_folded: (since_utc.is_some() && folds.is_some()).then_some(unexported_folded),
+    };
+    Ok(PreparedArchive {
+        trace,
+        summary,
+        markdown: buffer,
     })
 }
 
@@ -428,10 +550,10 @@ pub fn build_triage_archive_with(
 /// so each article is read once per scan.
 pub(crate) fn ordered_archive_window_paths(
     output_dir: &Path,
-    output_filename: &str,
+    target_path: &Path,
 ) -> Result<Vec<PathBuf>, ExportError> {
     let mut entries = collect_archive_md_files(output_dir)?;
-    exclude_export_artifacts(&mut entries, output_dir, output_filename);
+    entries.retain(|path| path != target_path && !is_named_archive_artifact(path, output_dir));
     entries.sort_by_key(|path| path.file_name().map(|name| name.to_os_string()));
     Ok(entries)
 }
@@ -445,30 +567,14 @@ fn collect_archive_md_files(output_dir: &Path) -> Result<Vec<PathBuf>, ExportErr
     Ok(entries)
 }
 
-fn exclude_export_artifacts(entries: &mut Vec<PathBuf>, output_dir: &Path, output_filename: &str) {
-    let output_artifact = output_dir.join(output_filename);
-
-    entries.retain(|path| {
-        if is_named_archive_artifact(path, output_dir, output_filename) {
-            return false;
-        }
-        if *path == output_artifact {
-            return false;
-        }
-        true
-    });
-}
-
-fn is_named_archive_artifact(path: &Path, output_dir: &Path, output_filename: &str) -> bool {
+fn is_named_archive_artifact(path: &Path, output_dir: &Path) -> bool {
     if path.parent() != Some(output_dir) {
         return false;
     }
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
     };
-    name == output_filename
-        || name == "archive.md"
-        || (name.starts_with("archive-") && name.ends_with(".md"))
+    name == "archive.md" || (name.starts_with("archive-") && name.ends_with(".md"))
 }
 
 /// A renamed export in the output root is recognised by its leading archive marker.
@@ -493,17 +599,19 @@ fn collect_md_files(dir: &Path) -> Result<Vec<PathBuf>, ExportError> {
     Ok(entries)
 }
 
-fn write_export_file(
-    output_dir: &Path,
-    output_filename: &str,
-    content: &str,
-) -> Result<PathBuf, ExportError> {
-    let writer = AtomicFileWriter::new(output_dir.to_path_buf());
-    Ok(writer.write(output_filename, content)?)
-}
-
-fn passes_since_filter(meta: &DocMeta, since_utc: Option<DateTime<Utc>>) -> bool {
-    !since_utc.is_some_and(|since| fetched_before_checkpoint(&meta.fetched_utc, since))
+fn write_export_file(target: &Path, content: &str) -> Result<(), ExportError> {
+    let filename = target.file_name().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "archive target must have a filename",
+        )
+    })?;
+    let parent = target
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    AtomicFileWriter::new(parent.to_path_buf()).write(filename, content)?;
+    Ok(())
 }
 
 pub(crate) fn fetched_before_checkpoint(fetched_utc: &str, since: DateTime<Utc>) -> bool {
@@ -657,7 +765,7 @@ fn write_archive_index(
     buffer: &mut String,
     rows: &[(usize, usize, &DocMeta, Option<&ArchiveDocAnnotations>)],
     parsed_fetched: &[(DateTime<Utc>, String)],
-    include_coverage: bool,
+    window: ArchiveWindow,
     window_count: usize,
     unexported_by_priority: [usize; 6],
     unexported_folded: Option<[usize; 2]>,
@@ -678,7 +786,7 @@ fn write_archive_index(
     let _ = writeln!(buffer, "doc_count: {}", rows.len());
     let _ = writeln!(buffer, "fetched_from: {fetched_from}");
     let _ = writeln!(buffer, "fetched_to: {fetched_to}");
-    if include_coverage {
+    if window.since_utc().is_some() {
         let _ = writeln!(buffer, "window_count: {window_count}");
         let [priority_5, priority_4, priority_3, priority_2, priority_1, unavailable] =
             unexported_by_priority;
@@ -690,6 +798,18 @@ fn write_archive_index(
             let _ = writeln!(buffer, "unexported_folded: {{\"same_event\":{same_event},\"identical_content\":{identical_content}}}");
         }
     }
+    if let Some(since) = window.since_utc() {
+        let _ = writeln!(
+            buffer,
+            "window_since_utc: {}",
+            format_archive_timestamp(since)
+        );
+    }
+    let _ = writeln!(
+        buffer,
+        "window_until_utc: {}",
+        format_archive_timestamp(window.until_utc())
+    );
     buffer.push_str("doc | line | fetched_utc | priority | signal_key | title\n");
     for (doc, line, meta, annotation) in rows {
         let priority = annotation

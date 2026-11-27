@@ -48,6 +48,7 @@ export_schema: 2
 doc_count: 3
 fetched_from: 2026-10-01T00:00:00Z
 fetched_to: 2026-10-01T00:00:00Z
+window_until_utc: 2026-12-01T00:00:00Z
 doc | line | fetched_utc | priority | signal_key | title
 1 | 1 | 2026-10-01T00:00:00Z | - | event | Kept event
 2 | 18 | 2026-10-01T00:00:00Z | - | - | Kept copy

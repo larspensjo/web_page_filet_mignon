@@ -142,9 +142,14 @@ fn export(
     let hints = index.map(CorpusScanIndex::archive_read_hints);
     let summary = build_triage_archive_with(
         dir,
-        "archive.md",
+        harvester_engine::ArchiveTarget::InOutput {
+            basename: "archive.md",
+        },
         urls,
-        since,
+        harvester_engine::ArchiveWindow::from_submission(
+            since,
+            "2026-12-01T00:00:00Z".parse().unwrap(),
+        ),
         false,
         &HashMap::new(),
         &HashMap::new(),

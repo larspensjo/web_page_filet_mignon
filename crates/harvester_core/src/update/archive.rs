@@ -1,6 +1,9 @@
 use crate::{AppState, ArchiveExportNotice, ArchiveExportNoticeKind, Effect};
 use engine_logging::{engine_info, engine_warn};
-use harvester_engine::{archive_url_key, ArchiveDocAnnotations};
+use harvester_engine::{
+    archive_url_key, is_safe_archive_basename, ArchiveDocAnnotations, ArchiveFoldReport,
+    ArchiveWindow,
+};
 use std::path::Path;
 
 pub(super) fn handle_archive_clicked(state: &mut AppState) -> Vec<Effect> {
@@ -246,8 +249,52 @@ pub(super) fn handle_dialog_submitted(
         (full_selection.ordered_urls, full_selection.folds)
     };
     state.clear_pinned_signal_candidate_selection();
-    let since_utc = state.briefing_since_utc();
-    let requested_checkpoint = set_checkpoint.then_some(submitted_at);
+    let window = ArchiveWindow::from_submission(state.briefing_since_utc(), submitted_at);
+    let mut effects = vec![build_archive_request(
+        state,
+        request_id,
+        basename,
+        crate::signal_candidate::FullArchiveSelection {
+            ordered_urls,
+            folds,
+        },
+        window,
+        set_checkpoint,
+        use_summaries,
+    )];
+    state.begin_archive_export(request_id);
+    state.set_archive_export_notice(Some(ArchiveExportNotice {
+        kind: ArchiveExportNoticeKind::Working,
+        text: "Exporting archive...".into(),
+    }));
+    let had_signal_candidate_overrides = !state.signal_exclusions().excluded().is_empty();
+    if set_checkpoint && had_signal_candidate_overrides {
+        state
+            .signal_exclusions_mut()
+            .set_excluded(Default::default());
+        effects.push(Effect::PersistSignalCandidateOverrides {
+            overrides: state.signal_exclusions().excluded().clone(),
+        });
+        engine_info!(
+            "[signal-overrides] cleared at archive-checkpoint request_id={}",
+            request_id
+        );
+        state.mark_dirty();
+    }
+    effects
+}
+
+fn build_archive_request(
+    state: &AppState,
+    request_id: u64,
+    basename: String,
+    selection: crate::signal_candidate::FullArchiveSelection,
+    window: ArchiveWindow,
+    set_checkpoint: bool,
+    use_summaries: bool,
+) -> Effect {
+    let (ordered_urls, folds) = window_archive_selection(state, selection, window);
+    let requested_checkpoint = set_checkpoint.then_some(window.until_utc());
     let mut annotated_urls = ordered_urls.clone();
     let raw_urls_by_key: std::collections::HashMap<_, _> = ordered_urls
         .iter()
@@ -271,43 +318,55 @@ pub(super) fn handle_dialog_submitted(
         std::collections::HashMap::new()
     };
     let annotations = build_annotation_map(state, &annotated_urls);
-    let priority_snapshot = build_priority_snapshot(state);
+    let priority_snapshot = build_priority_snapshot(state, window);
     engine_info!(
         "[archive-dialog] export effect ready request_id={} basename={} urls={} summaries={} annotations={} priorities={} fold_groups={}",
         request_id, basename, ordered_urls.len(), summaries.len(), annotations.len(), priority_snapshot.len(), folds.len()
     );
-    state.begin_archive_export(request_id);
-    state.set_archive_export_notice(Some(ArchiveExportNotice {
-        kind: ArchiveExportNoticeKind::Working,
-        text: "Exporting archive...".into(),
-    }));
-    let mut effects = vec![Effect::ArchiveRequested {
+    Effect::ArchiveRequested {
         request_id,
         basename,
         ordered_urls,
-        since_utc,
+        window,
         requested_checkpoint,
         use_summaries,
         summaries,
         annotations,
         priority_snapshot,
         folds,
-    }];
-    let had_signal_candidate_overrides = !state.signal_exclusions().excluded().is_empty();
-    if set_checkpoint && had_signal_candidate_overrides {
-        state
-            .signal_exclusions_mut()
-            .set_excluded(Default::default());
-        effects.push(Effect::PersistSignalCandidateOverrides {
-            overrides: state.signal_exclusions().excluded().clone(),
-        });
-        engine_info!(
-            "[signal-overrides] cleared at archive-checkpoint request_id={}",
-            request_id
-        );
-        state.mark_dirty();
     }
-    effects
+}
+
+fn window_archive_selection(
+    state: &AppState,
+    selection: crate::signal_candidate::FullArchiveSelection,
+    window: ArchiveWindow,
+) -> (Vec<String>, ArchiveFoldReport) {
+    let crate::signal_candidate::FullArchiveSelection {
+        ordered_urls,
+        mut folds,
+    } = selection;
+    let in_window = |url: &str| window.contains(state.archive_fetched_utc(url));
+    folds.retain(|_, members| {
+        members.retain(|member| in_window(&member.url));
+        !members.is_empty()
+    });
+    let ordered_urls = ordered_urls
+        .into_iter()
+        .filter_map(|url| {
+            if in_window(&url) {
+                return Some(url);
+            }
+            // Keep the pinned election order when the original representative falls out of the window.
+            let mut members = folds.remove(&archive_url_key(&url))?;
+            let promoted = members.remove(0);
+            if !members.is_empty() {
+                folds.insert(archive_url_key(&promoted.url), members);
+            }
+            Some(promoted.url)
+        })
+        .collect();
+    (ordered_urls, folds)
 }
 
 fn clear_export_unavailable_status(state: &mut AppState) {
@@ -349,10 +408,13 @@ fn grouped_count(count: usize) -> String {
     formatted
 }
 
-fn build_priority_snapshot(state: &AppState) -> std::collections::HashMap<String, u8> {
+fn build_priority_snapshot(
+    state: &AppState,
+    window: ArchiveWindow,
+) -> std::collections::HashMap<String, u8> {
     state
         .saved_results_entries()
-        .filter(|entry| entry.in_window)
+        .filter(|entry| entry.in_window && window.contains(entry.article.fetched_utc.as_deref()))
         .filter_map(|entry| {
             entry
                 .triage
@@ -466,16 +528,6 @@ pub(super) fn handle_export_failed(
     state.clear_pinned_archive_corpus();
     state.clear_pinned_signal_candidate_selection();
     Vec::new()
-}
-
-fn is_safe_archive_basename(name: &str) -> bool {
-    if name.is_empty() || name == "." || name == ".." {
-        return false;
-    }
-    if name.contains(['/', '\\', '\0']) {
-        return false;
-    }
-    !std::path::Path::new(name).is_absolute()
 }
 
 fn build_summary_map(

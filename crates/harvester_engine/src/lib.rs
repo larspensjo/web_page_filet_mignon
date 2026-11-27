@@ -51,9 +51,10 @@ pub use decode::{decode_html, DecodeError, DecodedHtml};
 pub use domain::registrable_domain;
 pub use engine::{EngineConfig, EngineHandle};
 pub use export::{
-    build_triage_archive, build_triage_archive_with, ArchiveDocAnnotations, ArchiveFoldReason,
-    ArchiveFoldReport, ArchiveFoldedArticle, ArchiveReadProgress, ExportError, ExportSummary,
-    MAX_FALLBACK_BODY_CHARS,
+    build_triage_archive, build_triage_archive_with, format_archive_timestamp,
+    is_safe_archive_basename, prepare_triage_archive_with, ArchiveDocAnnotations,
+    ArchiveFoldReason, ArchiveFoldReport, ArchiveFoldedArticle, ArchiveReadProgress, ArchiveTarget,
+    ArchiveWindow, ExportError, ExportSummary, PreparedArchive, MAX_FALLBACK_BODY_CHARS,
 };
 pub use extract::{ExtractedContent, Extractor, ReadabilityLikeExtractor};
 pub use fetch::{FetchSettings, Fetcher, ProgressSink, ReqwestFetcher, RetrySettings};
@@ -72,7 +73,10 @@ pub use import::{
 };
 pub use links::{ConversionOutput, ExtractedLink, LinkExtractingConverter, LinkKind};
 pub use path_policy::is_confined_to;
-pub use persist::{ensure_output_dir, AtomicFileWriter, PersistError};
+pub use persist::{
+    atomic_temp_prefix, ensure_output_dir, replace_atomic_file, stage_atomic_file,
+    AtomicFileWriter, PersistError,
+};
 pub use quota::{QuotaTracker, RunQuotas};
 pub use source_config::{
     BraveNewsSourceConfig, SourceConfig, SourceId, SourceIdError, SourceKind, SourceRegistry,

@@ -88,6 +88,16 @@ impl AppState {
         })
     }
 
+    pub(crate) fn archive_fetched_utc(&self, url: &str) -> Option<&str> {
+        if let Some(entry) = self.saved_results_for_url(url) {
+            return entry.article.fetched_utc.as_deref();
+        }
+        // A new checkpoint can age a pinned URL out of the results projection.
+        self.saved_articles
+            .get(&harvester_engine::archive_url_key(url))
+            .and_then(|article| article.fetched_utc.as_deref())
+    }
+
     pub(crate) fn current_summary_for_url(&self, url: &str) -> Option<&ArticleSummaryResult> {
         self.saved_results_for_url(url)?.summary.as_ref()
     }

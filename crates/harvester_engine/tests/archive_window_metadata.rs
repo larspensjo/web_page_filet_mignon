@@ -91,7 +91,7 @@ fn population_matches_exporter_including_linked_and_filtered_url_duplicates() {
         dir,
         "measurement",
         &[],
-        Some(since),
+        harvester_engine::ArchiveWindow::from_submission(Some(since), until),
         false,
         &HashMap::new(),
         &HashMap::new(),
@@ -107,17 +107,17 @@ fn population_matches_exporter_including_linked_and_filtered_url_duplicates() {
 }
 
 #[test]
-fn bounds_are_inclusive_and_applied_before_url_deduplication() {
+fn bounds_are_half_open_and_applied_before_url_deduplication() {
     let tmp = tempdir().unwrap();
     let dir = tmp.path();
     let since = date("2026-10-02T00:00:00Z");
     let until = date("2026-10-07T04:57:36Z");
     article(
         dir,
-        "a-too-new.md",
+        "a-at-until.md",
         "https://example.com/reused",
-        "2026-10-07T04:57:37Z",
-        "Future",
+        "2026-10-07T04:57:36Z",
+        "Upper boundary",
     );
     article(
         dir,
@@ -128,14 +128,21 @@ fn bounds_are_inclusive_and_applied_before_url_deduplication() {
     );
     article(
         dir,
-        "c-end.md",
+        "c-before-until.md",
         "https://example.com/reused",
-        "2026-10-07T04:57:36Z",
-        "End",
+        "2026-10-07T04:57:35.5Z",
+        "Last in window",
     );
     let members = scan_archive_window_metadata(dir, since, until).unwrap();
-    assert_eq!(members.len(), 2);
-    assert_eq!(members[1].source_title.as_deref(), Some("End"));
+    let titles: Vec<_> = members
+        .iter()
+        .map(|member| member.source_title.as_deref().unwrap())
+        .collect();
+    assert_eq!(titles, ["Start", "Last in window"]);
+    assert_eq!(
+        scan_archive_window_metadata(dir, since, date("2026-10-07T04:57:35.5Z")).unwrap(),
+        members[..1]
+    );
     assert!(scan_archive_window_metadata(dir, until, since).is_err());
 }
 
@@ -194,7 +201,10 @@ fn metadata_reuses_clean_text_hash_and_skips_undated_articles_like_exporter() {
         dir,
         "measurement",
         &[],
-        Some(date("2026-10-02T00:00:00Z")),
+        harvester_engine::ArchiveWindow::from_submission(
+            Some(date("2026-10-02T00:00:00Z")),
+            date("2026-10-07T04:57:36Z"),
+        ),
         false,
         &HashMap::new(),
         &HashMap::new(),
@@ -279,7 +289,7 @@ fn bounded_exports_skip_unparseable_articles_with_and_without_fold_report() {
             dir,
             "archive.md",
             &[missing_date.into(), no_frontmatter.into()],
-            Some(since),
+            harvester_engine::ArchiveWindow::from_submission(Some(since), until),
             false,
             &HashMap::new(),
             &HashMap::new(),

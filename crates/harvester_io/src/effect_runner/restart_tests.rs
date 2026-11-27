@@ -212,7 +212,7 @@ fn write_archive(paths: &RuntimePaths, effect: &Effect) -> Vec<u8> {
     let Effect::ArchiveRequested {
         basename,
         ordered_urls,
-        since_utc,
+        window,
         use_summaries,
         summaries,
         annotations,
@@ -227,7 +227,7 @@ fn write_archive(paths: &RuntimePaths, effect: &Effect) -> Vec<u8> {
         &paths.output_dir,
         basename,
         ordered_urls,
-        *since_utc,
+        *window,
         *use_summaries,
         summaries,
         annotations,

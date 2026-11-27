@@ -34,6 +34,8 @@ fetched_from: 2026-09-02T00:00:00Z
 fetched_to: 2026-09-03T00:00:00Z
 window_count: 14
 unexported_by_priority: {"5":1,"4":2,"3":3,"2":1,"1":1,"unavailable":4}
+window_since_utc: 2026-09-02T00:00:00Z
+window_until_utc: 2026-12-01T00:00:00Z
 doc | line | fetched_utc | priority | signal_key | title
 1 | 1 | 2026-09-02T00:00:00Z | - | - | untriaged
 2 | 14 | 2026-09-03T00:00:00Z | - | scored-event | scored

@@ -5,6 +5,13 @@ corpus schema. Schema 2 consists of ordered document blocks followed by one
 trailing index. A rename or meaning change to an existing field requires an
 `export_schema` bump; readers ignore unknown additive fields within schema 2.
 
+An export covers the half-open fetch window `[since, until)`. A parseable date
+at `since` is included, and a date at or after `until` falls into a later window.
+An export without `since` has only the upper bound. `until` is the submission
+time rounded up to a whole second. `since` keeps its exact instant, including
+fractional seconds. The request builder and exporter use the same parsed-time
+comparison. A malformed date in valid article frontmatter stays in the window.
+
 ## Document block
 
 Each block begins with `===== DOC START =====`. Its canonical header ends at
@@ -46,7 +53,7 @@ attribution. Annotation values are read at dialog submit time for the document
 selection pinned when the dialog opened.
 
 Annotations and the submit-time priority snapshot come from saved current-key
-results in the checkpoint window, including compatible dated model aliases.
+results for the export window, including compatible dated model aliases.
 They work immediately after restart without a processing run. Stale-key results
 remain in their stores but supply neither annotations nor priorities. The priority
 snapshot includes every window article with current-key triage, including manually
@@ -88,6 +95,9 @@ logged. An unscored member omits `signal_key`. Each slug is the article's own:
 `same_event` does not imply equal `signal_key` values. A document without members
 writes `folded: []`. An unavailable selected document is replaced, in its selected
 position, by the first available article folded into it in election order.
+At submit time the reducer filters both representatives and folded members
+against the export window. An out-of-window representative gives its position
+to the first in-window folded member in that same order.
 The promoted article uses its own annotations and summary and lists the other
 members with their original reasons. The lost selected URL is logged and listed
 nowhere; a group with no surviving member writes and counts nothing.
@@ -126,28 +136,33 @@ fetched_to: 2026-09-11T09:40:51Z
 window_count: 2
 unexported_by_priority: {"5":0,"4":0,"3":0,"2":0,"1":0,"unavailable":0}
 unexported_folded: {"same_event":0,"identical_content":0}
+window_since_utc: 2026-09-07T04:11:08.123456Z
+window_until_utc: 2026-09-12T07:00:00Z
 doc | line | fetched_utc | priority | signal_key | title
 1 | 1 | 2026-09-07T04:11:09Z | 4 | nvda-dmatrix-nvlink-fusion | d-Matrix joins NVLink Fusion
 2 | 39 | 2026-09-11T09:40:51Z | - | - | Example without triage
 ===== INDEX END =====
 ```
 
-Always present: `export_schema`, `doc_count`, `fetched_from`, `fetched_to`.
-Present only when the export has a `since` bound: `window_count`,
-`unexported_by_priority`, and (with a fold report) `unexported_folded`.
+Every new export includes `export_schema`, `doc_count`, `fetched_from`,
+`fetched_to`, and `window_until_utc`. An export with a `since` bound also
+includes `window_count`, `unexported_by_priority`, `window_since_utc`, and
+`unexported_folded` when there is a fold report. Both window fields use RFC 3339
+UTC with `Z` and include a fractional part only when it is nonzero. They
+follow any coverage fields immediately before the column header. Older
+schema-2 exports can lack both window fields.
 The index header is a sequence of `name: value` lines
 terminated by the column-header line. Readers must locate metadata keys by name
 and skip unknown name-keyed lines; they must never parse the header by line
 position.
 
-The bounded-export fields appear immediately after `fetched_to` and before the
-column-header line. `window_count` is the number of canonical URLs in the
-exporter-owned document map after the `since` filter and URL deduplication,
-including articles under `linked/`, and before the selected documents are
-removed. An unparseable `fetched_utc` passes the `since` filter as usual. Linked
-pages are included in this population but are not triaged, so they will normally
-increase `unavailable`; do not read that bucket as only "articles the scraper
-held back."
+The coverage fields begin immediately after `fetched_to`. `window_count` is
+the number of canonical URLs in the exporter's document map after both fetch
+bounds and URL deduplication, including articles under `linked/`, before the
+selected documents are removed. The upper bound narrows this population by
+excluding dates at or after `until`. An unparseable `fetched_utc` passes the
+bounds. Linked pages are included in this population and usually increase
+`unavailable` because they are outside triage.
 
 `unexported_by_priority` is compact JSON with exactly these keys, in this order:
 `5`, `4`, `3`, `2`, `1`, `unavailable`. Its values count the canonical URLs
@@ -172,11 +187,11 @@ Readers can cross-check these counts against the document headers.
 Coverage is per export, not a cumulative held-back total. Repeating an export
 without advancing the checkpoint reuses the same `since` bound, so documents
 selected by the first export can be counted as unexported when they are not
-selected by the second.
+selected by the second. Each request has its own `until` bound.
 
-When there is no `since` bound, `window_count`, `unexported_by_priority` and
-`unexported_folded` are omitted entirely. Without a fold report, neither `folded`
-nor `unexported_folded` is written, preserving existing export bytes.
+When there is no `since` bound, `window_since_utc` and the coverage fields are
+omitted. `window_until_utc` is written even when the desktop checkpoint box is
+unticked. Without a fold report, `folded` and `unexported_folded` are omitted.
 The column-header line shown
 above is part of the format. `line` is the 1-based line of that block's
 unescaped `DOC START`.
@@ -189,11 +204,11 @@ sanitised original value. Unparseable timestamps appear verbatim in index rows
 and are excluded from bounds. `fetched_from` and `fetched_to` are the minimum
 and maximum parseable RFC 3339 values; both are `-` when none parse.
 
-For zero documents the file contains only the index, with `doc_count: 0`, both
-bounds `-`, the column header, and no rows. When the export has a `since` bound,
-it also contains `window_count` and `unexported_by_priority`, which then account
-for the entire window. This leading index marker is an archive-artifact
-signature, including under a custom basename.
+For zero documents the file contains only the index, with `doc_count: 0`,
+`fetched_from` and `fetched_to` set to `-`, `window_until_utc`, the column header,
+and no rows. With a `since` bound, the window start and coverage fields are also
+included. The coverage counts account for the entire window. The leading index
+marker identifies the file as an archive artifact under any basename.
 
 ### Reader validation
 
@@ -212,3 +227,38 @@ Golden and boundary-forgery fixture bytes are maintained at
 in `.gitattributes` for downstream reader tests.
 `schema2_folded_since.md` covers both reasons and missing-title accounting;
 `schema2_folded_raw.md` covers fold headers without bounded index counts.
+
+## Export targets and publication
+
+Desktop exports take a basename within `output/`. The exporter also supports
+an explicit external target path. In both cases, articles are read from the
+corpus in `output/` and `harvester-corpus.json` is rewritten there.
+
+Publication stages the new archive as `.<name>.tmp-<random>` in the target
+directory and syncs it before a replacing rename. An existing target name
+continues to refer to a complete file throughout replacement. On Windows,
+replacement tolerates open readers that allow delete sharing. If a reader
+blocks delete sharing and the rename returns permission denied, publication
+retries up to four times at 50 ms intervals. A failed rename leaves the previous
+target in place. NTFS metadata durability across power loss is outside the
+contract.
+
+For morning publication, a target confirmed by the consumer can be replaced.
+An unconfirmed target, or one whose length or modification time has changed
+since it was observed, is kept aside first. The publisher reuses a readable
+identical kept copy when present. Otherwise it copies the old archive to a
+temporary file and syncs it before renaming without replacement. The first
+available kept name is `<stem>-unprocessed-<YYYYMMDDTHHMMSSZ>.md`, followed by
+`-2`, `-3`, and ascending suffixes before `.md` on a clash. The stamp comes from the previous
+archive's `window_until_utc`, then `fetched_to`, then its file modification time.
+The kept temporary file is `.<kept name>.tmp-<random>` in the same directory.
+A failed kept copy leaves the old target in place. If replacing the target
+fails after keeping the old archive, both names still hold the old bytes.
+After interruption, the next publication attempts to remove matching temporary
+files whose modification time is more than one hour old. It logs each removal
+and continues if a stale file cannot be deleted.
+
+The portfolio consumer owns `<target>.processed`, for example
+`archive.md.processed`. Its `until_utc`, `doc_count`, and `commit` describe an
+archive the consumer processed. A null `until_utc` provides no confirmation for
+replacement. The Harvester never writes this sidecar.

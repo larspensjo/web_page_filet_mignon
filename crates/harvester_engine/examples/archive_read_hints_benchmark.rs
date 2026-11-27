@@ -65,9 +65,14 @@ fn main() {
     let export = |label, hints: Option<&ArchiveReadHints>, started: Instant| {
         let summary = build_triage_archive_with(
             root,
-            "archive.md",
+            harvester_engine::ArchiveTarget::InOutput {
+                basename: "archive.md",
+            },
             &window_urls[..SELECTED],
-            Some(since),
+            harvester_engine::ArchiveWindow::from_submission(
+                Some(since),
+                "2026-12-01T00:00:00Z".parse().unwrap(),
+            ),
             false,
             &HashMap::new(),
             &HashMap::new(),

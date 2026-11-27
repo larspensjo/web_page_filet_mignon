@@ -13,6 +13,7 @@ use crate::content_prep::{
     derive_clean_text, truncate_to_budget, BoilerplatePolicy, CleanText, ContentPrepConfig,
     NormalizationPolicy,
 };
+use crate::export::ArchiveWindow;
 use crate::frontmatter::parse_frontmatter;
 use crate::llm::{PromptId, PromptRegistry};
 use crate::token::WhitespaceTokenCounter;
@@ -211,7 +212,7 @@ fn scan_article_path(
 /// Uses the exporter's artifact exclusions and filename precedence, and filters before
 /// canonical-URL deduplication. Both readers skip and log unparseable articles;
 /// present but malformed fetch dates remain included.
-/// Valid dates are bounded inclusively; no corpus lock or output writes are used.
+/// Valid dates use the half-open window `[since_utc, until_utc)`. The scan is read-only.
 pub fn scan_archive_window_metadata(
     output_dir: &Path,
     since_utc: chrono::DateTime<chrono::Utc>,
@@ -220,8 +221,10 @@ pub fn scan_archive_window_metadata(
     if since_utc > until_utc {
         return Err("archive window since must be no later than until".into());
     }
-    let paths = crate::export::ordered_archive_window_paths(output_dir, "archive.md")
-        .map_err(|err| format!("{}: {err}", output_dir.display()))?;
+    let window = ArchiveWindow::from_bounds(Some(since_utc), until_utc);
+    let paths =
+        crate::export::ordered_archive_window_paths(output_dir, &output_dir.join("archive.md"))
+            .map_err(|err| format!("{}: {err}", output_dir.display()))?;
     let config = build_content_prep_config();
     let mut seen = HashSet::new();
     let mut articles = Vec::new();
@@ -231,17 +234,14 @@ pub fn scan_archive_window_metadata(
         else {
             continue;
         };
-        match chrono::DateTime::parse_from_rfc3339(&doc.fetched_utc) {
-            Ok(date) => {
-                let date = date.with_timezone(&chrono::Utc);
-                if date < since_utc || date > until_utc {
-                    continue;
-                }
-            }
-            Err(_) => engine_warn!(
+        if !window.contains(Some(&doc.fetched_utc)) {
+            continue;
+        }
+        if chrono::DateTime::parse_from_rfc3339(&doc.fetched_utc).is_err() {
+            engine_warn!(
                 "[archive-window] {}: malformed fetched_utc — included",
                 path.display()
-            ),
+            );
         }
         if seen.insert(crate::archive_url_key(&doc.url)) {
             let clean_text = derive_clean_text(&markdown, &doc.url, Some(&doc.title), &config);

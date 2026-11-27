@@ -51,6 +51,8 @@ fetched_to: 2026-10-01T00:00:00Z
 window_count: 6
 unexported_by_priority: {"5":1,"4":1,"3":0,"2":0,"1":0,"unavailable":1}
 unexported_folded: {"same_event":2,"identical_content":1}
+window_since_utc: 2026-09-30T00:00:00Z
+window_until_utc: 2026-12-01T00:00:00Z
 doc | line | fetched_utc | priority | signal_key | title
 1 | 1 | 2026-10-01T00:00:00Z | - | event | Kept event
 2 | 18 | 2026-10-01T00:00:00Z | - | - | Kept copy

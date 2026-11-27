@@ -94,7 +94,7 @@ fn archive_dialog_submitted_validates_basename_and_checkpoint_flag() {
             request_id,
             basename: "custom-archive.md".to_string(),
             set_checkpoint: true,
-            submitted_at: since,
+            submitted_at: since - chrono::TimeDelta::microseconds(1),
             use_summaries: false,
             use_signal_candidates: false,
         },
@@ -108,7 +108,7 @@ fn archive_dialog_submitted_validates_basename_and_checkpoint_flag() {
             request_id,
             basename,
             ordered_urls,
-            since_utc,
+            window,
             requested_checkpoint,
             use_summaries,
             summaries,
@@ -119,13 +119,154 @@ fn archive_dialog_submitted_validates_basename_and_checkpoint_flag() {
             assert_eq!(request_id, 1);
             assert_eq!(basename, "custom-archive.md");
             assert_eq!(ordered_urls.len(), 0);
-            assert!(since_utc.is_none());
+            assert!(window.since_utc().is_none());
+            assert_eq!(window.until_utc(), since);
             assert_eq!(requested_checkpoint, Some(since));
             assert!(!use_summaries);
             assert!(summaries.is_empty());
         }
         _ => unreachable!(),
     }
+}
+
+#[test]
+fn archive_submit_drops_future_scored_article_in_full_and_signal_modes() {
+    init_logging();
+    let mut state = complete_triage_state_for_test(2);
+    complete_signal_candidate(&mut state, 0, 90, "before-until");
+    complete_signal_candidate(&mut state, 1, 90, "at-until");
+    crate::fixture_support::save_session_results(&mut state);
+    state.saved_articles_loaded(
+        state
+            .saved_results_entries()
+            .map(|entry| {
+                let mut article = entry.article.clone();
+                if article.url.ends_with("/1") {
+                    article.fetched_utc = Some("2026-09-28T12:00:01Z".into());
+                }
+                article
+            })
+            .collect(),
+    );
+    let submitted_at = "2026-09-28T12:00:00.1Z".parse().unwrap();
+    for use_signal_candidates in [false, true] {
+        let (state, _) = update(state.clone(), Msg::ArchiveClicked);
+        let request_id = state.archive_request_id();
+        let (_, effects) = update(
+            state,
+            Msg::ArchiveDialogSubmitted {
+                request_id,
+                basename: "archive.md".into(),
+                set_checkpoint: true,
+                submitted_at,
+                use_summaries: false,
+                use_signal_candidates,
+            },
+        );
+        let ordered_urls = effects
+            .into_iter()
+            .find_map(|effect| match effect {
+                Effect::ArchiveRequested { ordered_urls, .. } => Some(ordered_urls),
+                _ => None,
+            })
+            .expect("export requested");
+        assert_eq!(
+            ordered_urls,
+            ["https://triage-complete.com/0"],
+            "signal mode: {use_signal_candidates}"
+        );
+    }
+}
+
+#[test]
+fn archive_submit_promotes_first_in_window_fold_member_and_drops_out_of_window_members() {
+    use crate::signal_candidate::SignalCandidateArchiveSelection;
+    use harvester_engine::{
+        archive_url_key, ArchiveFoldReason, ArchiveFoldedArticle, WindowArticle,
+    };
+
+    init_logging();
+    let since = "2026-09-28T12:00:00Z";
+    let until = "2026-09-28T12:00:02Z";
+    let before = "2026-09-28T11:59:59Z";
+    let inside = "2026-09-28T12:00:01Z";
+    let future = "2026-09-28T12:00:03Z";
+    let url = |index| format!("https://triage-complete.com/{index}");
+    let member = |index| ArchiveFoldedArticle {
+        url: url(index),
+        reason: ArchiveFoldReason::SameEvent,
+        signal_key: None,
+    };
+    let dates = [
+        future, future, since, inside, future, until, inside, until, before, since,
+    ];
+    let mut state = complete_triage_state_for_test(dates.len());
+    state.saved_articles_loaded(
+        dates
+            .into_iter()
+            .enumerate()
+            .map(|(index, date)| WindowArticle {
+                url: url(index),
+                source_title: None,
+                content_hash: format!("hash-tc-{index}"),
+                fetched_utc: Some(date.into()),
+            })
+            .collect(),
+    );
+    let (mut state, _) = update(state, Msg::ArchiveClicked);
+    let request_id = state.archive_request_id();
+    state.pin_signal_candidate_selection(SignalCandidateArchiveSelection::new(
+        vec![url(0), url(4), url(6)],
+        [
+            (
+                archive_url_key(&url(0)),
+                vec![member(1), member(2), member(3)],
+            ),
+            (archive_url_key(&url(4)), vec![member(5)]),
+            (
+                archive_url_key(&url(6)),
+                vec![member(7), member(8), member(9)],
+            ),
+        ]
+        .into(),
+        60,
+        String::new(),
+        String::new(),
+        Default::default(),
+        false,
+    ));
+    state.set_briefing_since_utc(Some(since.parse().unwrap()));
+    let (_, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".into(),
+            set_checkpoint: false,
+            submitted_at: until.parse().unwrap(),
+            use_summaries: false,
+            use_signal_candidates: true,
+        },
+    );
+    let (ordered_urls, folds) = effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::ArchiveRequested {
+                ordered_urls,
+                folds,
+                ..
+            } => Some((ordered_urls, folds)),
+            _ => None,
+        })
+        .expect("export requested");
+    assert_eq!(ordered_urls, [url(2), url(6)]);
+    assert_eq!(
+        folds,
+        [
+            (archive_url_key(&url(2)), vec![member(3)]),
+            (archive_url_key(&url(6)), vec![member(9)]),
+        ]
+        .into()
+    );
 }
 
 #[test]
@@ -487,12 +628,13 @@ fn archive_dialog_submitted_with_only_pre_triage_ready_exports_zero_urls() {
     match effect {
         Effect::ArchiveRequested {
             ordered_urls,
-            since_utc,
+            window,
             requested_checkpoint,
             ..
         } => {
             assert_eq!(ordered_urls, Vec::<String>::new());
-            assert!(since_utc.is_none());
+            assert!(window.since_utc().is_none());
+            assert_eq!(window.until_utc(), since);
             assert_eq!(requested_checkpoint, None);
         }
         _ => unreachable!(),
@@ -508,9 +650,6 @@ fn archive_submitted_with_use_summaries_true_and_cached_summary_populates_map() 
     use harvester_engine::llm::prompt::PromptId;
 
     init_logging();
-    let since = chrono::DateTime::parse_from_rfc3339("2026-03-21T18:17:00Z")
-        .unwrap()
-        .with_timezone(&chrono::Utc);
     let url = "https://triage-complete.com/0".to_string();
     let mut state = complete_triage_state_for_test(1);
     state.store_summary_result(
@@ -540,7 +679,7 @@ fn archive_submitted_with_use_summaries_true_and_cached_summary_populates_map() 
             request_id,
             basename: "archive.md".to_string(),
             set_checkpoint: false,
-            submitted_at: since,
+            submitted_at: "2026-09-29T00:00:00Z".parse().unwrap(),
             use_summaries: true,
             use_signal_candidates: false,
         },
@@ -569,9 +708,6 @@ fn archive_submitted_with_use_summaries_true_and_cached_summary_populates_map() 
 #[test]
 fn archive_submitted_with_use_summaries_false_emits_empty_summary_map() {
     init_logging();
-    let since = chrono::DateTime::parse_from_rfc3339("2026-03-21T18:17:00Z")
-        .unwrap()
-        .with_timezone(&chrono::Utc);
     let state = complete_triage_state_for_test(1);
     let (state, _) = update(state, Msg::ArchiveClicked);
     let request_id = state.archive_request_id();
@@ -582,7 +718,7 @@ fn archive_submitted_with_use_summaries_false_emits_empty_summary_map() {
             request_id,
             basename: "archive.md".to_string(),
             set_checkpoint: false,
-            submitted_at: since,
+            submitted_at: "2026-09-29T00:00:00Z".parse().unwrap(),
             use_summaries: false,
             use_signal_candidates: false,
         },
@@ -626,9 +762,6 @@ fn archive_dialog_submitted_rejects_invalid_basename() {
 #[test]
 fn archive_open_and_submit_use_identical_pinned_corpus() {
     init_logging();
-    let since = chrono::DateTime::parse_from_rfc3339("2026-03-22T00:00:00Z")
-        .unwrap()
-        .with_timezone(&chrono::Utc);
     let state = complete_triage_state_for_test(2);
 
     let (state, open_effects) = update(state, Msg::ArchiveClicked);
@@ -653,7 +786,7 @@ fn archive_open_and_submit_use_identical_pinned_corpus() {
             request_id,
             basename: "archive.md".to_string(),
             set_checkpoint: false,
-            submitted_at: since,
+            submitted_at: "2026-09-29T00:00:00Z".parse().unwrap(),
             use_summaries: false,
             use_signal_candidates: false,
         },
@@ -680,9 +813,6 @@ fn archive_open_and_submit_use_identical_pinned_corpus() {
 #[test]
 fn refresh_between_open_and_submit_uses_pinned_snapshot() {
     init_logging();
-    let since = chrono::DateTime::parse_from_rfc3339("2026-03-22T00:00:00Z")
-        .unwrap()
-        .with_timezone(&chrono::Utc);
 
     let triage_url = "https://triage-complete.com/0";
     let state = complete_triage_state_for_test(1);
@@ -738,7 +868,7 @@ fn refresh_between_open_and_submit_uses_pinned_snapshot() {
             request_id,
             basename: "archive.md".to_string(),
             set_checkpoint: false,
-            submitted_at: since,
+            submitted_at: "2026-09-29T00:00:00Z".parse().unwrap(),
             use_summaries: false,
             use_signal_candidates: false,
         },
@@ -820,9 +950,6 @@ fn parity_a_pre_triage_ready_archive_count_is_zero_pending_count_is_nonzero() {
 fn parity_b_triage_complete_corpus_count_dialog_count_urls_match() {
     init_logging();
     let state = complete_triage_state_for_test(2);
-    let since = chrono::DateTime::parse_from_rfc3339("2026-03-22T00:00:00Z")
-        .unwrap()
-        .with_timezone(&chrono::Utc);
 
     let expected_count = state.archive_corpus().count();
     let expected_urls: Vec<String> = state.archive_corpus().ordered_urls().to_vec();
@@ -851,7 +978,7 @@ fn parity_b_triage_complete_corpus_count_dialog_count_urls_match() {
             request_id,
             basename: "archive.md".to_string(),
             set_checkpoint: false,
-            submitted_at: since,
+            submitted_at: "2026-09-29T00:00:00Z".parse().unwrap(),
             use_summaries: false,
             use_signal_candidates: false,
         },
@@ -927,16 +1054,13 @@ fn checkpoint_set_does_not_reduce_corpus_count_to_zero() {
     );
 
     let request_id = state.archive_request_id();
-    let submit_since = chrono::DateTime::parse_from_rfc3339("2026-03-22T00:00:00Z")
-        .unwrap()
-        .with_timezone(&chrono::Utc);
     let (_state, submit_effects) = update(
         state,
         Msg::ArchiveDialogSubmitted {
             request_id,
             basename: "archive.md".to_string(),
             set_checkpoint: false,
-            submitted_at: submit_since,
+            submitted_at: "2026-09-29T00:00:00Z".parse().unwrap(),
             use_summaries: false,
             use_signal_candidates: false,
         },

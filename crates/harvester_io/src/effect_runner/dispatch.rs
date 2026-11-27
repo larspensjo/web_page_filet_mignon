@@ -14,7 +14,8 @@ use harvester_engine::llm::prompt_context::ContextMeta;
 use harvester_engine::llm::prompt_context::PromptContextFile;
 use harvester_engine::llm::LlmCommand;
 use harvester_engine::{
-    build_triage_archive_with, import_saved_webpages, ArchiveReadProgress, ImportOptions,
+    build_triage_archive_with, import_saved_webpages, ArchiveReadProgress, ArchiveTarget,
+    ImportOptions,
 };
 
 use super::worker::run_triage_refresh_load;
@@ -122,7 +123,7 @@ impl EffectRunner {
                 request_id,
                 basename,
                 ordered_urls,
-                since_utc,
+                window,
                 requested_checkpoint,
                 use_summaries,
                 summaries,
@@ -181,9 +182,11 @@ impl EffectRunner {
                     };
                     match build_triage_archive_with(
                         &output_dir,
-                        &basename,
+                        ArchiveTarget::InOutput {
+                            basename: &basename,
+                        },
                         &ordered_urls,
-                        since_utc,
+                        window,
                         use_summaries,
                         &summaries,
                         &annotations,

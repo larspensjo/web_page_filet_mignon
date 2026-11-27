@@ -2962,3 +2962,11 @@ Change: The launcher resolves its default build by name. Keyless startup reports
 Lessons Learned: Capturing a PowerShell function body bypasses command mocks. Status and polling order need to reflect whether a lookup or search was attempted.
 Prevention: The launcher tests guard Cargo with a shim and pin the executable path, process environment and empty argument handling. The batch binary test checks keyless status, and poll tests cover recent searches plus refusal text in both notices and logs.
 Refs: scripts/tests/HarvesterLaunch.Tests.ps1, crates/harvester_batch/tests/stored_keys.rs, crates/harvester_io/src/effect_helpers.rs
+
+## 2026-11-27 - Morning archive publication and window review fixes
+Type: Bug Fix
+Context: Phase 4 review found that Windows replacement could fail with a default reader open, housekeeping could block publication, and fold and metadata selection could disagree with the archive window.
+Change: Both publication paths share a replacing rename with bounded permission retries. Stale-file deletion and kept-copy reuse tolerate individual filesystem failures. The reducer filters fold members before promotion, and the metadata scan uses the same half-open bounds as export.
+Lessons Learned: On Windows, clear the staging file's temporary attribute before moving its name, and keep cleanup armed until replacement succeeds. Apply window bounds to election members as well as representatives before generating archive annotations.
+Prevention: Windows tests hold readers across replacement and cover attributes, failed retry cleanup, and housekeeping failures. Reducer and metadata tests cover election order, empty groups, and the window boundaries.
+Refs: crates/harvester_engine/src/persist.rs, crates/harvester_io/src/archive_publication_tests.rs, crates/harvester_core/src/update/tests/archive_dialog_submit_tests.rs, crates/harvester_engine/tests/archive_window_metadata.rs

@@ -130,6 +130,23 @@ and checkpoint writes. The worker reports progress from zero to the current list
 throttled between the endpoints by 250 files or 200 ms. Scan logs record the current path
 every 1,000 files. Early returns and unwinding record the last export phase and article path.
 
+The reducer builds the export request from the pinned selection and the half-open
+fetch window `[since, until)`. `since` keeps its exact instant and `until` is the
+submission time rounded up to the second. The exporter applies the same bounds
+before URL deduplication and coverage counting. Schema 2 records the bounds in
+the trailing index, with `window_until_utc` present for every request. A desktop
+export requests a checkpoint save at `until` only when the checkbox is ticked.
+The desktop sends an output basename and the engine also accepts an explicit
+external target. The corpus and its manifest stay in `output/`.
+
+The engine stages writes beside their target and publishes them with a single
+replacing rename. The external publication operation in IO can first expose a
+complete, synced copy of an unconfirmed or changed target under a kept-aside
+name. It installs the new archive after that copy is visible. It reuses readable
+identical copies and attempts to clear matching temporary files over an hour old.
+The portfolio owns the processed sidecar. `ArchiveExportFormat.md` defines the
+external contract.
+
 Archive export previously filtered by checkpoint after a full read. The export worker now
 takes an owned hint snapshot from the process-lifetime root scan index and releases the lock
 before reading files. The directory listing determines membership and order. A hint can

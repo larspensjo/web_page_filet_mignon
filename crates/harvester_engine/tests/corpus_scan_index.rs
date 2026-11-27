@@ -74,9 +74,14 @@ fn archive_hints_preserve_frontmatter_and_checkpoint_boundary_behavior() {
     let export = |hints| {
         let summary = build_triage_archive_with(
             root,
-            "archive.md",
+            harvester_engine::ArchiveTarget::InOutput {
+                basename: "archive.md",
+            },
             &urls,
-            Some(since),
+            harvester_engine::ArchiveWindow::from_submission(
+                Some(since),
+                "2026-12-01T00:00:00Z".parse().unwrap(),
+            ),
             false,
             &HashMap::new(),
             &HashMap::new(),
