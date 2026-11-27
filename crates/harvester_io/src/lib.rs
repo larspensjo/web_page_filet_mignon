@@ -17,6 +17,8 @@ pub mod signal_candidate_cache_store;
 pub mod signal_candidate_overrides_store;
 mod source_loader;
 mod summary_cache_store;
+#[cfg(test)]
+mod test_logs;
 mod triage_cache_store;
 
 pub use article_links::{load_article_links, write_article_links};
@@ -46,7 +48,7 @@ pub use signal_candidate_cache_store::load as load_signal_candidate_cache;
 pub use signal_candidate_overrides_store::{
     load as load_signal_candidate_overrides, save as save_signal_candidate_overrides,
 };
-pub use source_loader::load_sources;
+pub use source_loader::{load_sources, LoadedSources};
 pub use summary_cache_store::load_summary_cache;
 #[cfg(test)]
 pub(crate) use summary_cache_store::persist_summary_cache;

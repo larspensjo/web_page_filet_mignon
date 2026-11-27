@@ -1501,10 +1501,10 @@ Origin:
 - SourceSection: Cross-cutting future work
 - Captured: 2026-02-12
 Tags: [security, secrets]
-Summary: Use scoped per-launch environment variables sourced from an encrypted SecretStore vault instead of encrypted application configuration; rotation support remains open.
-Rationale: The scoped SecretStore launch model limits vault-secret inheritance while preserving the existing application configuration shape, but it does not yet provide key rotation support.
+Summary: The hosts read API keys from Windows Credential Manager at startup when requested by the launch flag. Key rotation remains open.
+Rationale: Credential Manager supports unattended launch without passing stored keys through environment variables.
 SuccessCriteria:
-- API keys are sourced per launch from an encrypted SecretStore vault rather than encrypted application configuration.
+- The hosts read credentials from `Harvester/OpenAI` and `Harvester/BraveSearch` once at startup under `--use-stored-keys`. (Implemented.)
 - Key rotation can be performed without code changes. (Open.)
 
 ### PolicyConfig

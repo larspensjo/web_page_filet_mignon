@@ -24,6 +24,7 @@ impl EffectRunner {
         let output_dir = self.paths.output_dir.clone();
         let url_policy = self.url_policy.clone();
         let fetch_settings = self.fetch_settings.clone();
+        let brave_key = self.brave_key.clone();
 
         let timeline = std::sync::Arc::clone(&self.timeline);
         thread::spawn(move || {
@@ -35,14 +36,30 @@ impl EffectRunner {
             let _guard = PollGuard::with_timeline(msg_tx.clone(), timeline);
 
             engine_info!("[source-config] loading {}", sources_path.display());
-            let registry = load_sources(&sources_path);
+            let loaded = load_sources(&sources_path);
+            if !loaded.legacy_key_sources.is_empty() {
+                let ids = loaded
+                    .legacy_key_sources
+                    .iter()
+                    .map(|id| id.as_str())
+                    .collect::<Vec<_>>();
+                engine_info!(
+                    "[sources] api_key_env is ignored; Brave sources use Credential Manager entry {}; sources carrying it: {}",
+                    crate::credentials::CredentialEntry::BraveSearch.target_name(),
+                    ids.join(", "),
+                );
+            }
             let config_dir = sources_path
                 .parent()
                 .unwrap_or_else(|| std::path::Path::new("."))
                 .to_path_buf();
             let allowed_dirs = vec![config_dir.clone(), output_dir.clone()];
-            let enabled_sources: Vec<_> =
-                registry.sources.into_iter().filter(|s| s.enabled).collect();
+            let enabled_sources: Vec<_> = loaded
+                .registry
+                .sources
+                .into_iter()
+                .filter(|s| s.enabled)
+                .collect();
 
             let mut seen_set = load_seen_set(&seen_set_path);
             let mut brave_seen_set = load_brave_seen_set(&brave_seen_set_path);
@@ -149,6 +166,7 @@ impl EffectRunner {
                     }
                     SourceType::BraveNews(ref cfg) => {
                         let mut context = BravePollContext {
+                            api_key: brave_key.as_deref(),
                             brave_seen_set: &mut brave_seen_set,
                             brave_seen_set_path: &brave_seen_set_path,
                             brave_metadata_path: &brave_metadata_path,

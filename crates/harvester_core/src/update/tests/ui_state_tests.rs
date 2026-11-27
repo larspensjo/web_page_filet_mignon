@@ -223,7 +223,7 @@ fn run_stays_enabled_but_resume_is_disabled_when_ai_is_unavailable() {
     assert!(!view.resume_enabled);
     assert_eq!(
         view.resume_disabled_reason.as_deref(),
-        Some("AI features unavailable: OPENAI_API_KEY is not set")
+        Some("AI features unavailable: OpenAI key is unavailable (Harvester/OpenAI)")
     );
 }
 
@@ -245,7 +245,7 @@ fn missing_api_key_blocks_triage_and_briefing_actions() {
     assert!(!view.resume_enabled);
     assert_eq!(
         view.ai_unavailable_message.as_deref(),
-        Some("AI features unavailable: OPENAI_API_KEY is not set")
+        Some("AI features unavailable: OpenAI key is unavailable (Harvester/OpenAI)")
     );
 
     let pre_triage_before = state.pre_triage().resolved_included_urls().to_vec();

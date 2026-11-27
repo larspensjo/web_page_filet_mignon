@@ -11,6 +11,10 @@ use harvester_engine::llm::{
     ProviderKind, DEFAULT_SUMMARY_MODEL, DEFAULT_TRIAGE_MODEL,
 };
 
+use crate::credentials::{
+    ApiKey, CredentialEntry, KeyReadOutcome, StoredKeyAccess, StoredKeyReads,
+    STORED_KEYS_NOT_REQUESTED,
+};
 use crate::{
     load_blacklist, load_pending_intake, load_runtime_hydration, load_signal_candidate_cache,
     load_signal_candidate_overrides, load_summary_cache, load_triage_cache, EffectRunner,
@@ -68,58 +72,87 @@ pub fn prepare_desktop_startup_state(
     (state, startup_effects)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct HostAiEnvironment {
-    pub api_key: Option<String>,
+    pub api_key: Option<ApiKey>,
     pub availability: AiAvailability,
+}
+
+/// Startup keys passed by the host to its effect runner.
+pub struct HostKeys {
+    pub openai: KeyReadOutcome,
+    pub brave: Option<ApiKey>,
+}
+
+impl From<StoredKeyReads> for HostKeys {
+    fn from(reads: StoredKeyReads) -> Self {
+        if let Some(reason) = reads.brave.failure_text() {
+            engine_warn!("{reason}");
+        }
+        Self {
+            openai: reads.openai,
+            brave: match reads.brave {
+                KeyReadOutcome::Found { key, .. } => Some(key),
+                _ => None,
+            },
+        }
+    }
+}
+
+/// Runs the host's credential reader only when main supplied a launch proof.
+pub fn read_startup_key_outcomes(
+    access: Option<&StoredKeyAccess>,
+    reader: impl FnOnce(&StoredKeyAccess) -> StoredKeyReads,
+) -> StoredKeyReads {
+    match access {
+        Some(proof) => reader(proof),
+        None => {
+            engine_info!("[credentials] stored keys not requested");
+            StoredKeyReads {
+                openai: KeyReadOutcome::NotRequested,
+                brave: KeyReadOutcome::NotRequested,
+            }
+        }
+    }
 }
 
 pub type EffectRunnerBuild = (EffectRunner, Option<LlmQuotaLimits>, AiAvailability);
 
-/// Resolve the shared API-key state for every host, preserving each host's
-/// established warning text.
-pub fn host_ai_environment_from_env(
-    missing_api_key_warning: &'static str,
-    empty_api_key_warning: Option<&'static str>,
+/// Resolve model availability and report the credential failure in the host log.
+pub fn host_ai_environment_from_key(
+    outcome: KeyReadOutcome,
+    disabled_warning: &'static str,
 ) -> HostAiEnvironment {
-    host_ai_environment_from_value(
-        std::env::var("OPENAI_API_KEY"),
-        missing_api_key_warning,
-        empty_api_key_warning,
-    )
-}
-
-pub fn host_ai_environment_from_value(
-    value: Result<String, std::env::VarError>,
-    missing_api_key_warning: &'static str,
-    empty_api_key_warning: Option<&'static str>,
-) -> HostAiEnvironment {
-    match value {
-        Ok(api_key) if !api_key.trim().is_empty() => HostAiEnvironment {
-            api_key: Some(api_key),
-            availability: AiAvailability::Available,
-        },
-        Ok(_) => {
+    let entry = CredentialEntry::OpenAi.target_name();
+    match outcome {
+        KeyReadOutcome::Found { key, .. } => {
+            return HostAiEnvironment {
+                api_key: Some(key),
+                availability: AiAvailability::Available,
+            };
+        }
+        KeyReadOutcome::NotRequested => {
+            engine_warn!("stored keys {STORED_KEYS_NOT_REQUESTED}; AI features disabled");
+        }
+        KeyReadOutcome::NotFound => {
             engine_warn!(
-                "{}",
-                empty_api_key_warning.unwrap_or(missing_api_key_warning)
+                "OpenAI key not found in Credential Manager ({entry}); {disabled_warning}"
             );
-            HostAiEnvironment {
-                api_key: None,
-                availability: AiAvailability::Unavailable {
-                    reason: harvester_core::AiUnavailableReason::MissingApiKey,
-                },
+        }
+        KeyReadOutcome::Empty => {
+            engine_warn!("OpenAI key is empty in Credential Manager ({entry}); {disabled_warning}");
+        }
+        KeyReadOutcome::Unreadable { .. } => {
+            if let Some(reason) = outcome.failure_text() {
+                engine_warn!("{reason}; {disabled_warning}");
             }
         }
-        Err(_) => {
-            engine_warn!("{}", missing_api_key_warning);
-            HostAiEnvironment {
-                api_key: None,
-                availability: AiAvailability::Unavailable {
-                    reason: harvester_core::AiUnavailableReason::MissingApiKey,
-                },
-            }
-        }
+    }
+    HostAiEnvironment {
+        api_key: None,
+        availability: AiAvailability::Unavailable {
+            reason: harvester_core::AiUnavailableReason::MissingApiKey,
+        },
     }
 }
 
@@ -207,14 +240,13 @@ pub fn build_effect_runner(
     defaults: &HostLlmDefaults,
     platform_handler: Box<dyn PlatformEffectHandler>,
     persistence_sink: Box<dyn RuntimePersistenceSink>,
-    missing_api_key_warning: &'static str,
-    empty_api_key_warning: Option<&'static str>,
+    keys: HostKeys,
+    disabled_warning: &'static str,
 ) -> Result<EffectRunnerBuild, String> {
-    let ai_environment =
-        host_ai_environment_from_env(missing_api_key_warning, empty_api_key_warning);
+    let ai_environment = host_ai_environment_from_key(keys.openai, disabled_warning);
     if let Some(api_key) = ai_environment.api_key {
         let provider: Arc<dyn harvester_engine::llm::provider::LlmProvider> =
-            Arc::new(OpenAiProvider::new(api_key));
+            Arc::new(OpenAiProvider::new(api_key.expose().to_owned()));
         let (runner, config) = build_effect_runner_with_provider(
             paths,
             msg_tx,
@@ -226,10 +258,15 @@ pub fn build_effect_runner(
             None,
         );
         let quota_limits = llm_quota_limits_from_engine(&config.quotas);
-        Ok((runner, Some(quota_limits), ai_environment.availability))
+        Ok((
+            runner.with_brave_key(keys.brave),
+            Some(quota_limits),
+            ai_environment.availability,
+        ))
     } else {
         Ok((
-            EffectRunner::new(paths.clone(), msg_tx, platform_handler, persistence_sink),
+            EffectRunner::new(paths.clone(), msg_tx, platform_handler, persistence_sink)
+                .with_brave_key(keys.brave),
             None,
             ai_environment.availability,
         ))
@@ -818,17 +855,29 @@ mod tests {
 
     #[test]
     fn desktop_bootstrap_marks_missing_and_blank_keys_unavailable() {
-        let missing_warning = "test missing key warning";
-        let empty_warning = "test empty key warning";
-        let cases = [
-            Err(std::env::VarError::NotPresent),
-            Ok(String::new()),
-            Ok(" \t ".to_string()),
-        ];
-
-        for value in cases {
-            let environment =
-                host_ai_environment_from_value(value, missing_warning, Some(empty_warning));
+        use crate::credentials::{ApiKey, CredentialEntry, KeyEncoding, KeyReadOutcome};
+        for (outcome, warning) in [
+            (
+                KeyReadOutcome::NotFound,
+                "OpenAI key not found in Credential Manager (Harvester/OpenAI)",
+            ),
+            (
+                KeyReadOutcome::Empty,
+                "OpenAI key is empty in Credential Manager (Harvester/OpenAI)",
+            ),
+            (
+                KeyReadOutcome::Unreadable {
+                    entry: CredentialEntry::OpenAi,
+                },
+                "Credential Manager entry Harvester/OpenAI could not be read",
+            ),
+        ] {
+            let (environment, logs) = crate::test_logs::capture(|| {
+                host_ai_environment_from_key(outcome, "LLM features disabled")
+            });
+            assert_eq!(logs.len(), 1);
+            assert!(logs[0].contains(warning), "{logs:?}");
+            assert!(logs[0].contains("LLM features disabled"), "{logs:?}");
             assert!(environment.api_key.is_none());
             assert_eq!(
                 environment.availability,
@@ -854,12 +903,16 @@ mod tests {
             );
         }
 
-        let available = host_ai_environment_from_value(
-            Ok("test-key".to_string()),
-            missing_warning,
-            Some(empty_warning),
-        );
-        assert_eq!(available.api_key.as_deref(), Some("test-key"));
+        let key = KeyReadOutcome::Found {
+            key: ApiKey::from_trusted("test-key".into()),
+            chars: 8,
+            encoding: KeyEncoding::Utf8,
+        };
+        let (available, logs) = crate::test_logs::capture(|| {
+            host_ai_environment_from_key(key, "LLM features disabled")
+        });
+        assert!(logs.is_empty());
+        assert!(available.api_key.is_some());
         assert_eq!(available.availability, AiAvailability::Available);
     }
 }

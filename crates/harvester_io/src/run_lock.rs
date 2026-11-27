@@ -460,7 +460,7 @@ mod tests {
     /// later run, because acquisition only asked whether the file existed.
     #[test]
     fn lock_left_by_a_departed_run_is_reclaimed_without_force() {
-        engine_logging::initialize_for_tests();
+        crate::test_logs::initialize();
         let dir = tempdir().unwrap();
         let lock_path = dir.path().join(BATCH_LOCK.filename);
 
@@ -575,7 +575,7 @@ mod tests {
 
     #[test]
     fn force_unlock_replacement_logged() {
-        engine_logging::initialize_for_tests();
+        crate::test_logs::initialize();
         let dir = tempdir().unwrap();
 
         // First acquire

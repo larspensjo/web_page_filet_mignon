@@ -58,10 +58,53 @@ impl<'de> Deserialize<'de> for SourceId {
     }
 }
 
+/// Records whether a legacy Brave key field contained a string.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LegacyKeyField(bool);
+
+impl LegacyKeyField {
+    pub fn has_value(self) -> bool {
+        self.0
+    }
+}
+
+fn legacy_key_field<'de, D>(deserializer: D) -> Result<LegacyKeyField, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct LegacyKeyVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for LegacyKeyVisitor {
+        type Value = LegacyKeyField;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a legacy key name as a string, Some(string), or None")
+        }
+
+        fn visit_str<E: serde::de::Error>(self, _: &str) -> Result<Self::Value, E> {
+            Ok(LegacyKeyField(true))
+        }
+
+        fn visit_some<D: serde::Deserializer<'de>>(
+            self,
+            deserializer: D,
+        ) -> Result<Self::Value, D::Error> {
+            String::deserialize(deserializer).map(|_| LegacyKeyField(true))
+        }
+
+        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+            Ok(LegacyKeyField::default())
+        }
+    }
+
+    deserializer.deserialize_any(LegacyKeyVisitor)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BraveNewsSourceConfig {
     pub query: String,
-    pub api_key_env: String,
+    #[serde(default, deserialize_with = "legacy_key_field", skip_serializing)]
+    pub api_key_env: LegacyKeyField,
     /// Request size — how many results to fetch from Brave (1..=50).
     /// This is NOT the emit cap; `max_urls_per_poll` on `SourceConfig` controls that.
     pub count: Option<usize>,
@@ -192,12 +235,6 @@ impl SourceRegistry {
                     return Err(SourceRegistryValidationError::InvalidBraveConfig {
                         source_id: source.id.clone(),
                         reason: "query cannot be empty".to_string(),
-                    });
-                }
-                if cfg.api_key_env.trim().is_empty() {
-                    return Err(SourceRegistryValidationError::InvalidBraveConfig {
-                        source_id: source.id.clone(),
-                        reason: "api_key_env cannot be empty".to_string(),
                     });
                 }
                 if let Some(count) = cfg.count {
@@ -369,13 +406,13 @@ mod tests {
         ));
     }
 
-    fn brave_source(query: &str, api_key_env: &str, count: Option<usize>) -> SourceRegistry {
+    fn brave_source(query: &str, count: Option<usize>) -> SourceRegistry {
         SourceRegistry {
             sources: vec![SourceConfig {
                 id: SourceId::new("brave").unwrap(),
                 source_type: SourceType::BraveNews(BraveNewsSourceConfig {
                     query: query.to_string(),
-                    api_key_env: api_key_env.to_string(),
+                    api_key_env: LegacyKeyField::default(),
                     count,
                     freshness: None,
                 }),
@@ -387,12 +424,26 @@ mod tests {
     }
 
     #[test]
+    fn brave_legacy_key_field_recognizes_all_supported_forms() {
+        for (field, has_value) in [
+            ("", false),
+            ("api_key_env: None", false),
+            (r#"api_key_env: Some("X")"#, true),
+            (r#"api_key_env: "X""#, true),
+        ] {
+            let config: BraveNewsSourceConfig =
+                ron::from_str(&format!(r#"(query: "test", {field})"#)).unwrap();
+            assert_eq!(config.api_key_env.has_value(), has_value, "{field}");
+        }
+    }
+
+    #[test]
     fn brave_news_source_round_trips_through_ron() {
         let config = SourceConfig {
             id: SourceId::new("brave-test").unwrap(),
             source_type: SourceType::BraveNews(BraveNewsSourceConfig {
                 query: "\"AI\" AND \"data center\"".to_string(),
-                api_key_env: "BRAVE_API_KEY".to_string(),
+                api_key_env: LegacyKeyField::default(),
                 count: Some(10),
                 freshness: Some("pd".to_string()),
             }),
@@ -408,29 +459,34 @@ mod tests {
 
     #[test]
     fn brave_news_rejects_empty_query() {
-        assert!(brave_source("", "KEY", None).validate().is_err());
+        assert!(brave_source("", None).validate().is_err());
     }
 
     #[test]
-    fn brave_news_rejects_empty_api_key_env() {
-        assert!(brave_source("test", "", None).validate().is_err());
+    fn brave_news_accepts_empty_legacy_api_key_env() {
+        let registry: SourceRegistry = ron::from_str(
+            r#"(sources: [
+            (id: "brave", source_type: BraveNews((query: "test", api_key_env: "")),
+                enabled: true, description: ""),
+        ])"#,
+        )
+        .unwrap();
+        assert!(registry.validate().is_ok());
     }
 
     #[test]
     fn brave_news_rejects_count_over_50() {
-        assert!(brave_source("test", "KEY", Some(51)).validate().is_err());
+        assert!(brave_source("test", Some(51)).validate().is_err());
     }
 
     #[test]
     fn brave_news_rejects_count_zero() {
-        assert!(brave_source("test", "KEY", Some(0)).validate().is_err());
+        assert!(brave_source("test", Some(0)).validate().is_err());
     }
 
     #[test]
     fn brave_news_accepts_valid_config() {
-        assert!(brave_source("AI news", "BRAVE_API_KEY", Some(10))
-            .validate()
-            .is_ok());
+        assert!(brave_source("AI news", Some(10)).validate().is_ok());
     }
 
     #[test]
@@ -439,7 +495,7 @@ mod tests {
             id: SourceId::new("brave").unwrap(),
             source_type: SourceType::BraveNews(BraveNewsSourceConfig {
                 query: "test".to_string(),
-                api_key_env: "KEY".to_string(),
+                api_key_env: LegacyKeyField::default(),
                 count: None,
                 freshness: None,
             }),

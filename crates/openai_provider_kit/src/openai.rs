@@ -20,13 +20,18 @@ pub struct OpenAiProvider {
 }
 
 impl OpenAiProvider {
+    /// Convenience constructor for applications that provision an OpenAI environment variable.
     pub fn from_env() -> Result<Self, LlmError> {
-        let api_key = env::var("OPENAI_API_KEY").map_err(|err| LlmError::Configuration {
-            detail: format!("OPENAI_API_KEY missing: {err}"),
+        Self::from_env_var("OPENAI_API_KEY")
+    }
+
+    fn from_env_var(name: &str) -> Result<Self, LlmError> {
+        let api_key = env::var(name).map_err(|err| LlmError::Configuration {
+            detail: format!("{name} missing: {err}"),
         })?;
         if api_key.trim().is_empty() {
             return Err(LlmError::Configuration {
-                detail: "OPENAI_API_KEY is empty".to_string(),
+                detail: format!("{name} is empty"),
             });
         }
         Ok(Self::new(api_key))
@@ -56,6 +61,15 @@ impl OpenAiProvider {
         self
     }
 
+    fn authorization_header(&self) -> Result<header::HeaderValue, LlmError> {
+        let mut value = header::HeaderValue::from_str(&format!("Bearer {}", self.api_key))
+            .map_err(|_| LlmError::Network {
+                detail: "invalid OpenAI authorization header".into(),
+            })?;
+        value.set_sensitive(true);
+        Ok(value)
+    }
+
     fn endpoint(&self) -> String {
         format!("{}/chat/completions", self.base_url.trim_end_matches('/'))
     }
@@ -68,11 +82,14 @@ impl OpenAiProvider {
         status: StatusCode,
         headers: &header::HeaderMap,
         body: String,
+        api_key: &str,
     ) -> LlmError {
         match status.as_u16() {
             401 => LlmError::AuthenticationFailed,
             429 => match Self::insufficient_quota_description(&body) {
-                Some(description) => LlmError::QuotaExhausted { description },
+                Some(description) => LlmError::QuotaExhausted {
+                    description: scrub_echo(description, api_key),
+                },
                 None => LlmError::RateLimited {
                     retry_after_secs: headers
                         .get(header::RETRY_AFTER)
@@ -82,7 +99,7 @@ impl OpenAiProvider {
             },
             _ => LlmError::Http {
                 status: status.as_u16(),
-                body,
+                body: scrub_echo(body, api_key),
             },
         }
     }
@@ -163,12 +180,12 @@ impl OpenAiProvider {
         }
     }
 
-    pub(crate) fn map_reqwest_error(err: reqwest::Error) -> LlmError {
+    pub(crate) fn map_reqwest_error(err: reqwest::Error, api_key: &str) -> LlmError {
         if err.is_timeout() {
             LlmError::Timeout
         } else {
             LlmError::Network {
-                detail: err.to_string(),
+                detail: scrub_echo(err.to_string(), api_key),
             }
         }
     }
@@ -186,12 +203,12 @@ impl LlmProvider for OpenAiProvider {
         let response = self
             .client
             .post(self.endpoint())
-            .header(header::AUTHORIZATION, format!("Bearer {}", self.api_key))
+            .header(header::AUTHORIZATION, self.authorization_header()?)
             .header(header::CONTENT_TYPE, "application/json")
             .body(body)
             .send()
             .await
-            .map_err(Self::map_reqwest_error)?;
+            .map_err(|err| Self::map_reqwest_error(err, &self.api_key))?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -200,13 +217,27 @@ impl LlmProvider for OpenAiProvider {
                 .text()
                 .await
                 .unwrap_or_else(|_| "<body read failed>".to_string());
-            return Err(Self::map_status_code(status, &headers, body_text));
+            return Err(Self::map_status_code(
+                status,
+                &headers,
+                body_text,
+                &self.api_key,
+            ));
         }
 
         let headroom = parse_rate_limit_headroom(response.headers());
-        let bytes = response.bytes().await.map_err(Self::map_reqwest_error)?;
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|err| Self::map_reqwest_error(err, &self.api_key))?;
         Self::parse_response_body(&bytes)
             .map(|response| response.with_rate_limit_headroom(headroom))
+            .map_err(|error| match error {
+                LlmError::InvalidResponse { detail } => LlmError::InvalidResponse {
+                    detail: scrub_echo(detail, &self.api_key),
+                },
+                other => other,
+            })
     }
 
     fn provider_name(&self) -> &str {
@@ -219,10 +250,10 @@ impl LlmProvider for OpenAiProvider {
         let response = self
             .client
             .get(&url)
-            .header(header::AUTHORIZATION, format!("Bearer {}", self.api_key))
+            .header(header::AUTHORIZATION, self.authorization_header()?)
             .send()
             .await
-            .map_err(Self::map_reqwest_error)?;
+            .map_err(|err| Self::map_reqwest_error(err, &self.api_key))?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -231,14 +262,25 @@ impl LlmProvider for OpenAiProvider {
                 .text()
                 .await
                 .unwrap_or_else(|_| "<body read failed>".to_string());
-            return Err(Self::map_status_code(status, &headers, body_text));
+            return Err(Self::map_status_code(
+                status,
+                &headers,
+                body_text,
+                &self.api_key,
+            ));
         }
 
-        let bytes = response.bytes().await.map_err(Self::map_reqwest_error)?;
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|err| Self::map_reqwest_error(err, &self.api_key))?;
 
         let parsed: OpenAiModelsResponse =
             serde_json::from_slice(&bytes).map_err(|err| LlmError::InvalidResponse {
-                detail: format!("models response parse failure: {err}"),
+                detail: scrub_echo(
+                    format!("models response parse failure: {err}"),
+                    &self.api_key,
+                ),
             })?;
 
         // Filter to chat-completion models using prefix allow-list
@@ -270,6 +312,36 @@ impl LlmProvider for OpenAiProvider {
 
         Ok(chat_models)
     }
+}
+
+/// Redacts key echoes. Keep the behavior in sync with `harvester_io::credentials::scrub`.
+fn scrub_echo(text: String, key: &str) -> String {
+    if key.is_empty() {
+        return text;
+    }
+    let mut matches = text
+        .char_indices()
+        .map(|(start, _)| start)
+        .filter(|&start| text[start..].starts_with(key));
+    let Some(mut first) = matches.next() else {
+        return text;
+    };
+    let mut end = first + key.len();
+    let mut cursor = 0;
+    let mut scrubbed = String::with_capacity(text.len());
+    for start in matches {
+        if start > end {
+            scrubbed.push_str(&text[cursor..first]);
+            scrubbed.push_str("<redacted>");
+            cursor = end;
+            first = start;
+        }
+        end = start + key.len();
+    }
+    scrubbed.push_str(&text[cursor..first]);
+    scrubbed.push_str("<redacted>");
+    scrubbed.push_str(&text[end..]);
+    scrubbed
 }
 
 fn parse_rate_limit_headroom(headers: &header::HeaderMap) -> Option<RateLimitHeadroom> {
@@ -585,6 +657,18 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    #[test]
+    fn scrub_echo_redacts_repeated_adjacent_and_overlapping_occurrences() {
+        const KEY: &str = "synthetic-openai-echo-sentinel";
+        let text = format!("error: key {KEY} rejected; echo={KEY}{KEY}.");
+        assert_eq!(
+            scrub_echo(text, KEY),
+            "error: key <redacted> rejected; echo=<redacted>."
+        );
+        assert_eq!(scrub_echo("x ababab y".into(), "abab"), "x <redacted> y");
+        assert_eq!(scrub_echo("nothing to see".into(), KEY), "nothing to see");
+    }
+
     fn sample_request() -> LlmRequest {
         LlmRequest::new(
             ModelId::new(ProviderKind::OpenAi, "gpt-4.1"),
@@ -593,6 +677,24 @@ mod tests {
                 ChatMessage::new(ChatRole::User, "user prompt"),
             ],
         )
+    }
+
+    #[test]
+    fn from_env_missing_key_returns_configuration_error() {
+        let name = "HARVESTER_TEST_OPENAI_MISSING_1DA06DD4";
+        std::env::remove_var(name);
+        assert!(matches!(OpenAiProvider::from_env_var(name),
+            Err(LlmError::Configuration { detail }) if detail.contains(&format!("{name} missing"))));
+    }
+
+    #[test]
+    fn from_env_rejects_empty_or_whitespace_key() {
+        let name = "HARVESTER_TEST_OPENAI_BLANK_623D8A05";
+        std::env::set_var(name, " \t ");
+        let result = OpenAiProvider::from_env_var(name);
+        std::env::remove_var(name);
+        assert!(matches!(result, Err(LlmError::Configuration { detail })
+            if detail == format!("{name} is empty")));
     }
 
     #[test]
@@ -738,6 +840,7 @@ mod tests {
             StatusCode::UNAUTHORIZED,
             &HeaderMap::new(),
             "body".into(),
+            "test-key",
         );
         assert!(matches!(err, LlmError::AuthenticationFailed));
     }
@@ -747,8 +850,12 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(header::RETRY_AFTER, HeaderValue::from_static("7"));
 
-        let err =
-            OpenAiProvider::map_status_code(StatusCode::TOO_MANY_REQUESTS, &headers, "body".into());
+        let err = OpenAiProvider::map_status_code(
+            StatusCode::TOO_MANY_REQUESTS,
+            &headers,
+            "body".into(),
+            "test-key",
+        );
         assert!(matches!(
             err,
             LlmError::RateLimited {
@@ -764,6 +871,7 @@ mod tests {
             StatusCode::TOO_MANY_REQUESTS,
             &HeaderMap::new(),
             body.into(),
+            "test-key",
         );
         match err {
             LlmError::QuotaExhausted { description } => {
@@ -780,6 +888,7 @@ mod tests {
             StatusCode::TOO_MANY_REQUESTS,
             &HeaderMap::new(),
             body.into(),
+            "test-key",
         );
         assert!(matches!(
             err,
@@ -795,6 +904,7 @@ mod tests {
             StatusCode::TOO_MANY_REQUESTS,
             &HeaderMap::new(),
             "<html>not json</html>".into(),
+            "test-key",
         );
         assert!(matches!(
             err,
@@ -810,6 +920,7 @@ mod tests {
             StatusCode::INTERNAL_SERVER_ERROR,
             &HeaderMap::new(),
             "oops".into(),
+            "test-key",
         );
         assert!(matches!(err, LlmError::Http { status: 500, body } if body == "oops"));
     }
@@ -827,7 +938,7 @@ mod tests {
         let client = reqwest::Client::new();
         let err = client.get("http://127.0.0.1:1").send().await.unwrap_err();
 
-        let mapped = OpenAiProvider::map_reqwest_error(err);
+        let mapped = OpenAiProvider::map_reqwest_error(err, "test-key");
         assert!(matches!(mapped, LlmError::Network { .. }));
     }
 
@@ -850,7 +961,7 @@ mod tests {
             .send()
             .await
             .unwrap_err();
-        let err = OpenAiProvider::map_reqwest_error(err);
+        let err = OpenAiProvider::map_reqwest_error(err, "test-key");
         assert!(matches!(err, LlmError::Timeout));
     }
 

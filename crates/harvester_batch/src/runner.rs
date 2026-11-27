@@ -5,8 +5,11 @@ use engine_logging::{engine_info, engine_warn};
 use harvester_core::{AppState, BatchObservation, Msg};
 use harvester_engine::llm::{ModelId, ProviderKind, OPENAI_MODEL_GPT_4O_MINI};
 use harvester_io::{
-    acquire_lock, host_bootstrap::HostLlmDefaults, load_briefing_checkpoint, load_sources,
-    save_blacklist, save_briefing_checkpoint, RuntimePaths, COMMAND_LINE_LOCK_IDENTITY,
+    acquire_lock,
+    credentials::{read_host_keys, StoredKeyAccess},
+    host_bootstrap::HostLlmDefaults,
+    load_briefing_checkpoint, load_sources, save_blacklist, save_briefing_checkpoint, RuntimePaths,
+    COMMAND_LINE_LOCK_IDENTITY,
 };
 use std::io::{IsTerminal, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,10 +22,7 @@ mod dispatch_loop;
 mod live_progress;
 mod reporting;
 
-pub(crate) const BATCH_MISSING_API_KEY_WARNING: &str =
-    "[batch] OPENAI_API_KEY not set; AI triage/summary features disabled";
-pub(crate) const BATCH_EMPTY_API_KEY_WARNING: &str =
-    "[batch] OPENAI_API_KEY is empty; AI triage/summary features disabled";
+pub(crate) const BATCH_AI_DISABLED_WARNING: &str = "AI triage/summary features disabled";
 
 pub(crate) fn batch_host_llm_defaults() -> HostLlmDefaults {
     HostLlmDefaults {
@@ -110,7 +110,7 @@ fn determine_exit_code(total_failure_cycles: usize) -> i32 {
 }
 
 /// Run one poll, download and synchronous processing cycle, then exit.
-pub fn run(args: Args) -> Result<i32, String> {
+pub fn run(args: Args, stored_keys: Option<StoredKeyAccess>) -> Result<i32, String> {
     engine_info!("[batch] Starting harvester_batch");
     engine_info!("[batch] output_dir: {:?}", args.output_dir);
     engine_info!("[batch] sources: {:?}", args.sources_path());
@@ -160,6 +160,8 @@ pub fn run(args: Args) -> Result<i32, String> {
     let interactive = std::io::stdout().is_terminal() && std::io::stderr().is_terminal();
     install_signal_handler(Arc::clone(&shutdown_flag), interactive);
 
+    let keys = bootstrap::read_startup_keys(stored_keys.as_ref(), read_host_keys);
+
     // Import mode: branch before source loading
     if let Some(import_dir) = &args.import_saved_web_dir {
         engine_info!("[batch] Import mode: dir={}", import_dir.display());
@@ -168,6 +170,7 @@ pub fn run(args: Args) -> Result<i32, String> {
             &args,
             import_dir.clone(),
             Arc::clone(&shutdown_flag),
+            keys,
         );
     }
 
@@ -179,14 +182,15 @@ pub fn run(args: Args) -> Result<i32, String> {
     let source_registry = load_sources(&paths.sources_path);
     engine_info!(
         "[batch] Source registry entries loaded={}",
-        source_registry.sources.len()
+        source_registry.registry.sources.len()
     );
 
     let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
     if interactive {
         println!("{}", format_startup_notice("one cycle"));
     }
-    let (mut state, effect_runner) = bootstrap::prepare_runtime(&paths, &args, msg_tx.clone())?;
+    let (mut state, effect_runner) =
+        bootstrap::prepare_runtime(&paths, &args, msg_tx.clone(), keys)?;
     prepare_startup_window(&mut state, &msg_rx, &effect_runner)?;
     let run_started_at = Instant::now();
     let mut cycle_baseline = CycleCounterBaseline::from_observation(&state.batch_observation());

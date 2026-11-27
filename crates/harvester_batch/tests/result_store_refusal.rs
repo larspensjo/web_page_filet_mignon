@@ -8,7 +8,6 @@ fn cli_with_no_flags_polls_one_cycle_persists_and_exits() {
     fs::write(output.join(".sources.ron"), "(sources: [])").unwrap();
     let result = Command::new(env!("CARGO_BIN_EXE_harvester_batch"))
         .current_dir(dir.path())
-        .env_remove("OPENAI_API_KEY")
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&result.stdout);
@@ -56,7 +55,6 @@ fn cli_names_refused_store_at_start_and_finish_polls_and_exits_nonzero() {
     // and network-free. engine.log is confined to the temporary working folder.
     let result = Command::new(env!("CARGO_BIN_EXE_harvester_batch"))
         .current_dir(dir.path())
-        .env_remove("OPENAI_API_KEY")
         .arg("--output-dir")
         .arg(&output)
         .output()
@@ -86,7 +84,6 @@ fn cli_one_cycle_refuses_any_damaged_store_before_model_setup() {
         fs::write(&corrupt, b"damaged paid results").unwrap();
         let result = Command::new(env!("CARGO_BIN_EXE_harvester_batch"))
             .current_dir(dir.path())
-            .env_remove("OPENAI_API_KEY")
             .arg("--output-dir")
             .arg(&output)
             .output()

@@ -3,14 +3,13 @@ use crate::no_progress::{pipeline_operation, NoProgressWatchdog};
 use crate::runner::{
     apply_signal_candidate_selection_settings, batch_host_llm_defaults, exit_code_with_shutdown,
     should_log_batch_msg, summarize_batch_msg, CycleOutcome, CycleStartWorkReporter,
-    DispatchLoopOptions, BATCH_EMPTY_API_KEY_WARNING, BATCH_MISSING_API_KEY_WARNING,
-    MAX_DISPATCH_INBOX_BATCH,
+    DispatchLoopOptions, BATCH_AI_DISABLED_WARNING, MAX_DISPATCH_INBOX_BATCH,
 };
 use chrono::Utc;
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{update, AppState, BatchObservation, CompletedJobSnapshot, ImportPhase, Msg};
 use harvester_io::{
-    host_bootstrap::{build_effect_runner, pump_pre_triage_refresh},
+    host_bootstrap::{build_effect_runner, pump_pre_triage_refresh, HostKeys},
     load_runtime_hydration, load_signal_candidate_overrides, persist_completed_jobs, EffectRunner,
     NoOpPlatformHandler, PersistenceWorker, RuntimePaths,
 };
@@ -52,6 +51,7 @@ pub(crate) fn run_import_mode(
     args: &Args,
     import_dir: std::path::PathBuf,
     shutdown_flag: Arc<AtomicBool>,
+    keys: HostKeys,
 ) -> Result<i32, String> {
     engine_info!("[import] Starting import mode");
     let hydration = load_runtime_hydration(&paths.state_path, &paths.output_dir);
@@ -74,8 +74,8 @@ pub(crate) fn run_import_mode(
             paths.state_path.clone(),
             paths.blacklist_path.clone(),
         )),
-        BATCH_MISSING_API_KEY_WARNING,
-        Some(BATCH_EMPTY_API_KEY_WARNING),
+        keys,
+        BATCH_AI_DISABLED_WARNING,
     )?;
     state = crate::runner::apply_llm_availability(state, availability);
 

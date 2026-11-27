@@ -64,9 +64,13 @@ impl fmt::Debug for ApiKey {
     }
 }
 
-/// The result of reading one entry.
+pub(crate) const STORED_KEYS_NOT_REQUESTED: &str =
+    "not requested (launched without --use-stored-keys)";
+
+/// The startup status of one entry.
 #[derive(Debug)]
 pub enum KeyReadOutcome {
+    NotRequested,
     Found {
         key: ApiKey,
         chars: usize,
@@ -95,6 +99,7 @@ impl KeyReadOutcome {
     /// One key-status line for the batch's startup output (K9). Never contains the value.
     pub fn status_line(&self, entry: CredentialEntry) -> String {
         let state = match self {
+            Self::NotRequested => STORED_KEYS_NOT_REQUESTED.to_owned(),
             Self::Found {
                 chars, encoding, ..
             } => format!("found ({chars} chars, {})", encoding.label()),
@@ -186,7 +191,7 @@ impl StoredKeyAccess {
     }
 }
 
-/// Both entries, read once at host startup.
+/// The status of both entries at host startup.
 #[derive(Debug)]
 pub struct StoredKeyReads {
     pub openai: KeyReadOutcome,
@@ -213,6 +218,7 @@ fn read_key(_access: &StoredKeyAccess, entry: CredentialEntry) -> KeyReadOutcome
 
 /// Replaces every occurrence of `key` in `text` with `<redacted>`, including overlapping ones,
 /// so an HTTP error body or message that echoes the key cannot leak it (K7).
+/// Keep the behavior in sync with `openai_provider_kit::openai::scrub_echo`.
 pub fn scrub(text: &str, key: &ApiKey) -> String {
     let needle = key.expose().as_bytes();
     let haystack = text.as_bytes();

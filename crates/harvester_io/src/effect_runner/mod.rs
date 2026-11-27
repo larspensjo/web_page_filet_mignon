@@ -113,6 +113,7 @@ pub struct EffectRunner {
     paths: RuntimePaths,
     url_policy: UrlPolicy,
     fetch_settings: FetchSettings,
+    brave_key: Option<Arc<crate::credentials::ApiKey>>,
     llm_handle: Option<LlmHandle>,
     llm_max_input_bytes: Option<usize>,
     prompt_registry: Arc<RwLock<PromptRegistry>>,
@@ -254,6 +255,7 @@ impl EffectRunner {
             paths,
             url_policy,
             fetch_settings,
+            brave_key: None,
             llm_handle,
             llm_max_input_bytes,
             prompt_registry,
@@ -297,6 +299,7 @@ impl EffectRunner {
             paths,
             url_policy,
             fetch_settings,
+            brave_key: None,
             llm_handle: None,
             llm_max_input_bytes: None,
             prompt_registry: Arc::new(RwLock::new(PromptRegistry::with_defaults())),
@@ -308,6 +311,11 @@ impl EffectRunner {
         };
         runner.spawn_event_loop(msg_tx);
         runner
+    }
+
+    pub(crate) fn with_brave_key(mut self, key: Option<crate::credentials::ApiKey>) -> Self {
+        self.brave_key = key.map(Arc::new);
+        self
     }
 
     pub fn with_result_sink(mut self, sink: Box<dyn crate::result_sink::ResultSink>) -> Self {

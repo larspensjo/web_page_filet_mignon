@@ -1,10 +1,13 @@
-use super::{batch_host_llm_defaults, BATCH_EMPTY_API_KEY_WARNING, BATCH_MISSING_API_KEY_WARNING};
+use super::{batch_host_llm_defaults, BATCH_AI_DISABLED_WARNING};
 use crate::cli::Args;
 use engine_logging::engine_info;
 use harvester_core::signal_candidate::DEFAULT_SELECTION_THRESHOLD;
 use harvester_core::{update, AiAvailability, AppState, Effect, Msg};
 use harvester_io::{
-    host_bootstrap::{build_effect_runner, hydrate_state_from_disk},
+    credentials::{CredentialEntry, StoredKeyAccess, StoredKeyReads},
+    host_bootstrap::{
+        build_effect_runner, hydrate_state_from_disk, read_startup_key_outcomes, HostKeys,
+    },
     EffectRunner, NoOpPlatformHandler, PersistenceWorker, RuntimePaths,
 };
 use std::sync::mpsc;
@@ -24,10 +27,21 @@ pub(crate) fn apply_llm_availability(state: AppState, availability: AiAvailabili
     update(state, Msg::AiAvailabilityDetected { availability }).0
 }
 
+pub(super) fn read_startup_keys(
+    access: Option<&StoredKeyAccess>,
+    reader: impl FnOnce(&StoredKeyAccess) -> StoredKeyReads,
+) -> HostKeys {
+    let reads = read_startup_key_outcomes(access, reader);
+    println!("{}", reads.openai.status_line(CredentialEntry::OpenAi));
+    println!("{}", reads.brave.status_line(CredentialEntry::BraveSearch));
+    reads.into()
+}
+
 pub(crate) fn prepare_runtime(
     paths: &RuntimePaths,
     args: &Args,
     msg_tx: mpsc::Sender<Msg>,
+    keys: HostKeys,
 ) -> Result<(AppState, EffectRunner), String> {
     // Hydrate state
     engine_info!("[batch] Hydrating state from disk");
@@ -37,7 +51,6 @@ pub(crate) fn prepare_runtime(
         eprintln!("AI features unavailable: {reason}");
     }
 
-    // Build EffectRunner (with optional LLM support based on OPENAI_API_KEY)
     engine_info!("[batch] Building EffectRunner");
     let platform_handler = Box::new(NoOpPlatformHandler);
     let defaults = batch_host_llm_defaults();
@@ -51,8 +64,8 @@ pub(crate) fn prepare_runtime(
             paths.state_path.clone(),
             paths.blacklist_path.clone(),
         )),
-        BATCH_MISSING_API_KEY_WARNING,
-        Some(BATCH_EMPTY_API_KEY_WARNING),
+        keys,
+        BATCH_AI_DISABLED_WARNING,
     )?;
     state = apply_llm_availability(state, availability);
     if !startup_effects.is_empty() {
@@ -74,6 +87,32 @@ mod model_budget_tests {
     use super::*;
 
     #[test]
+    fn keyless_batch_bootstrap_does_not_call_the_credential_reader() {
+        use harvester_io::credentials::KeyReadOutcome;
+        let reads = std::cell::Cell::new(0);
+        let keys = read_startup_keys(None, |_| {
+            reads.set(reads.get() + 1);
+            StoredKeyReads {
+                openai: KeyReadOutcome::NotFound,
+                brave: KeyReadOutcome::NotFound,
+            }
+        });
+        assert_eq!(reads.get(), 0);
+        assert!(keys.brave.is_none());
+        assert!(matches!(keys.openai, KeyReadOutcome::NotRequested));
+        assert_eq!(
+            harvester_io::host_bootstrap::host_ai_environment_from_key(
+                keys.openai,
+                "AI triage/summary features disabled",
+            )
+            .availability,
+            AiAvailability::Unavailable {
+                reason: harvester_core::AiUnavailableReason::MissingApiKey,
+            },
+        );
+    }
+
+    #[test]
     fn synchronous_batch_defaults_to_worker_cap() {
         let args = Args::parse_from(&["harvester_batch"]);
         let mut state = AppState::new();
@@ -85,17 +124,16 @@ mod model_budget_tests {
     }
 
     #[test]
-    fn missing_and_blank_keys_disarm_full_and_resume_even_after_metadata() {
-        let values = [
-            Err(std::env::VarError::NotPresent),
-            Ok(String::new()),
-            Ok(" \t ".to_string()),
-        ];
-        for value in values {
-            let availability = harvester_io::host_bootstrap::host_ai_environment_from_value(
-                value,
-                "test missing warning",
-                Some("test empty warning"),
+    fn unavailable_keys_disarm_full_and_resume_even_after_metadata() {
+        use harvester_io::credentials::KeyReadOutcome;
+        for outcome in [
+            KeyReadOutcome::NotRequested,
+            KeyReadOutcome::NotFound,
+            KeyReadOutcome::Empty,
+        ] {
+            let availability = harvester_io::host_bootstrap::host_ai_environment_from_key(
+                outcome,
+                "AI triage/summary features disabled",
             )
             .availability;
             for scope in [

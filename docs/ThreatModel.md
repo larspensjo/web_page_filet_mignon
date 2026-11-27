@@ -3,13 +3,13 @@ is no longer part of the build or runtime.
 
 Structured threat model for the batch host and the Tauri desktop host, covering:
 
-1. **Assets**: downloaded content, output files, persisted state, LLM API keys (sensitive credentials that must never be committed), the encrypted SecretStore vault and its password, user's system
+1. **Assets**: downloaded content, output files, persisted state, API keys stored in the Windows Credential Manager entries `Harvester/OpenAI` and `Harvester/BraveSearch`, user's system
 2. **Trust boundaries**:
    - User input (semi-trusted)
    - Downloaded web content (untrusted)
    - Persisted state (untrusted for side effects — may be hand-edited or corrupted)
    - LLM API responses (untrusted, Phase 1+)
-   - LLM API keys and provisioning secrets (confidential trust boundary; the SecretStore password prompt is the boundary for scoped retrieval)
+   - Stored API keys (confidential). The fixed launcher flag `--use-stored-keys` is Harvester's boundary for requesting the entries. Windows controls access to the entries by account.
 3. **Threat categories** with mitigations:
    - SSRF → URL policy module (Part 4)
    - Content injection (frontmatter) → sanitization (Part 2)
@@ -18,9 +18,10 @@ Structured threat model for the batch host and the Tauri desktop host, covering:
    - Prompt injection via article content → nonce-delimited rendering, DTO validation, replay auditing (Phase 1+)
    - Data exfiltration via prompt injection (LLM output leak) → strict validation, result gating, replay records for forensic review
    - Resource exhaustion → per-run download and LLM quotas, per-URL limits
-   - Secret inheritance into agent-controlled processes → every vault secret follows the scoped model: launchers inject only the explicitly needed secret into the launched child, and do not inherit vault secrets into a process an agent controls or can spawn. The SecretStore password prompt must be typed into a session the user started. The one deliberate exception is that an agent may hold exactly the single token it uses to authenticate to its own model provider, because there is nowhere else for that credential to live.
+   - Secret inheritance into agent-controlled processes. Keys from Credential Manager are no longer inherited through environment variables. Direct reads by code running as Lars are an accepted residual risk. Harvester-only keys with provider spending limits reduce the impact of exposure.
    - Agent-modified launcher, helper, or application code → accepted residual risk: an agent can change source that the user subsequently runs with real keys. The user accepts this because code changes are reviewable and reviewed before they are run, whereas environment inheritance is invisible and automatic.
-   - Persistent parent key variables → accepted residual risk: Windows User-scope or Machine-scope values defeat the inheritance guarantee entirely. This user deliberately keeps `BRAVE_SEARCH_API_KEY` and `OPENAI_API_KEY` at User scope because other applications depend on them; the launchers therefore warn rather than refuse and pass those inherited values to `cargo build` and the child process.
+   - Persistent parent key variables. Harvester ignores `OPENAI_API_KEY` and `BRAVE_SEARCH_API_KEY` regardless of their scope. The launcher warns once for each one it finds and suggests removing it if no other application needs it. Existing values can still be inherited by child processes from the caller.
+   - Unattended credential access. Any process running as Lars, including an LLM coding agent, can read these entries directly without a human gate. The only remaining guard against an agent reading them is the `Agents.md` rule that agents never obtain API keys.
    - Long-lived key-bearing research service → the corpus MCP server is gone, so no long-lived key-bearing process answers agent questions.
    - Desktop IPC → the shipped Tauri page is an untrusted boundary. It may send only `UiIntent`, decoded fail-closed; it cannot name reducer result messages or arbitrary URLs. Snapshot bodies are served only from the last derived `BodyTable`.
    - Desktop assets → the desktop window never starts a dev server or loads remote content. `harvester://` resolves only confined files beneath the built bundle and carries the bridge CSP.
@@ -29,8 +30,8 @@ Structured threat model for the batch host and the Tauri desktop host, covering:
    - Persisted data is untrusted input for side effects
    - All model calls are synchronous; no Batch API submission or collection path remains.
    - LLM outputs are advisory and tainted until validated. Replay records are write-only forensics: the synchronous model path writes them for review, and no provider lookup reads them to satisfy requests.
-   - LLM API keys are never checked into source and must be rotated/encrypted in production
-   - Vault secrets are scoped per launched process; the rule applies to every vault secret, not only Harvester keys
+   - Harvester reads API keys from Credential Manager only under the launcher flag. Agents use the key-free paths for builds, tests and diagnostics.
+   - Key values stay out of source, files, environments, logs, Debug output and user-facing messages. OpenAI and Brave remove key echoes from provider error details before those details reach logs or the UI.
    - Side effects require passing through `EffectRunner` policy checks; runtime
      persistence is a reducer-emitted effect whose snapshot is captured during
      update, never by a host reading state out of band

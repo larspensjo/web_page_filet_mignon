@@ -1,5 +1,5 @@
 use engine_logging::engine_warn;
-use harvester_engine::{SourceRegistry, SourceRegistryValidationError};
+use harvester_engine::{SourceId, SourceRegistry, SourceRegistryValidationError, SourceType};
 use ron::de::{from_str, SpannedError};
 use ron::value::RawValue;
 use serde::Deserialize;
@@ -7,19 +7,38 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-/// Load the source registry from the given path.
-/// Returns empty registry when the file is missing or invalid.
-pub fn load_sources(path: &Path) -> SourceRegistry {
+#[derive(Debug, Default)]
+pub struct LoadedSources {
+    pub registry: SourceRegistry,
+    pub legacy_key_sources: Vec<SourceId>,
+}
+
+/// Load the source registry and identify Brave sources that still name a key.
+/// Returns an empty registry when the file is missing or invalid.
+pub fn load_sources(path: &Path) -> LoadedSources {
     let config_dir = path.parent().unwrap_or_else(|| Path::new("."));
-    match load_sources_from_path(path, config_dir) {
+    let registry = match load_sources_from_path(path, config_dir) {
         Ok(registry) => registry,
         Err(SourceLoaderError::Io(err)) if err.kind() == io::ErrorKind::NotFound => {
-            SourceRegistry::default()
+            return LoadedSources::default();
         }
         Err(err) => {
             engine_warn!("[source-config] failed to load {}: {}", path.display(), err);
-            SourceRegistry::default()
+            return LoadedSources::default();
         }
+    };
+    let legacy_key_sources = registry
+        .sources
+        .iter()
+        .filter(|source| {
+            matches!(&source.source_type,
+            SourceType::BraveNews(config) if config.api_key_env.has_value())
+        })
+        .map(|source| source.id.clone())
+        .collect();
+    LoadedSources {
+        registry,
+        legacy_key_sources,
     }
 }
 
@@ -142,7 +161,7 @@ mod tests {
 
     fn init_logging() {
         static INIT: std::sync::Once = std::sync::Once::new();
-        INIT.call_once(engine_logging::initialize_for_tests);
+        INIT.call_once(crate::test_logs::initialize);
     }
 
     fn make_registry_ron(path: &str, max: Option<usize>) -> String {
@@ -170,7 +189,7 @@ SourceRegistry(
     fn load_missing_file_returns_empty() {
         init_logging();
         let temp = TempDir::new().expect("temp");
-        let registry = load_sources(&temp.path().join("nope.ron"));
+        let registry = load_sources(&temp.path().join("nope.ron")).registry;
         assert!(registry.sources.is_empty());
     }
 
@@ -182,7 +201,7 @@ SourceRegistry(
         let contents = make_registry_ron("incoming.txt", Some(5));
         fs::write(&config_path, contents).expect("write config");
 
-        let registry = load_sources(&config_path);
+        let registry = load_sources(&config_path).registry;
         assert_eq!(registry.sources.len(), 1);
         if let SourceType::File { path } = &registry.sources[0].source_type {
             assert_eq!(path, &temp.path().join("incoming.txt"));
@@ -226,7 +245,7 @@ SourceRegistry(
         let temp = TempDir::new().expect("temp");
         let config_path = temp.path().join("bad.ron");
         fs::write(&config_path, "this is not ron").expect("write");
-        let registry = load_sources(&config_path);
+        let registry = load_sources(&config_path).registry;
         assert!(registry.sources.is_empty());
     }
 
@@ -254,7 +273,7 @@ SourceRegistry(
 )
 "#;
         fs::write(&config_path, contents).expect("write config");
-        let registry = load_sources(&config_path);
+        let registry = load_sources(&config_path).registry;
         assert_eq!(registry.sources.len(), 1);
         assert!(matches!(
             registry.sources[0].source_type,
@@ -293,6 +312,65 @@ SourceRegistry(
         let loaded = load_sources_from_str(contents, Path::new("."), Path::new(".sources.ron"))
             .expect("valid real registry entries load after unsupported entries are skipped");
         assert_eq!(loaded.sources.len(), 29);
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join(".sources.ron");
+        fs::write(&path, contents).unwrap();
+        let (loaded, logs) = crate::test_logs::capture(|| load_sources(&path));
+        let expected_ids: Vec<_> = loaded
+            .registry
+            .sources
+            .iter()
+            .filter(|source| matches!(source.source_type, SourceType::BraveNews(_)))
+            .map(|source| source.id.clone())
+            .collect();
+        assert_eq!(loaded.registry.sources.len(), 29);
+        assert_eq!(expected_ids.len(), 24);
+        assert_eq!(loaded.legacy_key_sources, expected_ids);
+        assert!(
+            logs.iter().all(|line| !line.contains("api_key_env")),
+            "{logs:?}"
+        );
+    }
+
+    #[test]
+    fn legacy_brave_key_forms_leave_the_rest_of_the_registry_intact() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join(".sources.ron");
+        for (field, has_value) in [
+            ("", false),
+            (r#"api_key_env: Some("X"),"#, true),
+            ("api_key_env: None,", false),
+            (r#"api_key_env: "","#, true),
+        ] {
+            fs::write(
+                &path,
+                format!(
+                    r#"(sources: [
+                (id: "brave", source_type: BraveNews((query: "Q", {field})),
+                    enabled: true, description: ""),
+                (id: "rss", source_type: Rss(feed_url: "https://example.invalid/rss"),
+                    enabled: true, description: ""),
+            ])"#
+                ),
+            )
+            .unwrap();
+            let loaded = load_sources(&path);
+            assert_eq!(loaded.registry.sources.len(), 2, "{field}");
+            assert!(matches!(
+                loaded.registry.sources[0].source_type,
+                SourceType::BraveNews(_)
+            ));
+            assert!(matches!(
+                loaded.registry.sources[1].source_type,
+                SourceType::Rss { .. }
+            ));
+            let ids: Vec<_> = loaded
+                .legacy_key_sources
+                .iter()
+                .map(|id| id.as_str())
+                .collect();
+            assert_eq!(ids, if has_value { &["brave"][..] } else { &[] }, "{field}");
+        }
     }
 
     #[test]
@@ -307,7 +385,7 @@ SourceRegistry(
             },
             SourceType::BraveNews(harvester_engine::BraveNewsSourceConfig {
                 query: "sample".into(),
-                api_key_env: "BRAVE_SEARCH_API_KEY".into(),
+                api_key_env: Default::default(),
                 count: None,
                 freshness: None,
             }),

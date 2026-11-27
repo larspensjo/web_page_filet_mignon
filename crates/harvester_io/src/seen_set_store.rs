@@ -189,14 +189,13 @@ pub struct BraveMetadataEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use engine_logging::initialize_for_tests;
     use harvester_engine::{BraveSeenSet, FeedEntry};
     use std::fs;
     use tempfile::TempDir;
 
     fn init_logging() {
         static INIT: std::sync::Once = std::sync::Once::new();
-        INIT.call_once(initialize_for_tests);
+        INIT.call_once(crate::test_logs::initialize);
     }
 
     #[test]

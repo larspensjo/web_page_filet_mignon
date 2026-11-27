@@ -892,6 +892,7 @@ fn dispatch_canned_poll(
             .push(guid.to_owned());
     }
     let current_rss_ids = load_sources(&paths.sources_path)
+        .registry
         .sources
         .into_iter()
         .filter(|source| matches!(source.source_type, SourceType::Rss { .. }))

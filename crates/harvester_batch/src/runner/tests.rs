@@ -24,6 +24,7 @@ use tempfile::TempDir;
 
 fn create_test_args(temp_dir: &TempDir) -> Args {
     Args {
+        use_stored_keys: false,
         output_dir: temp_dir.path().to_path_buf(),
         sources: Some(PathBuf::from("test_sources.json")),
         contexts_dir: PathBuf::from("contexts"),

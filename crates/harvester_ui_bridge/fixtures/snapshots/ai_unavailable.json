@@ -2,7 +2,7 @@
   "generation": 1,
   "schema_version": 18,
   "view": {
-    "ai_unavailable_message": "AI features unavailable: OPENAI_API_KEY is not set",
+    "ai_unavailable_message": "AI features unavailable: OpenAI key is unavailable (Harvester/OpenAI)",
     "archive_enabled": true,
     "archive_export_notice": null,
     "archive_meter": {
@@ -34,7 +34,7 @@
       "used": 0
     },
     "reprocess_notice": null,
-    "resume_disabled_reason": "AI features unavailable: OPENAI_API_KEY is not set",
+    "resume_disabled_reason": "AI features unavailable: OpenAI key is unavailable (Harvester/OpenAI)",
     "resume_enabled": false,
     "right_pane": {
       "summary_markdown": null

@@ -2947,3 +2947,18 @@ Change: The archive worker snapshots root scan hints, verifies each candidate fi
 Lessons Learned: Filtering after a full read preserves coverage but pays the first-read cost for every file. Moving a filter ahead of I/O requires proof for each file and the same parsed date and cutoff as the full read.
 Prevention: Byte comparisons after adds, rewrites and deletes, the fingerprint fault check and a temporary-corpus benchmark cover the fast path. The tests cover a length change with the original modification time restored and verify that a triage load leads to actual skips on export. Reducer tests cover request gating, and reducer-generated snapshots exercise notice rendering across the IPC boundary.
 Refs: crates/harvester_engine/tests/archive_export_read_hints.rs, crates/harvester_engine/examples/archive_read_hints_benchmark.rs, crates/harvester_io/src/effect_runner/tests.rs, crates/harvester_core/src/update/tests/archive_export_progress_tests.rs, frontend/src/App.test.tsx
+
+## 2026-11-27 - Stored keys for both launch policies
+Type: Implementation
+Context: The batch and desktop launchers need to start unattended under the owner's Windows account.
+Change: Both launchers request stored keys and both hosts read them during runtime startup. The batch reports credential status and the poll worker reports legacy Brave key fields while retaining every supported source.
+Lessons Learned: Integration tests run production binaries, so a unit-test stub alone cannot guard credential access. RON bare strings require explicit compatibility when a field also accepts `Some` or `None`.
+Refs: docs/plans/Plan.MorningBatchRun.md, real_batch_binary_without_launch_flag_never_reads_credentials, raw_entry_capture_handles_production_shape_and_skips_unknown_types
+
+## 2026-11-27 - Keyless startup and launcher review fixes
+Type: Bug Fix
+Context: The launcher test could run a real build, keyless startup reported an unsuccessful credential lookup, and Brave refusals could flood poll notices.
+Change: The launcher resolves its default build by name. Keyless startup reports that no lookup was requested, and recent Brave sources still skip. Brave refusal details are scrubbed, flattened and capped at 200 characters.
+Lessons Learned: Capturing a PowerShell function body bypasses command mocks. Status and polling order need to reflect whether a lookup or search was attempted.
+Prevention: The launcher tests guard Cargo with a shim and pin the executable path, process environment and empty argument handling. The batch binary test checks keyless status, and poll tests cover recent searches plus refusal text in both notices and logs.
+Refs: scripts/tests/HarvesterLaunch.Tests.ps1, crates/harvester_batch/tests/stored_keys.rs, crates/harvester_io/src/effect_helpers.rs

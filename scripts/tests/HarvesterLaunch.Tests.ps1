@@ -2,200 +2,87 @@
 Set-StrictMode -Version Latest
 
 BeforeAll {
-    $script:ModulePath = Join-Path $PSScriptRoot '..\lib\HarvesterLaunch.psm1'
-    Get-Module -Name HarvesterLaunch -All | Remove-Module -Force -ErrorAction SilentlyContinue
-    Import-Module $script:ModulePath -Force -DisableNameChecking
+    $modulePath = Join-Path $PSScriptRoot '..\lib\HarvesterLaunch.psm1'
+    Import-Module $modulePath -Force
 
-    $script:TestRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('harvester launch tests {0}' -f [guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path $script:TestRoot | Out-Null
-    $script:CommandsAvailable = $true
+    function New-TestLaunchSpec {
+        param([string]$Name, [string]$RepositoryRoot)
+        $spec = Get-HarvesterLaunchSpec -Name $Name -RepositoryRoot $RepositoryRoot
+        New-Item -ItemType Directory -Path (Split-Path -Parent $spec.ExecutablePath) -Force | Out-Null
+        New-Item -ItemType File -Path $spec.ExecutablePath -Force | Out-Null
+        $spec
+    }
 
-    Mock -ModuleName HarvesterLaunch Get-Command {
-        param([string]$Name)
-        if ($script:CommandsAvailable -and $Name -in @('Invoke-WithSecretMap', 'Test-SecretStorePromptAvailable')) {
-            return [pscustomobject]@{ Name = $Name }
+    function Invoke-WithTestCargo {
+        param([string]$ShimPath, [scriptblock]$Action)
+
+        $oldPath = $env:PATH
+        try {
+            $shimDirectory = Split-Path -Parent $ShimPath
+            $env:PATH = "$shimDirectory$([System.IO.Path]::PathSeparator)$oldPath"
+            InModuleScope HarvesterLaunch -Parameters @{ ShimPath = $ShimPath } {
+                param($ShimPath)
+                if ((Get-Command cargo -ErrorAction Stop).Source -ne $ShimPath) {
+                    throw 'The test cargo shim must resolve before invoking a default build.'
+                }
+            }
+            & $Action
         }
-        return $null
+        finally {
+            $env:PATH = $oldPath
+        }
     }
 }
 
 AfterAll {
-    Remove-Item -LiteralPath $script:TestRoot -Recurse -Force -ErrorAction SilentlyContinue
-    Get-Module -Name HarvesterLaunch -All | Remove-Module -Force -ErrorAction SilentlyContinue
-}
-
-function script:New-BuildFake {
-    param(
-        [Parameter(Mandatory)][psobject]$Spec,
-        [Parameter(Mandatory)][hashtable]$Calls,
-        [switch]$Fail
-    )
-
-    $null = @($Spec, $Calls, $Fail)
-    {
-        param(
-            [Parameter(Mandatory)]
-            [psobject]$BuildSpec
-        )
-        $Calls.BuildPackages += $BuildSpec.Package
-        if ($Fail) {
-            throw "fake build failed for $($BuildSpec.Package)"
-        }
-
-        $binaryParent = Split-Path -Parent $Spec.ExecutablePath
-        New-Item -ItemType Directory -Path $binaryParent -Force | Out-Null
-        New-Item -ItemType File -Path $Spec.ExecutablePath -Force | Out-Null
-    }.GetNewClosure()
-}
-
-function script:New-SecretFake {
-    param(
-        [Parameter(Mandatory)][hashtable]$Calls,
-        [int]$ReportedExitCode = 0
-    )
-
-    $null = @($Calls, $ReportedExitCode)
-    {
-        param(
-            [Parameter(Mandatory)]
-            [System.Collections.IDictionary]$SecretEnvironmentMap,
-
-            [Parameter(Mandatory)]
-            [string]$Executable,
-
-            [Parameter()]
-            [AllowEmptyCollection()]
-            [string[]]$ArgumentList = @(),
-
-            [Parameter(Mandatory)]
-            [ref]$ExitCode
-        )
-
-        $Calls.SecretInvocations++
-        $Calls.Executable = $Executable
-        $Calls.Arguments = [string[]]$ArgumentList
-        $Calls.SecretMap = [ordered]@{}
-        foreach ($entry in $SecretEnvironmentMap.GetEnumerator()) {
-            $Calls.SecretMap[[string]$entry.Key] = [string]$entry.Value
-        }
-        Write-Host 'fake child stdout one'
-        Write-Host 'fake child stdout two'
-        $ExitCode.Value = $ReportedExitCode
-    }.GetNewClosure()
-}
-
-function script:New-EnvironmentVariableProbe {
-    param(
-        [Parameter(Mandatory)]
-        [hashtable]$Values
-    )
-
-    $null = $Values
-    {
-        param(
-            [Parameter(Mandatory)]
-            [string]$Name,
-
-            [Parameter(Mandatory)]
-            [System.EnvironmentVariableTarget]$Target
-        )
-
-        $Values[('{0}|{1}' -f $Name, $Target)]
-    }.GetNewClosure()
-}
-
-function script:New-Calls {
-    @{
-        BuildPackages     = [System.Collections.Generic.List[string]]::new()
-        SecretInvocations = 0
-        Executable        = $null
-        Arguments         = @()
-        SecretMap         = $null
-    }
+    Remove-Module HarvesterLaunch -ErrorAction SilentlyContinue
 }
 
 Describe 'Harvester launch policy' {
-    BeforeEach {
-        $script:CommandsAvailable = $true
-    }
-
     It 'rejects the retired desktop launch policy' {
-        { Get-HarvesterLaunchSpec -Name App -RepositoryRoot $script:TestRoot } |
+        { Get-HarvesterLaunchSpec -Name App -RepositoryRoot $TestDrive } |
             Should -Throw -ExceptionType ([System.Management.Automation.ParameterBindingException])
     }
 
     It 'continues launching when UTF-8 process encoding setup fails' {
-        Mock -ModuleName HarvesterLaunch Set-HarvesterLaunchUtf8ProcessEncoding {
-            throw 'encoding setup unavailable in this host'
-        }
-
-        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
-        $calls = New-Calls
-        $code = 1
-
-        Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) `
-            -BuildInvoker (New-BuildFake -Spec $spec -Calls $calls) `
-            -SecretInvoker (New-SecretFake -Calls $calls) `
-            -PromptCheck { $true } `
-            -EnvironmentVariableProbe (New-EnvironmentVariableProbe -Values @{})
-
-        Assert-MockCalled -ModuleName HarvesterLaunch -CommandName Set-HarvesterLaunchUtf8ProcessEncoding -Times 1
-        $calls.SecretInvocations | Should -Be 1
+        $spec = New-TestLaunchSpec Ui $TestDrive
+        $code = -1
+        Mock -ModuleName HarvesterLaunch Set-HarvesterLaunchUtf8ProcessEncoding { throw 'console unavailable' }
+        Mock -ModuleName HarvesterLaunch Invoke-DefaultHarvesterChild { $ExitCode.Value = 0 }
+        Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) -BuildInvoker {} -EnvironmentVariableProbe {}
+        Should -Invoke -ModuleName HarvesterLaunch Invoke-DefaultHarvesterChild -Times 1 -Exactly
         $code | Should -Be 0
     }
 
-    It 'returns the batch policy with exactly its fixed runtime arguments' {
-        $spec = Get-HarvesterLaunchSpec -Name Batch -RepositoryRoot $script:TestRoot
-        @($spec.RuntimeArguments).Count | Should -Be 0
-        $spec.Package | Should -Be 'harvester_batch'
-        $spec.BinaryName | Should -Be 'harvester_batch.exe'
+    It 'keeps the UI frontend build command independent between specs' {
+        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $TestDrive
+        $spec.FrontendBuildCommand[1] = 'changed'
+        $fresh = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $TestDrive
+        ($fresh.FrontendBuildCommand -join ' ') | Should -BeExactly 'npm run build'
     }
 
-    It 'builds Batch with one cargo call and no frontend step' {
-        $spec = Get-HarvesterLaunchSpec -Name Batch -RepositoryRoot $script:TestRoot
-        $calls = [System.Collections.Generic.List[string]]::new()
-        InModuleScope HarvesterLaunch -Parameters @{ Spec = $spec; Calls = $calls } {
-            param($Spec, $Calls)
-            Invoke-DefaultHarvesterBuild -Spec $Spec -ProcessRunner {
-                param($command, $arguments, $workingDirectory)
-                $Calls.Add("$command|$($arguments -join ' ')|$workingDirectory")
-                0
-            }
+    It 'stops the UI build before cargo if the frontend build fails' {
+        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $TestDrive
+        InModuleScope HarvesterLaunch -Parameters @{ Spec = $spec } {
+            param($Spec)
+            $calls = [System.Collections.Generic.List[string]]::new()
+            $runner = {
+                param($Command, $Arguments, $WorkingDirectory)
+                $calls.Add($Command)
+                7
+            }.GetNewClosure()
+            { Invoke-DefaultHarvesterBuild -Spec $Spec -ProcessRunner $runner } |
+                Should -Throw '*frontend build failed with exit code 7*'
+            $calls.Count | Should -Be 1
+            $calls[0] | Should -BeExactly 'npm'
         }
-
-        $spec.FrontendDirectory | Should -BeNullOrEmpty
-        $spec.FrontendBuildCommand | Should -BeNullOrEmpty
-        @($calls) | Should -Be @("cargo|build -p harvester_batch|$($spec.RepositoryRoot)")
-    }
-
-    It 'returns the UI policy with independent frontend build fields' {
-        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
-        $spec.ExecutablePath | Should -Be (Join-Path $script:TestRoot 'target\debug\harvester_ui.exe')
-        $spec.FrontendDirectory | Should -Be 'frontend'
-        @($spec.FrontendBuildCommand) | Should -Be @('npm', 'run', 'build')
-        $spec.FrontendBuildCommand[1] = 'mutated'
-        @(Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot).FrontendBuildCommand | Should -Be @('npm', 'run', 'build')
-    }
-
-    It 'runs npm before cargo in the default UI build path' {
-        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
-        $calls = [System.Collections.Generic.List[string]]::new()
-        InModuleScope HarvesterLaunch -Parameters @{ Spec = $spec; Calls = $calls } {
-            param($Spec, $Calls)
-            Invoke-DefaultHarvesterBuild -Spec $Spec -ProcessRunner {
-                param($command, $arguments, $workingDirectory)
-                $Calls.Add("$command $($arguments -join ' ')")
-                0
-            }
-        }
-        @($calls) | Should -Be @('npm run build', 'cargo build -p harvester_ui')
     }
 
     It 'default runner keeps stdout out of the exit code and runs frontend in its directory' {
-        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
-        $frontendDirectory = Join-Path $script:TestRoot 'frontend'
-        $shimDirectory = Join-Path $script:TestRoot 'default-runner-bin'
-        $workingDirectoryReport = Join-Path $script:TestRoot 'frontend-working-directory.txt'
+        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $TestDrive
+        $frontendDirectory = Join-Path $TestDrive 'frontend'
+        $shimDirectory = Join-Path $TestDrive 'default-runner-bin'
+        $workingDirectoryReport = Join-Path $TestDrive 'frontend-working-directory.txt'
         New-Item -ItemType Directory -Path $frontendDirectory, $shimDirectory -Force | Out-Null
         $frontendScript = Join-Path $shimDirectory 'frontend-build.cmd'
         Set-Content -LiteralPath $frontendScript -Value @(
@@ -204,343 +91,211 @@ Describe 'Harvester launch policy' {
             'echo frontend output',
             'exit /b 0'
         )
-        Set-Content -LiteralPath (Join-Path $shimDirectory 'cargo.cmd') -Value @(
+        $cargoShim = Join-Path $shimDirectory 'cargo.cmd'
+        Set-Content -LiteralPath $cargoShim -Value @(
             '@echo off',
             'echo cargo output',
             'exit /b 0'
         )
         $spec.FrontendBuildCommand = @($frontendScript)
-        $oldPath = $env:PATH
-        try {
-            $env:PATH = "$shimDirectory$([System.IO.Path]::PathSeparator)$oldPath"
-            {
+        {
+            Invoke-WithTestCargo -ShimPath $cargoShim -Action {
                 InModuleScope HarvesterLaunch -Parameters @{ Spec = $spec } {
                     param($Spec)
                     Invoke-DefaultHarvesterBuild -Spec $Spec
                 }
-            } | Should -Not -Throw
-        }
-        finally {
-            $env:PATH = $oldPath
-        }
+            }
+        } | Should -Not -Throw
 
         (Get-Content -LiteralPath $workingDirectoryReport -Raw).Trim() | Should -Be $frontendDirectory
     }
 
-    It 'throws on default npm failure before cargo and secrets' {
-        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
-        $launchCalls = New-Calls
-        $code = 1
-        $shimDirectory = Join-Path $script:TestRoot 'failing-npm-bin'
-        $npmMarker = Join-Path $script:TestRoot 'failing-npm-invoked.txt'
-        New-Item -ItemType Directory -Path (Join-Path $script:TestRoot 'frontend'), $shimDirectory -Force | Out-Null
-        Set-Content -LiteralPath (Join-Path $shimDirectory 'npm.cmd') -Value @(
-            '@echo off',
-            ('echo invoked > "{0}"' -f $npmMarker),
-            'echo npm failure output',
-            'exit /b 1'
-        )
-        $oldPath = $env:PATH
-        try {
-            $env:PATH = "$shimDirectory$([System.IO.Path]::PathSeparator)$oldPath"
-            {
-                Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) `
-                    -SecretInvoker (New-SecretFake -Calls $launchCalls) `
-                    -PromptCheck { $true } `
-                    -EnvironmentVariableProbe (New-EnvironmentVariableProbe -Values @{})
-            } | Should -Throw '*frontend build failed*'
-        }
-        finally {
-            $env:PATH = $oldPath
-        }
-
-        Test-Path -LiteralPath $npmMarker -PathType Leaf | Should -BeTrue
-        $launchCalls.SecretInvocations | Should -Be 0
+    It '<name> uses exactly the stored-key flag' -ForEach @(
+        @{ name = 'Batch'; package = 'harvester_batch' }
+        @{ name = 'Ui'; package = 'harvester_ui' }
+    ) {
+        $root = Join-Path $TestDrive 'working tree'
+        $spec = Get-HarvesterLaunchSpec -Name $name -RepositoryRoot $root
+        $spec.RepositoryRoot | Should -BeExactly $root
+        $spec.Package | Should -BeExactly $package
+        $spec.BinaryName | Should -BeExactly "$package.exe"
+        $spec.ExecutablePath | Should -BeExactly (Join-Path $root "target\debug\$package.exe")
+        $spec.RuntimeArguments.Count | Should -Be 1
+        $spec.RuntimeArguments[0] | Should -BeExactly '--use-stored-keys'
+        $spec.RuntimeArguments[0] = '--changed'
+        (Get-HarvesterLaunchSpec -Name $name -RepositoryRoot $root).RuntimeArguments[0] |
+            Should -BeExactly '--use-stored-keys'
     }
 
-    It 'returns an independent copy of the runtime argument policy' {
-        $first = Get-HarvesterLaunchSpec -Name Batch -RepositoryRoot $script:TestRoot
-        $first.RuntimeArguments = [string[]]@('--mutated-by-caller')
-        $second = Get-HarvesterLaunchSpec -Name Batch -RepositoryRoot $script:TestRoot
-
-        @($second.RuntimeArguments).Count | Should -Be 0
-    }
-
-    It 'keeps the repository root on the spec as the launch location source of truth' {
-        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
-
-        $spec.RepositoryRoot | Should -Be ([System.IO.Path]::GetFullPath($script:TestRoot))
-        $spec.ExecutablePath | Should -Be (Join-Path $spec.RepositoryRoot 'target\debug\harvester_ui.exe')
-        (Get-Command Invoke-HarvesterLaunch).Parameters.Keys | Should -Not -Contain 'RepositoryRoot'
-    }
-
-    It 'keeps the default secret wrapper compatible with an empty argument list' {
-        InModuleScope HarvesterLaunch {
-            function Invoke-WithSecretMap {
-                param(
-                    [Parameter(Mandatory)]
-                    [System.Collections.IDictionary]$SecretEnvironmentMap,
-
-                    [Parameter(Mandatory)]
-                    [string]$Executable,
-
-                    [Parameter()]
-                    [AllowEmptyCollection()]
-                    [string[]]$ArgumentList = @(),
-
-                    [Parameter(Mandatory)]
-                    [ref]$ExitCode
-                )
-
-                $null = @($SecretEnvironmentMap, $Executable)
-                $script:DefaultWrapperArguments = [string[]]$ArgumentList
-                Write-Host 'fake native child output'
-                $ExitCode.Value = 0
+    It 'builds <name> from the working tree with its fixed build steps' -ForEach @(
+        @{ name = 'Batch'; package = 'harvester_batch'; frontend = $false }
+        @{ name = 'Ui'; package = 'harvester_ui'; frontend = $true }
+    ) {
+        $root = Join-Path $TestDrive 'working tree'
+        $spec = New-TestLaunchSpec $name $root
+        InModuleScope HarvesterLaunch -Parameters @{ Spec = $spec; Package = $package; Frontend = $frontend } {
+            param($Spec, $Package, $Frontend)
+            $calls = [System.Collections.Generic.List[object]]::new()
+            $runner = {
+                param($Command, $Arguments, $WorkingDirectory)
+                $calls.Add(@{ Command = $Command; Arguments = $Arguments; Directory = $WorkingDirectory })
+                0
+            }.GetNewClosure()
+            Invoke-DefaultHarvesterBuild -Spec $Spec -ProcessRunner $runner
+            if ($Frontend) {
+                $calls.Count | Should -Be 2
+                $calls[0].Command | Should -BeExactly 'npm'
+                ($calls[0].Arguments -join ' ') | Should -BeExactly 'run build'
+                $calls[0].Directory | Should -BeExactly (Join-Path $Spec.RepositoryRoot 'frontend')
             }
-
-            try {
-                $code = 1
-                $output = @(
-                    Invoke-DefaultHarvesterSecret `
-                        -SecretEnvironmentMap ([ordered]@{ DummySecret = 'DUMMY_ENVIRONMENT_NAME' }) `
-                        -Executable 'dummy.exe' `
-                        -ArgumentList @() `
-                        -ExitCode ([ref]$code)
-                )
-
-                $code | Should -Be 0
-                @($script:DefaultWrapperArguments).Count | Should -Be 0
-                $output.Count | Should -Be 0
+            else {
+                $calls.Count | Should -Be 1
             }
-            finally {
-                Remove-Item -LiteralPath Function:Invoke-WithSecretMap -ErrorAction SilentlyContinue
+            $calls[-1].Command | Should -BeExactly 'cargo'
+            ($calls[-1].Arguments -join ' ') | Should -BeExactly "build -p $Package"
+            $calls[-1].Directory | Should -BeExactly $Spec.RepositoryRoot
+        }
+    }
+
+    It 'starts the fixed child directly and forwards its exit code' {
+        $spec = New-TestLaunchSpec Batch (Join-Path $TestDrive 'working tree')
+        $shimDirectory = Join-Path $TestDrive 'mocked-build-bin'
+        New-Item -ItemType Directory -Path $shimDirectory -Force | Out-Null
+        $cargoShim = Join-Path $shimDirectory 'cargo.cmd'
+        Set-Content -LiteralPath $cargoShim -Value @('@echo off', 'exit /b 1')
+        $code = -1
+        $cwd = (Get-Location).Path
+        Mock -ModuleName HarvesterLaunch Set-HarvesterLaunchUtf8ProcessEncoding {}
+        Mock -ModuleName HarvesterLaunch Invoke-DefaultHarvesterBuild {}
+        Mock -ModuleName HarvesterLaunch Invoke-DefaultHarvesterChild {
+            [pscustomobject]@{ Exe = $Executable; Args = $ArgumentList; WorkingDirectory = (Get-Location).Path }
+            $ExitCode.Value = 17
+        }
+        $exitCode = [ref]$code
+        $output = @(Invoke-WithTestCargo -ShimPath $cargoShim -Action {
+            Invoke-HarvesterLaunch -Spec $spec -ExitCode $exitCode -EnvironmentVariableProbe {}
+        })
+        $output.Count | Should -Be 1
+        $output[0].Exe | Should -BeExactly $spec.ExecutablePath
+        $output[0].Args.Count | Should -Be 1
+        $output[0].Args[0] | Should -BeExactly '--use-stored-keys'
+        $output[0].WorkingDirectory | Should -BeExactly $spec.RepositoryRoot
+        $code | Should -Be 17
+        (Get-Location).Path | Should -BeExactly $cwd
+        Should -Invoke -ModuleName HarvesterLaunch Set-HarvesterLaunchUtf8ProcessEncoding -Times 1 -Exactly
+        Should -Invoke -ModuleName HarvesterLaunch Invoke-DefaultHarvesterBuild -Times 1 -Exactly
+        Should -Invoke -ModuleName HarvesterLaunch Invoke-DefaultHarvesterChild -Times 1 -Exactly
+    }
+
+    It 'leaves the process environment unchanged during and after the child launch' {
+        $spec = New-TestLaunchSpec Batch (Join-Path $TestDrive 'working tree')
+        $code = -1
+        Mock -ModuleName HarvesterLaunch Set-HarvesterLaunchUtf8ProcessEncoding {}
+        Mock -ModuleName HarvesterLaunch Invoke-DefaultHarvesterChild {
+            $ExitCode.Value = 0
+            [System.Environment]::GetEnvironmentVariables('Process')
+        }
+        $before = [System.Environment]::GetEnvironmentVariables('Process')
+        $during = Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) -BuildInvoker {} -EnvironmentVariableProbe {}
+        $after = [System.Environment]::GetEnvironmentVariables('Process')
+
+        $code | Should -Be 0
+        foreach ($snapshot in @($during, $after)) {
+            $snapshot.Count | Should -Be $before.Count
+            foreach ($name in $before.Keys) {
+                $snapshot.Contains($name) | Should -BeTrue -Because "$name should still be present"
+                [string]::Equals($snapshot[$name], $before[$name], [StringComparison]::Ordinal) |
+                    Should -BeTrue -Because "$name should retain its original value"
             }
         }
     }
 
-    It 'uses exactly the two UI secret mappings and no runtime arguments' {
-        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
-        $calls = New-Calls
-        $code = 1
-
-        Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) `
-            -BuildInvoker (New-BuildFake -Spec $spec -Calls $calls) `
-            -SecretInvoker (New-SecretFake -Calls $calls) `
-            -PromptCheck { $true } `
-            -EnvironmentVariableProbe (New-EnvironmentVariableProbe -Values @{})
-
-        @($calls.BuildPackages) | Should -Be @('harvester_ui')
-        @($calls.SecretMap.Keys) | Should -Be @('BraveSearchApiKey', 'OpenAIProductionKey')
-        @($calls.SecretMap.Values) | Should -Be @('BRAVE_SEARCH_API_KEY', 'OPENAI_API_KEY')
-        @($calls.Arguments).Count | Should -Be 0
-    }
-
-    It 'uses exactly the two batch secret mappings and fixed argument order' {
-        $spec = Get-HarvesterLaunchSpec -Name Batch -RepositoryRoot $script:TestRoot
-        $calls = New-Calls
-        $code = 1
-
-        Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) `
-            -BuildInvoker (New-BuildFake -Spec $spec -Calls $calls) `
-            -SecretInvoker (New-SecretFake -Calls $calls) `
-            -PromptCheck { $true } `
-            -EnvironmentVariableProbe (New-EnvironmentVariableProbe -Values @{})
-
-        @($calls.BuildPackages) | Should -Be @('harvester_batch')
-        @($calls.SecretMap.Keys) | Should -Be @('BraveSearchApiKey', 'OpenAIProductionKey')
-        @($calls.SecretMap.Values) | Should -Be @('BRAVE_SEARCH_API_KEY', 'OPENAI_API_KEY')
-        @($calls.Arguments).Count | Should -Be 0
-    }
-
-    It 'does not select forbidden secrets or inject any other environment variable' {
-        foreach ($name in @('Ui', 'Batch')) {
-            $spec = Get-HarvesterLaunchSpec -Name $name -RepositoryRoot $script:TestRoot
-            @($spec.SecretEnvironmentMap.Keys) | Should -Not -Contain 'DeepSeekProductionKey'
-            @($spec.SecretEnvironmentMap.Keys) | Should -Not -Contain 'MoonshotApiKey'
-            @($spec.SecretEnvironmentMap.Keys) | Should -Not -Contain 'TEST_SECRET'
-            @($spec.SecretEnvironmentMap.Values) | Should -BeIn @('BRAVE_SEARCH_API_KEY', 'OPENAI_API_KEY')
+    It 'binds an empty argument list for the default child' {
+        $child = Join-Path $TestDrive 'no-arguments.cmd'
+        Set-Content -LiteralPath $child -Value @('@echo off', 'if not "%~1"=="" exit /b 1', 'exit /b 23')
+        InModuleScope HarvesterLaunch -Parameters @{ Child = $child } {
+            param($Child)
+            $code = -1
+            Invoke-DefaultHarvesterChild -Executable $Child -ArgumentList @() -ExitCode ([ref]$code)
+            $code | Should -Be 23
         }
     }
 
-    It 'stops after a build failure without invoking secrets' {
-        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
-        $calls = New-Calls
-        $code = 1
+    It 'launches without the helpers in a non-interactive PowerShell session' {
+        $exe = Join-Path $PSHOME 'pwsh.exe'
+        $child = Join-Path $TestDrive 'fake child.ps1'
+        $harness = Join-Path $TestDrive 'invoke module.ps1'
+        Set-Content -LiteralPath $child -Value '@($args) -join "|"; exit 19'
+        Set-Content -LiteralPath $harness -Value @'
+param([string]$ModulePath, [string]$Root, [string]$Child)
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $true
+Import-Module -Name $ModulePath -Force
+$spec = Get-HarvesterLaunchSpec -Name Batch -RepositoryRoot $Root
+$spec.ExecutablePath = Join-Path $PSHOME 'pwsh.exe'
+$spec.RuntimeArguments = @('-NoProfile', '-NonInteractive', '-File', $Child, '--use-stored-keys')
+$code = -1
+Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) -BuildInvoker {} -EnvironmentVariableProbe {}
+exit $code
+'@
+        $PSNativeCommandUseErrorActionPreference = $false
+        $output = @(& $exe -NoProfile -NonInteractive -File $harness $modulePath $TestDrive $child)
+        $code = $LASTEXITCODE
+        $code | Should -Be 19
+        $output.Count | Should -Be 1
+        $output[0] | Should -BeExactly '--use-stored-keys'
+    }
 
+    It 'throws on build failure before starting a child and restores the working directory' {
+        $spec = New-TestLaunchSpec Batch (Join-Path $TestDrive 'failing build')
+        $cwd = (Get-Location).Path
+        Mock -ModuleName HarvesterLaunch Set-HarvesterLaunchUtf8ProcessEncoding {}
+        Mock -ModuleName HarvesterLaunch Invoke-DefaultHarvesterChild {}
         {
-            Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) `
-                -BuildInvoker (New-BuildFake -Spec $spec -Calls $calls -Fail) `
-                -SecretInvoker (New-SecretFake -Calls $calls) `
-                -PromptCheck { $true } `
-                -EnvironmentVariableProbe (New-EnvironmentVariableProbe -Values @{})
-        } | Should -Throw '*fake build failed*'
-
-        $calls.SecretInvocations | Should -Be 0
+            $code = -1
+            $params = @{ Spec = $spec; ExitCode = [ref]$code; EnvironmentVariableProbe = {}; BuildInvoker = { throw 'build failed' } }
+            Invoke-HarvesterLaunch @params
+        } | Should -Throw '*build failed*'
+        Should -Invoke -ModuleName HarvesterLaunch Invoke-DefaultHarvesterChild -Times 0 -Exactly
+        (Get-Location).Path | Should -BeExactly $cwd
     }
 
-    It 'warns and continues for a key set persistently for the Windows user account' {
-        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
-        $spec.SecretEnvironmentMap = [ordered]@{ DummySecret = 'HARVESTER_TEST_PARENT_KEY' }
-        $calls = New-Calls
-        $probe = New-EnvironmentVariableProbe -Values @{
-            'HARVESTER_TEST_PARENT_KEY|Process' = 'dummy-test-value'
-            'HARVESTER_TEST_PARENT_KEY|User'    = 'dummy-test-value'
-        }
-        $code = 1
-
-        Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) `
-            -BuildInvoker (New-BuildFake -Spec $spec -Calls $calls) `
-            -SecretInvoker (New-SecretFake -Calls $calls) `
-            -PromptCheck { $true } `
-            -EnvironmentVariableProbe $probe `
-            -WarningVariable warnings
-
-        $calls.BuildPackages.Count | Should -Be 1
-        $calls.SecretInvocations | Should -Be 1
-        @($warnings).Count | Should -Be 1
-        $warnings[0].Message | Should -BeLike '*HARVESTER_TEST_PARENT_KEY*persistently for the Windows user account*cargo build and the child process will inherit it*current session environment*NullString*Permanent removal*secondary option*'
+    It 'warns once for an ignored key when present in <scope>' -ForEach @(
+        @{ scope = 'User'; targets = @('User'); key = 'OPENAI_API_KEY' }
+        @{ scope = 'Machine'; targets = @('Machine'); key = 'BRAVE_SEARCH_API_KEY' }
+        @{ scope = 'Process'; targets = @('Process'); key = 'OPENAI_API_KEY' }
+        @{ scope = 'all scopes'; targets = @('Process', 'User', 'Machine'); key = 'BRAVE_SEARCH_API_KEY' }
+    ) {
+        $spec = New-TestLaunchSpec Batch $TestDrive
+        $probe = {
+            param($Name, $Target)
+            if ($Name -eq $key -and [string]$Target -in $targets) { 'fake-secret-value' }
+        }.GetNewClosure()
+        Mock -ModuleName HarvesterLaunch Set-HarvesterLaunchUtf8ProcessEncoding {}
+        Mock -ModuleName HarvesterLaunch Invoke-DefaultHarvesterChild {}
+        $code = -1
+        $params = @{ Spec = $spec; ExitCode = [ref]$code; BuildInvoker = {}; EnvironmentVariableProbe = $probe }
+        $warnings = @(Invoke-HarvesterLaunch @params 3>&1)
+        $warnings.Count | Should -Be 1
+        $warnings[0].Message | Should -Match "$key.*ignor"
+        $warnings[0].Message | Should -Match 'remov.*no other application needs it'
+        $warnings[0].Message | Should -Not -Match 'fake-secret-value'
     }
 
-    It 'warns and continues for a key set only in the current session' {
-        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
-        $spec.SecretEnvironmentMap = [ordered]@{ DummySecret = 'HARVESTER_TEST_PARENT_KEY' }
-        $calls = New-Calls
-        $probe = New-EnvironmentVariableProbe -Values @{
-            'HARVESTER_TEST_PARENT_KEY|Process' = 'dummy-test-value'
-        }
-        $code = 1
-
-        Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) `
-            -BuildInvoker (New-BuildFake -Spec $spec -Calls $calls) `
-            -SecretInvoker (New-SecretFake -Calls $calls) `
-            -PromptCheck { $true } `
-            -EnvironmentVariableProbe $probe `
-            -WarningVariable warnings
-
-        $calls.BuildPackages.Count | Should -Be 1
-        $calls.SecretInvocations | Should -Be 1
-        @($warnings).Count | Should -Be 1
-        $warnings[0].Message | Should -BeLike '*HARVESTER_TEST_PARENT_KEY*only in the current session*cargo build and the child process will inherit it*Lock-Secrets*NullString*'
+    It 'does not warn for empty or whitespace key variables' {
+        $spec = New-TestLaunchSpec Ui $TestDrive
+        Mock -ModuleName HarvesterLaunch Set-HarvesterLaunchUtf8ProcessEncoding {}
+        Mock -ModuleName HarvesterLaunch Invoke-DefaultHarvesterChild {}
+        $code = -1
+        $probe = { param($Name, $Target) if ($Name -eq 'BRAVE_SEARCH_API_KEY') { ' ' } else { '' } }
+        $params = @{ Spec = $spec; ExitCode = [ref]$code; BuildInvoker = {}; EnvironmentVariableProbe = $probe }
+        $warnings = @(Invoke-HarvesterLaunch @params 3>&1)
+        $warnings.Count | Should -Be 0
     }
 
-    It 'does not warn or block for a blank parent variable' {
-        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
-        $spec.SecretEnvironmentMap = [ordered]@{ DummySecret = 'HARVESTER_TEST_PARENT_KEY' }
-        $calls = New-Calls
-        $probe = New-EnvironmentVariableProbe -Values @{
-            'HARVESTER_TEST_PARENT_KEY|Process' = ''
-            'HARVESTER_TEST_PARENT_KEY|User'    = 'dummy-test-value'
-        }
-        $code = 1
-
-        Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) `
-            -BuildInvoker (New-BuildFake -Spec $spec -Calls $calls) `
-            -SecretInvoker (New-SecretFake -Calls $calls) `
-            -PromptCheck { $true } `
-            -EnvironmentVariableProbe $probe `
-            -WarningVariable warnings
-
-        $calls.BuildPackages.Count | Should -Be 1
-        $calls.SecretInvocations | Should -Be 1
-        @($warnings).Count | Should -Be 0
-    }
-
-    It 'puts the child exit code in the ref and emits no success-stream output' {
-        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
-        $calls = New-Calls
-        $code = 1
-        $output = @(
-            Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) `
-                -BuildInvoker (New-BuildFake -Spec $spec -Calls $calls) `
-                -SecretInvoker (New-SecretFake -Calls $calls -ReportedExitCode 3) `
-                -PromptCheck { $true } `
-                -EnvironmentVariableProbe (New-EnvironmentVariableProbe -Values @{})
-        )
-
-        $code | Should -Be 3
-        $code.GetType().Name | Should -Be 'Int32'
-        $output.Count | Should -Be 0
-    }
-
-    It 'keeps a repository root containing spaces as one executable path argument' {
-        $spec = Get-HarvesterLaunchSpec -Name Batch -RepositoryRoot $script:TestRoot
-        $calls = New-Calls
-        $code = 1
-
-        Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) `
-            -BuildInvoker (New-BuildFake -Spec $spec -Calls $calls) `
-            -SecretInvoker (New-SecretFake -Calls $calls) `
-            -PromptCheck { $true } `
-            -EnvironmentVariableProbe (New-EnvironmentVariableProbe -Values @{})
-
-        $calls.Executable | Should -Be (Join-Path $script:TestRoot 'target\debug\harvester_batch.exe')
-        $calls.Executable | Should -BeOfType [string]
-        @($calls.Arguments).Count | Should -Be 0
-    }
-
-    It 'restores the working directory after a successful launch' {
-        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
-        $calls = New-Calls
-        $before = (Get-Location).Path
-        $code = 1
-
-        Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) `
-            -BuildInvoker (New-BuildFake -Spec $spec -Calls $calls) `
-            -SecretInvoker (New-SecretFake -Calls $calls) `
-            -PromptCheck { $true } `
-            -EnvironmentVariableProbe (New-EnvironmentVariableProbe -Values @{})
-
-        (Get-Location).Path | Should -Be $before
-    }
-
-    It 'restores the working directory after a failed launch' {
-        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
-        $calls = New-Calls
-        $before = (Get-Location).Path
-        $code = 1
-
-        {
-            Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) `
-                -BuildInvoker (New-BuildFake -Spec $spec -Calls $calls -Fail) `
-                -SecretInvoker (New-SecretFake -Calls $calls) `
-                -PromptCheck { $true } `
-                -EnvironmentVariableProbe (New-EnvironmentVariableProbe -Values @{})
-        } | Should -Throw '*fake build failed*'
-
-        (Get-Location).Path | Should -Be $before
-    }
-
-    It 'fails fast in a non-interactive session before building' {
-        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
-        $calls = New-Calls
-        $code = 1
-
-        {
-            Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) `
-                -BuildInvoker (New-BuildFake -Spec $spec -Calls $calls) `
-                -SecretInvoker (New-SecretFake -Calls $calls) `
-                -PromptCheck { $false } `
-                -EnvironmentVariableProbe (New-EnvironmentVariableProbe -Values @{})
-        } | Should -Throw '*non-interactive*'
-
-        $calls.BuildPackages.Count | Should -Be 0
-    }
-
-    It 'reports the missing secret helper and does not build' {
-        $script:CommandsAvailable = $false
-        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
-        $calls = New-Calls
-        $code = 1
-
-        {
-            Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) `
-                -BuildInvoker (New-BuildFake -Spec $spec -Calls $calls) `
-                -SecretInvoker (New-SecretFake -Calls $calls) `
-                -PromptCheck { $true } `
-                -EnvironmentVariableProbe (New-EnvironmentVariableProbe -Values @{})
-        } | Should -Throw '*Invoke-WithSecretMap*load your PowerShell profile*'
-
-        $calls.BuildPackages.Count | Should -Be 0
+    It 'does not require an interactive or vault helper in module source' {
+        $source = Get-Content -LiteralPath $modulePath -Raw
+        $source | Should -Not -Match 'SecretStore|Invoke-WithSecretMap|UserInteractive|NonInteractive'
     }
 }
 

@@ -2,6 +2,7 @@
 
 use engine_logging::{engine_error, engine_info};
 use harvester_batch::Args;
+use harvester_io::credentials::StoredKeyAccess;
 use std::fs::File;
 use std::process;
 
@@ -14,7 +15,8 @@ fn main() {
     // Batch mode is file-only to keep stderr/stdout clean during scheduled runs.
     engine_logging::initialize_file_only();
 
-    let exit_code = match harvester_batch::run(args) {
+    let stored_keys = StoredKeyAccess::from_launch_flag(args.use_stored_keys);
+    let exit_code = match harvester_batch::run(args, stored_keys) {
         Ok(code) => code,
         Err(err) => {
             engine_error!("[batch] Fatal error: {}", err);

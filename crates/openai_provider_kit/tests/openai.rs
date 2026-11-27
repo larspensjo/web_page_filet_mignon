@@ -1,14 +1,9 @@
-use std::env;
-use std::sync::Mutex;
-
 use openai_provider_kit::{
     ChatMessage, ChatRole, FinishReason, LlmError, LlmProvider, LlmRequest, ModelId,
     OpenAiProvider, ProviderKind,
 };
 use wiremock::matchers::{header as header_matcher, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
-
-static OPENAI_API_KEY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 async fn response_with_headers(headers: &[(&str, &str)]) -> openai_provider_kit::LlmResponse {
     let server = MockServer::start().await;
@@ -135,24 +130,6 @@ fn response_constructor_and_old_serialized_response_remain_compatible() {
     );
 }
 
-struct SavedApiKey(Option<std::ffi::OsString>);
-
-impl SavedApiKey {
-    fn capture() -> Self {
-        Self(env::var_os("OPENAI_API_KEY"))
-    }
-}
-
-impl Drop for SavedApiKey {
-    fn drop(&mut self) {
-        if let Some(value) = self.0.take() {
-            env::set_var("OPENAI_API_KEY", value);
-        } else {
-            env::remove_var("OPENAI_API_KEY");
-        }
-    }
-}
-
 fn sample_request() -> LlmRequest {
     LlmRequest::new(
         ModelId::new(ProviderKind::OpenAi, "gpt-4.1"),
@@ -161,36 +138,6 @@ fn sample_request() -> LlmRequest {
             ChatMessage::new(ChatRole::User, "user prompt"),
         ],
     )
-}
-
-#[test]
-fn from_env_missing_key_returns_configuration_error() {
-    let _guard = OPENAI_API_KEY_TEST_LOCK
-        .lock()
-        .expect("environment test lock");
-    let _saved_key = SavedApiKey::capture();
-    env::remove_var("OPENAI_API_KEY");
-
-    match OpenAiProvider::from_env() {
-        Err(LlmError::Configuration { detail }) if detail.contains("OPENAI_API_KEY missing") => {}
-        Err(other) => panic!("unexpected error variant: {other:?}"),
-        Ok(_) => panic!("expected configuration error"),
-    }
-}
-
-#[test]
-fn from_env_rejects_empty_or_whitespace_key() {
-    let _guard = OPENAI_API_KEY_TEST_LOCK
-        .lock()
-        .expect("environment test lock");
-    let _saved_key = SavedApiKey::capture();
-    env::set_var("OPENAI_API_KEY", " \t ");
-
-    match OpenAiProvider::from_env() {
-        Err(LlmError::Configuration { detail }) if detail.contains("OPENAI_API_KEY is empty") => {}
-        Err(other) => panic!("unexpected error variant: {other:?}"),
-        Ok(_) => panic!("expected configuration error"),
-    }
 }
 
 #[tokio::test]
@@ -277,22 +224,6 @@ async fn network_error_from_completion_maps_to_network_variant() {
 }
 
 #[tokio::test]
-#[ignore]
-async fn live_openai_completion() {
-    let _key =
-        std::env::var("OPENAI_API_KEY").expect("set OPENAI_API_KEY to run live OpenAI check");
-    let provider =
-        OpenAiProvider::from_env().expect("provider should initialize when key is present");
-    let response = provider
-        .complete(&sample_request().with_max_output_tokens(16))
-        .await
-        .expect("live completion must succeed");
-
-    assert!(!response.content().trim().is_empty());
-    assert!(matches!(response.finish_reason(), FinishReason::Stop));
-}
-
-#[tokio::test]
 async fn list_models_filters_supported_rolling_chat_categories() {
     let server = MockServer::start().await;
 
@@ -336,5 +267,62 @@ async fn list_models_filters_supported_rolling_chat_categories() {
             "o3-synthetic-mini".to_string(),
             "o4-synthetic-general".to_string(),
         ]
+    );
+}
+
+#[tokio::test]
+async fn echoed_authentication_and_http_errors_never_expose_the_key() {
+    const KEY: &str = "synthetic-openai-echo-sentinel";
+    let server = MockServer::start().await;
+    let echo = format!("upstream echoed {KEY} twice: {KEY}");
+    Mock::given(method("POST"))
+        .and(path("/unauthorized/chat/completions"))
+        .respond_with(ResponseTemplate::new(401).set_body_string(&echo))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/bad-request/chat/completions"))
+        .respond_with(ResponseTemplate::new(400).set_body_string(&echo))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/bad-request/models"))
+        .respond_with(ResponseTemplate::new(400).set_body_string(&echo))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/quota/chat/completions"))
+        .respond_with(ResponseTemplate::new(429).set_body_json(serde_json::json!({
+            "error": { "code": "insufficient_quota", "message": echo }
+        })))
+        .mount(&server)
+        .await;
+
+    let auth_error = OpenAiProvider::new(KEY.into())
+        .with_base_url(format!("{}/unauthorized", server.uri()))
+        .complete(&sample_request())
+        .await
+        .unwrap_err();
+    assert!(matches!(auth_error, LlmError::AuthenticationFailed));
+    let provider =
+        OpenAiProvider::new(KEY.into()).with_base_url(format!("{}/bad-request", server.uri()));
+    let chat_error = provider.complete(&sample_request()).await.unwrap_err();
+    let models_error = provider.list_models().await.unwrap_err();
+    let quota_error = OpenAiProvider::new(KEY.into())
+        .with_base_url(format!("{}/quota", server.uri()))
+        .complete(&sample_request())
+        .await
+        .unwrap_err();
+    for error in [&auth_error, &chat_error, &models_error, &quota_error] {
+        assert!(!format!("{error:?}").contains(KEY));
+        assert!(!error.to_string().contains(KEY));
+    }
+    for error in [chat_error, models_error] {
+        assert!(matches!(error, LlmError::Http { status: 400, body }
+            if body == "upstream echoed <redacted> twice: <redacted>"));
+    }
+    assert!(
+        matches!(quota_error, LlmError::QuotaExhausted { description }
+        if description == "upstream echoed <redacted> twice: <redacted>")
     );
 }

@@ -9,6 +9,9 @@ const MAX_LLM_CONCURRENCY: usize = harvester_engine::llm::MAX_LLM_CONCURRENT_REQ
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
+    #[arg(long, hide = true)]
+    pub use_stored_keys: bool,
+
     /// Path to sources configuration file (defaults to <output-dir>/.sources.ron)
     #[arg(long, value_name = "PATH")]
     pub sources: Option<PathBuf>,

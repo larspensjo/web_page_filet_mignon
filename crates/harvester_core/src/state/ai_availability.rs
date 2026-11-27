@@ -80,7 +80,9 @@ impl AppState {
             Some(AiUnavailableReason::ResultStoreUnavailable) => {
                 Some("saved results store unavailable")
             }
-            Some(AiUnavailableReason::MissingApiKey) => Some("OPENAI_API_KEY is not set"),
+            Some(AiUnavailableReason::MissingApiKey) => {
+                Some("OpenAI key is unavailable (Harvester/OpenAI)")
+            }
             Some(AiUnavailableReason::NoTriageModel) => Some("no triage model is available"),
             None => None,
         }

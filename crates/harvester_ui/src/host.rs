@@ -13,9 +13,10 @@ use harvester_core::{
 use harvester_engine::llm::{ModelId, ProviderKind, OPENAI_MODEL_GPT_5_4_NANO};
 use harvester_io::{
     acquire_lock,
+    credentials::{read_host_keys, StoredKeyAccess, StoredKeyReads},
     host_bootstrap::{
         build_effect_runner, llm_max_concurrency_requests_from_env, prepare_desktop_startup_state,
-        HostLlmDefaults,
+        read_startup_key_outcomes, HostKeys, HostLlmDefaults,
     },
     load_desktop_window_size, EffectRunner, PersistenceWorker, PlatformEffectHandler, RuntimePaths,
     DESKTOP_LOCK_IDENTITY,
@@ -218,11 +219,12 @@ fn probe_report(
     }
 }
 
-pub fn run(probe: bool) -> Result<(), String> {
+pub fn run(probe: bool, stored_keys: Option<StoredKeyAccess>) -> Result<(), String> {
     let root = repository_root();
     initialize_logging(&root);
     let paths = runtime_paths(&root);
     if probe {
+        engine_info!("[credentials] stored keys not requested");
         let _lock = acquire_lock(&paths.output_dir, DESKTOP_LOCK_IDENTITY, false)?;
         return run_probe(root);
     }
@@ -251,7 +253,8 @@ pub fn run(probe: bool) -> Result<(), String> {
         running: Arc::new(AtomicBool::new(true)),
         probe_data: None,
     };
-    let (app_state, effect_runner) = prepare_state(&paths, &sender)?;
+    let keys = read_startup_keys(stored_keys.as_ref(), read_host_keys);
+    let (app_state, effect_runner) = prepare_state(&paths, &sender, keys)?;
     let run_state = state.clone();
     let builder = tauri::Builder::default()
         .manage(state.clone())
@@ -757,9 +760,17 @@ fn finish_probe(host: &HostState, samples: Vec<harvester_ui_bridge::probe::Probe
     std::process::exit(if report.passed { 0 } else { 1 });
 }
 
+fn read_startup_keys(
+    access: Option<&StoredKeyAccess>,
+    reader: impl FnOnce(&StoredKeyAccess) -> StoredKeyReads,
+) -> HostKeys {
+    read_startup_key_outcomes(access, reader).into()
+}
+
 fn prepare_state(
     paths: &RuntimePaths,
     sender: &mpsc::Sender<Msg>,
+    keys: HostKeys,
 ) -> Result<(AppState, EffectRunner), String> {
     let state = AppState::new();
     let defaults = HostLlmDefaults {
@@ -777,8 +788,8 @@ fn prepare_state(
             paths.state_path.clone(),
             paths.blacklist_path.clone(),
         )),
-        "OPENAI_API_KEY not set; LLM features disabled",
-        Some("OPENAI_API_KEY is empty; LLM features disabled"),
+        keys,
+        "LLM features disabled",
     )?;
     let (state, effects) =
         prepare_desktop_startup_state(state, paths, llm_concurrency, Some(availability), limits);
@@ -920,6 +931,22 @@ fn initialize_logging(root: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn desktop_without_launch_flag_makes_zero_credential_reads() {
+        use harvester_io::credentials::KeyReadOutcome;
+        let reads = std::cell::Cell::new(0);
+        let keys = read_startup_keys(None, |_| {
+            reads.set(reads.get() + 1);
+            StoredKeyReads {
+                openai: KeyReadOutcome::NotFound,
+                brave: KeyReadOutcome::NotFound,
+            }
+        });
+        assert_eq!(reads.get(), 0);
+        assert!(keys.brave.is_none());
+        assert!(matches!(keys.openai, KeyReadOutcome::NotRequested));
+    }
 
     fn main_thread_result_deadline() -> Instant {
         Instant::now() + Duration::from_secs(1)

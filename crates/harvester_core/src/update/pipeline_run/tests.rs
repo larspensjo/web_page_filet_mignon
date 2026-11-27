@@ -737,7 +737,7 @@ fn desktop_run_actions_follow_lifecycle_unfinished_work_and_ai_availability() {
     assert!(!unavailable.view().resume_enabled);
     assert_eq!(
         unavailable.view().resume_disabled_reason.as_deref(),
-        Some("AI features unavailable: OPENAI_API_KEY is not set")
+        Some("AI features unavailable: OpenAI key is unavailable (Harvester/OpenAI)")
     );
 
     let (complete, articles) = prepare_pipeline(1, 0);

@@ -10,6 +10,26 @@ This document describes the overall system shape, centered on a unidirectional d
 3. Effects perform all I/O and return results as new messages.
 4. Views render read-only snapshots of state.
 
+### Host credentials and Brave sources
+
+The fixed launch policies build the working tree and pass the hidden
+`--use-stored-keys` flag. At runtime startup, each host derives a `StoredKeyAccess`
+proof from the flag. `harvester_io::credentials` requires the proof to read the
+generic entries `Harvester/OpenAI` and `Harvester/BraveSearch` from Windows
+Credential Manager once each. Without the proof the host records that stored
+keys were not requested. The batch reports the entry status on stdout. The
+shared bootstrap configures OpenAI from the read result. Both hosts apply AI
+availability through a reducer message. The Brave key stays with the effect
+runner for all polls in the process.
+
+Every Brave source uses `Harvester/BraveSearch`. The registry accepts a legacy
+`api_key_env` as a bare string, `Some`, `None`, or an omitted field. It retains
+only whether a string was present. The loader reports the corresponding source
+IDs and the poll worker logs them together once per poll-all. A missing Brave
+key emits `SourcePollFailed` only for Brave sources due for a search. Recently
+searched sources still report `SourcePollSkipped`, and other sources continue
+polling.
+
 ### Run timing
 
 Both hosts observe each reducer result through a shared `RunTimeline` in
@@ -41,7 +61,7 @@ the run's first preparation read and model dispatch, then stays fixed. Hydration
 discovers unfinished work without admitting scoring. Import completion uses Resume
 to process the current window without starting another source poll.
 
-Brave sources are searched at most once per 20 hours, because Brave bills per request.
+Brave bills per request, so a configured Brave source is searched at most once per 20 hours.
 The poll worker records each source's last search Brave accepted in
 `.brave_search_log.ron` and reports a source searched more recently as
 `SourcePollSkipped` with the age; that counts as scanned, not failed, and appears as
@@ -63,8 +83,7 @@ counts admitted pending and in-flight work plus intake refresh demand, loads and
 processing preparation. A run becomes Terminal exactly once after intake closes
 and activity settles. Hosts pump `PipelineRunAdvance` while their dispatch loops
 run. A Full or Resume run arms model work only when AI is available; an unarmed
-Full run still polls and becomes Terminal after intake settles. Batch and import
-hosts mark a missing or empty API key unavailable before requesting a run.
+Full run still polls and becomes Terminal after intake settles. Hosts mark AI unavailable before requesting a run if the OpenAI key cannot be used.
 The command-line host performs one Full cycle (poll, download, process, exit).
 Browser-page import starts Resume after importing; checkpoint commands remain
 separate operations. The command-line and import loops use a 60-second monotonic

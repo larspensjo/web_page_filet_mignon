@@ -4,7 +4,7 @@ Small Rust client abstraction for OpenAI chat-style API calls.
 
 The crate currently focuses on Chat Completions-compatible requests. It owns the reusable OpenAI provider code, request and response types, model discovery, error mapping, and optional test support that used to live inside Harvester.
 
-The consuming application is responsible for obtaining and storing API keys. `OpenAiProvider::new(api_key)` accepts an API key string directly. `OpenAiProvider::from_env()` is only a convenience helper for applications that already use `OPENAI_API_KEY`.
+The consuming application is responsible for obtaining and storing API keys. `OpenAiProvider::new(api_key)` accepts an API key string directly. `OpenAiProvider::from_env()` is only a convenience helper for applications that already use `OPENAI_API_KEY`. The Harvester desktop and batch hosts use `new` with keys obtained from Windows Credential Manager.
 
 ## Installation
 
@@ -106,11 +106,10 @@ async fn main() {
 
 ## Testing
 
-Normal CI does not require a live OpenAI API key. Live tests remain ignored and should be run explicitly after setting `OPENAI_API_KEY`.
+Tests use synthetic credentials and local HTTP servers.
 
 ```powershell
 cargo test -p openai_provider_kit
-cargo test -p openai_provider_kit -- --ignored
 ```
 
 ## Minimum Supported Rust Version

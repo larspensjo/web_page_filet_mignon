@@ -12,9 +12,11 @@ use harvester_engine::{
     SourceId, SourceKind, UrlPolicy,
 };
 use reqwest::blocking::Client;
-use reqwest::header::ACCEPT;
+use reqwest::header::{HeaderValue, ACCEPT};
 use reqwest::redirect::Policy;
 use url::Url;
+
+use crate::credentials::{scrub, ApiKey};
 
 pub(crate) const MAX_FEED_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 pub(crate) const FEED_ACCEPT_HEADER: &str =
@@ -46,6 +48,7 @@ mod prompt_context_filename_tests {
 }
 
 pub struct BravePollContext<'a> {
+    pub api_key: Option<&'a ApiKey>,
     pub brave_seen_set: &'a mut BraveSeenSet,
     pub brave_seen_set_path: &'a Path,
     pub brave_metadata_path: &'a Path,
@@ -530,23 +533,6 @@ fn llm_error_reason(error: LlmCompletionError) -> String {
 pub(crate) const BRAVE_NEWS_API_URL: &str = "https://api.search.brave.com/res/v1/news/search";
 pub(crate) const MAX_BRAVE_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 
-pub fn fetch_brave_results(
-    query: &str,
-    api_key: &str,
-    count: Option<usize>,
-    freshness: Option<&str>,
-    fetch_settings: &FetchSettings,
-) -> Result<Vec<u8>, String> {
-    fetch_brave_results_with_url(
-        BRAVE_NEWS_API_URL,
-        query,
-        api_key,
-        count,
-        freshness,
-        fetch_settings,
-    )
-}
-
 /// Brave refusals name the account action a person can take, since every
 /// later source in the run fails the same way.
 fn brave_http_error(status: reqwest::StatusCode) -> String {
@@ -559,10 +545,36 @@ fn brave_http_error(status: reqwest::StatusCode) -> String {
     format!("Brave API HTTP {status} ({hint})")
 }
 
+fn brave_refusal(mut response: reqwest::blocking::Response, key: &ApiKey) -> String {
+    const MAX_ERROR_BYTES: u64 = 4096;
+    const MAX_DETAIL_CHARS: usize = 200;
+    let message = brave_http_error(response.status());
+    let mut body = Vec::new();
+    if response
+        .by_ref()
+        .take(MAX_ERROR_BYTES + 1)
+        .read_to_end(&mut body)
+        .is_err()
+        || body.len() as u64 > MAX_ERROR_BYTES
+    {
+        return message;
+    }
+    let detail = String::from_utf8_lossy(&body);
+    let scrubbed = scrub(&detail, key);
+    let single_line = scrubbed.split_whitespace().collect::<Vec<_>>().join(" ");
+    let excerpt: String = single_line.chars().take(MAX_DETAIL_CHARS).collect();
+    let detail = excerpt.trim_end();
+    if detail.is_empty() {
+        message
+    } else {
+        format!("{message}: {detail}")
+    }
+}
+
 pub(crate) fn fetch_brave_results_with_url(
     base_url: &str,
     query: &str,
-    api_key: &str,
+    api_key: &ApiKey,
     count: Option<usize>,
     freshness: Option<&str>,
     fetch_settings: &FetchSettings,
@@ -572,9 +584,9 @@ pub(crate) fn fetch_brave_results_with_url(
         .timeout(fetch_settings.request_timeout)
         .user_agent(fetch_settings.user_agent.clone())
         .build()
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| scrub(&err.to_string(), api_key))?;
 
-    let mut url = reqwest::Url::parse(base_url).map_err(|e| e.to_string())?;
+    let mut url = reqwest::Url::parse(base_url).map_err(|err| scrub(&err.to_string(), api_key))?;
     url.query_pairs_mut().append_pair("q", query);
     if let Some(c) = count {
         url.query_pairs_mut().append_pair("count", &c.to_string());
@@ -583,23 +595,27 @@ pub(crate) fn fetch_brave_results_with_url(
         url.query_pairs_mut().append_pair("freshness", f);
     }
 
+    let mut subscription_token =
+        HeaderValue::from_str(api_key.expose()).map_err(|err| scrub(&err.to_string(), api_key))?;
+    subscription_token.set_sensitive(true);
     let mut response = client
         .get(url)
-        .header("X-Subscription-Token", api_key)
+        .header("X-Subscription-Token", subscription_token)
         .header(ACCEPT, "application/json")
         .send()
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| scrub(&err.to_string(), api_key))?;
 
-    let status = response.status();
-    if !status.is_success() {
-        return Err(brave_http_error(status));
+    if !response.status().is_success() {
+        return Err(brave_refusal(response, api_key));
     }
 
     let mut buffer = Vec::new();
     let mut chunk = [0u8; 8192];
     let mut total = 0;
     loop {
-        let read = response.read(&mut chunk).map_err(|err| err.to_string())?;
+        let read = response
+            .read(&mut chunk)
+            .map_err(|err| scrub(&err.to_string(), api_key))?;
         if read == 0 {
             break;
         }
@@ -618,10 +634,28 @@ pub(crate) fn fetch_brave_results_with_url(
 
 /// Handle a single Brave News source poll.
 ///
-/// Flow: skip sources searched within the minimum interval, resolve the API
-/// key, fetch and record the accepted search, parse results, select unseen URLs
+/// Flow: require the startup key, skip sources searched within the minimum interval,
+/// fetch and record the accepted search, parse results, select unseen URLs
 /// up to the per-poll limit, persist seen state, then emit the selected URLs.
 pub fn handle_brave_source_poll(
+    source_id: &SourceId,
+    cfg: &harvester_engine::BraveNewsSourceConfig,
+    max_urls_per_poll: Option<usize>,
+    fetch_settings: &FetchSettings,
+    context: &mut BravePollContext,
+) {
+    handle_brave_source_poll_with_url(
+        BRAVE_NEWS_API_URL,
+        source_id,
+        cfg,
+        max_urls_per_poll,
+        fetch_settings,
+        context,
+    );
+}
+
+fn handle_brave_source_poll_with_url(
+    endpoint: &str,
     source_id: &SourceId,
     cfg: &harvester_engine::BraveNewsSourceConfig,
     max_urls_per_poll: Option<usize>,
@@ -647,37 +681,20 @@ pub fn handle_brave_source_poll(
             return;
         }
     }
-    let api_key = match std::env::var(&cfg.api_key_env) {
-        Ok(key) if !key.is_empty() => key,
-        Ok(_) => {
-            engine_warn!(
-                "[brave-poll] {} env var is empty for source {}",
-                cfg.api_key_env,
-                source_id
-            );
-            let _ = msg_tx.send(Msg::SourcePollFailed {
-                source_id: source_id.clone(),
-                error: format!("environment variable {} is empty", cfg.api_key_env),
-            });
-            return;
-        }
-        Err(_) => {
-            engine_warn!(
-                "[brave-poll] {} env var not set for source {}",
-                cfg.api_key_env,
-                source_id
-            );
-            let _ = msg_tx.send(Msg::SourcePollFailed {
-                source_id: source_id.clone(),
-                error: format!("environment variable {} is not set", cfg.api_key_env),
-            });
-            return;
-        }
+    let Some(api_key) = context.api_key else {
+        let entry = crate::credentials::CredentialEntry::BraveSearch.target_name();
+        let error = format!("Brave Search key not found in Credential Manager ({entry})");
+        engine_warn!("[brave-poll] {source_id} failed: {error}");
+        let _ = msg_tx.send(Msg::SourcePollFailed {
+            source_id: source_id.clone(),
+            error,
+        });
+        return;
     };
-
-    let bytes = match fetch_brave_results(
+    let bytes = match fetch_brave_results_with_url(
+        endpoint,
         &cfg.query,
-        &api_key,
+        api_key,
         cfg.count,
         cfg.freshness.as_deref(),
         fetch_settings,
@@ -759,10 +776,11 @@ pub fn handle_brave_source_poll(
             });
         }
         Err(err) => {
-            engine_warn!("[brave-poll] {} parse failed: {}", source_id, err);
+            let error = scrub(&err.to_string(), api_key);
+            engine_warn!("[brave-poll] {source_id} parse failed: {error}");
             let _ = msg_tx.send(Msg::SourcePollFailed {
                 source_id: source_id.clone(),
-                error: err.to_string(),
+                error,
             });
         }
     }
@@ -773,6 +791,10 @@ mod brave_fetch_tests {
     use super::*;
     use wiremock::matchers::{header, method, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn synthetic_key(value: &str) -> ApiKey {
+        ApiKey::from_trusted(value.to_owned())
+    }
 
     fn default_settings() -> FetchSettings {
         FetchSettings::default()
@@ -797,7 +819,7 @@ mod brave_fetch_tests {
             fetch_brave_results_with_url(
                 &uri,
                 "AI chips",
-                "test-key",
+                &synthetic_key("test-key"),
                 None,
                 None,
                 &default_settings(),
@@ -819,7 +841,14 @@ mod brave_fetch_tests {
 
         let uri = server.uri();
         let result = tokio::task::spawn_blocking(move || {
-            fetch_brave_results_with_url(&uri, "q", "key", Some(20), None, &default_settings())
+            fetch_brave_results_with_url(
+                &uri,
+                "q",
+                &synthetic_key("key"),
+                Some(20),
+                None,
+                &default_settings(),
+            )
         })
         .await
         .unwrap();
@@ -837,7 +866,14 @@ mod brave_fetch_tests {
 
         let uri = server.uri();
         let result = tokio::task::spawn_blocking(move || {
-            fetch_brave_results_with_url(&uri, "q", "key", None, Some("pd"), &default_settings())
+            fetch_brave_results_with_url(
+                &uri,
+                "q",
+                &synthetic_key("key"),
+                None,
+                Some("pd"),
+                &default_settings(),
+            )
         })
         .await
         .unwrap();
@@ -854,7 +890,14 @@ mod brave_fetch_tests {
 
         let uri = server.uri();
         let err = tokio::task::spawn_blocking(move || {
-            fetch_brave_results_with_url(&uri, "q", "key", None, None, &default_settings())
+            fetch_brave_results_with_url(
+                &uri,
+                "q",
+                &synthetic_key("key"),
+                None,
+                None,
+                &default_settings(),
+            )
         })
         .await
         .unwrap()
@@ -875,7 +918,14 @@ mod brave_fetch_tests {
 
         let uri = server.uri();
         let err = tokio::task::spawn_blocking(move || {
-            fetch_brave_results_with_url(&uri, "q", "key", None, None, &default_settings())
+            fetch_brave_results_with_url(
+                &uri,
+                "q",
+                &synthetic_key("key"),
+                None,
+                None,
+                &default_settings(),
+            )
         })
         .await
         .unwrap()
@@ -893,7 +943,14 @@ mod brave_fetch_tests {
 
         let uri = server.uri();
         let err = tokio::task::spawn_blocking(move || {
-            fetch_brave_results_with_url(&uri, "q", "key", None, None, &default_settings())
+            fetch_brave_results_with_url(
+                &uri,
+                "q",
+                &synthetic_key("key"),
+                None,
+                None,
+                &default_settings(),
+            )
         })
         .await
         .unwrap()
@@ -908,23 +965,23 @@ mod brave_fetch_tests {
         harvester_engine::SourceId::new("brave-test").unwrap()
     }
 
-    /// Polls one source whose API key variable is unset, so any search
-    /// attempt fails before reaching the network.
-    fn poll_without_key(
+    fn poll_brave(
         search_log: &mut BraveSearchLog,
         force_search: bool,
-    ) -> harvester_core::Msg {
-        use std::sync::mpsc;
+        api_key: Option<&crate::credentials::ApiKey>,
+        url: &str,
+    ) -> Msg {
         let (tx, rx) = mpsc::channel();
         let cfg = harvester_engine::BraveNewsSourceConfig {
             query: "test".to_string(),
-            api_key_env: "BRAVE_KEY_DEFINITELY_NOT_SET_XYZ".to_string(),
+            api_key_env: Default::default(),
             count: None,
             freshness: None,
         };
         let temp = tempfile::TempDir::new().unwrap();
         let mut seen_set = harvester_engine::BraveSeenSet::new();
         let mut context = BravePollContext {
+            api_key,
             brave_seen_set: &mut seen_set,
             brave_seen_set_path: &temp.path().join(".brave_seen_set.ron"),
             brave_metadata_path: &temp.path().join(".brave_metadata.ron"),
@@ -933,22 +990,89 @@ mod brave_fetch_tests {
             force_search,
             msg_tx: &tx,
         };
-        handle_brave_source_poll(
+        handle_brave_source_poll_with_url(
+            url,
             &brave_test_id(),
             &cfg,
             None,
-            &FetchSettings::default(),
+            &default_settings(),
             &mut context,
         );
         rx.try_recv().unwrap()
     }
 
+    fn poll_without_key(search_log: &mut BraveSearchLog, force_search: bool) -> Msg {
+        poll_brave(search_log, force_search, None, "http://127.0.0.1:1")
+    }
+
+    #[tokio::test]
+    async fn poll_sends_the_supplied_brave_key_in_the_request() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(header("X-Subscription-Token", "synthetic-brave-poll-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(br#"{"results":[]}"#))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let url = server.uri();
+        let message = tokio::task::spawn_blocking(move || {
+            let key = synthetic_key("synthetic-brave-poll-key");
+            poll_brave(&mut BraveSearchLog::new(), false, Some(&key), &url)
+        })
+        .await
+        .unwrap();
+        assert!(matches!(message, Msg::SourcePollCompleted { .. }));
+    }
+
+    #[tokio::test]
+    async fn brave_poll_failure_and_log_use_a_short_scrubbed_single_line() {
+        const KEY: &str = "synthetic-brave-echo-sentinel";
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(header("X-Subscription-Token", KEY))
+            .respond_with(
+                ResponseTemplate::new(401)
+                    .set_body_string(format!("invalid\r\n\ttoken {KEY}\n{}", "é".repeat(220))),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let url = server.uri();
+        let (message, logs) = tokio::task::spawn_blocking(move || {
+            let key = synthetic_key(KEY);
+            crate::test_logs::capture(|| {
+                poll_brave(&mut BraveSearchLog::new(), false, Some(&key), &url)
+            })
+        })
+        .await
+        .unwrap();
+        let Msg::SourcePollFailed { source_id, error } = message else {
+            panic!("expected SourcePollFailed");
+        };
+        assert_eq!(source_id, brave_test_id());
+        let start = "invalid token <redacted> ";
+        let expected = format!("{start}{}", "é".repeat(200 - start.len()));
+        assert_eq!(
+            error,
+            format!("Brave API HTTP 401 Unauthorized (check the Brave API key): {expected}")
+        );
+        assert!(!error.contains(KEY));
+        assert!(logs
+            .iter()
+            .any(|line| line.ends_with(&format!("fetch failed for brave-test: {error}"))));
+        assert!(logs.iter().all(|line| !line.contains(KEY)));
+    }
+
     #[test]
-    fn handle_brave_poll_fails_with_missing_env_var() {
+    fn handle_brave_poll_fails_with_missing_stored_key() {
         let mut search_log = BraveSearchLog::new();
         match poll_without_key(&mut search_log, false) {
-            harvester_core::Msg::SourcePollFailed { source_id, .. } => {
+            harvester_core::Msg::SourcePollFailed { source_id, error } => {
                 assert_eq!(source_id, brave_test_id());
+                assert_eq!(
+                    error,
+                    "Brave Search key not found in Credential Manager (Harvester/BraveSearch)"
+                );
             }
             other => panic!("expected SourcePollFailed, got {other:?}"),
         }
@@ -960,7 +1084,7 @@ mod brave_fetch_tests {
     }
 
     #[test]
-    fn handle_brave_poll_skips_source_searched_recently() {
+    fn handle_brave_poll_skips_source_searched_recently_even_without_key() {
         let mut search_log = BraveSearchLog::new();
         let searched = chrono::Utc::now() - chrono::Duration::hours(3);
         search_log.record_success(&brave_test_id(), searched);
@@ -986,9 +1110,14 @@ mod brave_fetch_tests {
             - chrono::Duration::hours(harvester_engine::BRAVE_MIN_SEARCH_INTERVAL_HOURS + 1);
         search_log.record_success(&brave_test_id(), searched);
 
-        let msg = poll_without_key(&mut search_log, false);
+        let msg = poll_brave(
+            &mut search_log,
+            false,
+            Some(&synthetic_key("key")),
+            "invalid URL",
+        );
         assert!(
-            matches!(msg, harvester_core::Msg::SourcePollFailed { .. }),
+            matches!(&msg, Msg::SourcePollFailed { error, .. } if error.contains("relative URL")),
             "expected a search attempt, got {msg:?}"
         );
     }
@@ -998,9 +1127,14 @@ mod brave_fetch_tests {
         let mut search_log = BraveSearchLog::new();
         search_log.record_success(&brave_test_id(), chrono::Utc::now());
 
-        let msg = poll_without_key(&mut search_log, true);
+        let msg = poll_brave(
+            &mut search_log,
+            true,
+            Some(&synthetic_key("key")),
+            "invalid URL",
+        );
         assert!(
-            matches!(msg, harvester_core::Msg::SourcePollFailed { .. }),
+            matches!(&msg, Msg::SourcePollFailed { error, .. } if error.contains("relative URL")),
             "expected a search attempt, got {msg:?}"
         );
     }

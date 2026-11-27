@@ -33,20 +33,30 @@ the built frontend. Deterministic processing keeps API use and costs bounded.
 - Node.js/npm for the desktop frontend
 - Microsoft Edge WebView2 Evergreen Runtime for the Tauri desktop window
 - PowerShell 7
-- A PowerShell profile that loads the external `SecretLaunch` module and
-  provides `Invoke-WithSecretMap` and `Test-SecretStorePromptAvailable`, plus
-  SecretStore vault entries named `BraveSearchApiKey` and
-  `OpenAIProductionKey`. Run launchers from a session with that profile loaded;
-  they do not load it themselves.
-- The launchers retrieve `BRAVE_SEARCH_API_KEY` and `OPENAI_API_KEY` from
-  encrypted SecretStore entries and inject them into the launched process. If
-  either variable already has a non-empty parent value, the launcher warns
-  rather than refuses; that value is inherited by Cargo and the child process.
 
-Each Brave source names its own key environment variable with `api_key_env` in
-`output/.sources.ron`; the name in use is `BRAVE_SEARCH_API_KEY`, so a Brave
-source added by hand should use that same name rather than inventing a second
-one.
+## API keys
+
+From PowerShell under the Windows account that will run Harvester, store each key
+in Windows Credential Manager.
+
+```powershell
+cmdkey /generic:Harvester/OpenAI /user:harvester /pass
+cmdkey /generic:Harvester/BraveSearch /user:harvester /pass
+```
+
+Each command prompts for the key value. Paste or type it at the prompt. Use
+Harvester-specific keys with provider spending limits.
+
+Both launchers ask Harvester to read the stored keys at startup. Starting either
+binary directly without the launcher flag leaves it key-free. At startup the
+batch prints the status of each credential, including the character count and
+encoding for a found key.
+
+Every Brave source uses `Harvester/BraveSearch`. New entries in
+`output/.sources.ron` omit `api_key_env`. Older entries still load, and the poll
+worker logs the source IDs that carry an ignored key name once per run. If the
+Brave key is missing, only Brave sources due for a search report a failure.
+Recently searched Brave sources still skip, and other sources continue polling.
 
 ## Common Commands
 
@@ -68,9 +78,9 @@ Launch one command-line cycle (poll, download, synchronous processing, then exit
 .\scripts\Start-HarvesterBatch.ps1
 ```
 
-The Batch launcher supplies no runtime arguments. External scheduling starts a
-new process for each cycle. Browser-page import and checkpoint editing remain
-available through the command-line options; see `harvester_batch --help`.
+The batch launcher builds the working tree and supplies the fixed stored-key
+flag. External scheduling starts a new process for each cycle. Run
+`harvester_batch --help` for browser-page import and checkpoint commands.
 
 Each cycle shows a compact progress block with elapsed time, cost so far, and
 remaining work for source scanning, downloading, triage, summaries and scoring.
@@ -87,13 +97,13 @@ Checkpoint commands are `--set-checkpoint <RFC3339>`, `--set-checkpoint-now`,
 spellings remain accepted as hidden aliases. The file remains
 `.briefing_checkpoint.ron`.
 
-The launchers are interactive because they never add vault secrets to the
-environment of a process an LLM coding agent controls or can spawn: harvested
-article content flows into agent context, and environment variables are
-inherited downward. Retrieving a secret therefore requires typing the
-SecretStore password into a session the user started. This stops inheritance,
-not an agent editing launcher, helper, or application source that the user
-later runs with real keys.
+The launchers can start unattended under the Windows account that stored the
+keys. Any process running as Lars, including an LLM coding agent, can now read
+the entries directly without a human gate. The only remaining guard against
+agents reading the entries is the `Agents.md` rule that agents never obtain
+API keys. Agents use the key-free build and test paths. If either legacy key
+environment variable is set at any scope, the launchers warn that Harvester
+ignores it.
 
 ## Harvester Output
 

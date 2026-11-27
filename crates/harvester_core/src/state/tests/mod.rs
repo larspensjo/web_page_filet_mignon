@@ -781,7 +781,7 @@ mod app_state_tests {
         });
         assert_eq!(
             state.view().ai_unavailable_message.as_deref(),
-            Some("AI features unavailable: OPENAI_API_KEY is not set")
+            Some("AI features unavailable: OpenAI key is unavailable (Harvester/OpenAI)")
         );
         assert_eq!(
             state.view().llm_quota.severity,
