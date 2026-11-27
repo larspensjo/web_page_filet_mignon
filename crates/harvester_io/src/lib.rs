@@ -2,6 +2,7 @@
 
 mod article_links;
 mod blacklist_store;
+pub mod credentials;
 mod effect_helpers;
 mod effect_runner;
 pub mod host_bootstrap;
