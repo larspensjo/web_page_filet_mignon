@@ -93,16 +93,6 @@ impl Fixture {
         ).unwrap();
     }
 
-    pub fn seed_strikes(&self) {
-        let key = target_key(&self.target);
-        fs::write(
-            &self.checkpoint,
-            format!(
-                r#"(since_utc: Some("{SINCE}"), portfolio: {{{key:?}: (confirmed_until_utc: Some("{SINCE}"), last_archive_until_utc: None, pending_until_utc: None, strikes: {{"{URL}": (count: 2, last_until: "2026-09-21T00:00:00Z")}})}})"#,
-            ),
-        ).unwrap();
-    }
-
     pub fn sidecar(&self) -> PathBuf {
         self.target.with_file_name("archive.md.processed")
     }
@@ -301,6 +291,32 @@ pub struct Run {
 }
 
 impl Run {
+    pub fn assert_result_key_order(&self, keys: &[&str]) {
+        let line = self
+            .stdout
+            .lines()
+            .last()
+            .unwrap()
+            .strip_prefix(PREFIX)
+            .unwrap();
+        let value: Value = serde_json::from_str(line).unwrap();
+        assert_eq!(value.as_object().unwrap().len(), keys.len());
+        let positions: Vec<_> = keys
+            .iter()
+            .map(|key| line.find(&format!("\"{key}\":")).unwrap())
+            .collect();
+        assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "{line}");
+    }
+
+    pub fn assert_printed_failed_source(&self, id: &str) {
+        assert!(
+            self.stdout.lines().any(|line| line
+                .starts_with(&format!("[morning-archive] failed_source id={id} reason="))),
+            "{}",
+            self.stdout
+        );
+    }
+
     pub fn result(&self, code: i32, status: &str, reason: Option<&str>) -> Value {
         self.assert_exit_code(code);
         assert!(!self.stdout.starts_with('\u{feff}'));
@@ -316,9 +332,15 @@ impl Run {
         let line = self.stdout.lines().last().unwrap();
         assert!(line.is_ascii());
         let result: Value = serde_json::from_str(line.strip_prefix(PREFIX).unwrap()).unwrap();
+        assert_eq!(result["v"], 2);
         assert_eq!(result["status"], status);
         assert_eq!(result["reason"].as_str(), reason);
         assert!(result.get("reason").is_some());
+        let left_out = result["left_out"].as_array().expect("omissions array");
+        assert_eq!(result["left_out_articles"], left_out.len());
+        if !matches!(status, "exported" | "nothing_new") {
+            assert!(left_out.is_empty());
+        }
         result
     }
 
@@ -389,6 +411,7 @@ impl ContractFixture for HostServices {
                 let provider = Arc::new(ContractProvider {
                     canned: routing_canned_provider(URL, 5),
                     fail_scoring: mode == "scoring-failure",
+                    quota_halt: mode == "quota-halt",
                 });
                 let order = paths.output_dir.join("publication-order");
                 let file_observer: Option<FileWriteObserver> =
@@ -564,6 +587,24 @@ fn forward_replies(
             ("startup-watchdog", Msg::LlmMetadataLoaded { .. })
             | ("drop-success", Msg::BatchArchivePublished { .. })
             | ("drop-failure", Msg::BatchArchivePublicationFailed { .. }) => continue,
+            (
+                "export-failure" | "quota-halt",
+                Msg::SavedArticlesLoaded {
+                    request_id,
+                    mut articles,
+                },
+            ) => {
+                articles.push(harvester_engine::WindowArticle {
+                    url: "https://carry-over.synthetic/unfinished".into(),
+                    content_hash: "unfinished-fixture".into(),
+                    source_title: Some("Unfinished article".into()),
+                    fetched_utc: Some("2026-09-20T09:15:00Z".into()),
+                });
+                Msg::SavedArticlesLoaded {
+                    request_id,
+                    articles,
+                }
+            }
             (_, msg) => msg,
         };
         if mode == "interrupt-before" && matches!(msg, Msg::PollStarted { .. }) {
@@ -587,11 +628,17 @@ fn append_event(path: &Path, event: &str) {
 struct ContractProvider {
     canned: Arc<dyn LlmProvider>,
     fail_scoring: bool,
+    quota_halt: bool,
 }
 
 #[async_trait::async_trait]
 impl LlmProvider for ContractProvider {
     async fn complete(&self, request: &LlmRequest) -> Result<LlmResponse, LlmError> {
+        if self.quota_halt {
+            return Err(LlmError::QuotaExhausted {
+                description: "canned quota halt".into(),
+            });
+        }
         if self.fail_scoring && canned_prompt_kind(request) == "ArticleSignalCandidate" {
             return Err(LlmError::InvalidResponse {
                 detail: "canned scoring failure".into(),

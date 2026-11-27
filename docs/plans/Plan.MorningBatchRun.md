@@ -275,6 +275,14 @@ because it runs with Lars's stored keys. This replaces following local `main`.
   reported from the target's own index: `exported` if publication happened, `export_failed` if
   not.
 
+**Amendment (Lars, 2026-11-27).** B1 uses result-line version 2. Under B3 the
+morning uses the shared signal selection and request builder and filters
+previously reported omissions before selection. B4 applies whenever zero
+articles are selected and reports any omissions. B5 applies to interrupt or
+Stop, result-store refusal, unavailable saved results, a model-dispatch halt
+(`quota_halted`), and total source poll failure, in that order. Each failed
+source's ID and short reason are printed and logged.
+
 ### Portfolio window
 
 - **W1** The Harvester keeps a durable per-target portfolio record in `.briefing_checkpoint.ron`:
@@ -476,6 +484,12 @@ as `BatchArchiveOutcome`:
 This gate applies only to morning exports. The desktop rule that export is never blocked by
 unfinished or failed articles (2026-09-27, 2026-10-24) is unchanged.
 
+**Amendment (Lars, 2026-11-27).** The model-dispatch halt check follows
+startup readiness. A session quota, provider credit or repeated rate-limit
+halt gives `cycle_failed` with reason `quota_halted`. After the run-level
+checks, report articles missing required results in `left_out` and use the
+normal empty-selection and publication paths.
+
 Completion goes through the existing `handle_export_completed`; its save writes `since_utc`,
 `L = until` and clears P; the acknowledgement sets `exported` (or `exported` with reason
 `checkpoint_not_saved` on a failed save, which the next startup reconciles). Failure goes through
@@ -614,6 +628,13 @@ with a missing or malformed `fetched_utc` stay inside every window (2026-10-12) 
 several archives; an article that first arrives with a recorded `fetched_utc` earlier than the
 current start (for example an import carrying an old date) is outside every later window.
 
+**W8 amendment (Lars, 2026-11-27).** Each dated article in a confirmed
+window is selected, deliberately omitted by policy, folded, or accounted
+for by an omission reported in version 2. Reported omissions are remembered
+through unconfirmed replays and on `nothing_new` mornings. An export
+advances through the normal publication and confirmation path. A dated
+omission ages out of the per-target record when the confirmed window passes it.
+
 ### Failed-cycle rule: carry-over list examined; fall back to plain A
 
 **Decision: plain Option A for morning exports.** A backlog above zero (the archive-meter
@@ -675,6 +696,16 @@ never silently disappears and never blocks a third morning.
   because of the halt; a success between two failures resets the count.
 - **Result line:** adds `excused_articles` (integer). The cross-repo section lists it for
   ai-portfolio-59 to confirm; the brief shows it as a warning, like `backlog_articles`.
+
+**Amendment (Lars, 2026-11-27).** The two-morning cap and the earlier
+backlog gate are superseded. A run that passes the run-level checks reports
+every in-window article missing required triage, summary or score, including
+articles the pipeline never loaded. The brief lists each article by URL
+and source title, with `failed:<stage>[+<stage>]` for a failure observed
+this run and `not_finished` otherwise. Priority and pre-triage exclusions
+still apply. Durable records ignore legacy strikes. Publication intent
+carries new omissions through crash recovery, and an empty selection saves
+new omissions without publishing a file.
 
 ### Credential-free real-process tests
 
@@ -747,6 +778,14 @@ with incremental compilation off: estimated 1.5 to 3 GB. Total estimate about 3 
 after the first build (Lars's step M-B).
 
 ## Result line
+
+**Amendment (Lars, 2026-11-27).** The launcher and executable now emit
+`"v":2`. The fields after `failed_sources` are `left_out_articles` and
+`left_out` (an array of `{url, title, reason}` in URL order, empty when
+there are no entries). They replace the two historical omission counters in
+the table below. `quota_halted` replaces `backlog` in the cycle-failure
+reasons. The remaining fields retain their order and `commit` is last.
+See [Batch result line](../ArchiveExportFormat.md#batch-result-line).
 
 Printed by the binary for every morning outcome it reaches, and by the launcher for
 `usage_error` (argument refusal), `update_failed` and `build_failed`. Format:
@@ -849,6 +888,11 @@ Without `--archive-out`, every row keeps today's code and prints no line.
 | launcher: release ref missing or outside main, clone failure, dirty, foreign, wrong branch, ahead, diverged, fetch or merge failure, HEAD not the fetched commit | n/a | `update_failed` 23 | launcher |
 | launcher: cargo failure, binary missing or child startup exception | throws, 1 | `build_failed` 24 | launcher |
 | launcher: unexpected exception | 1 | crash | no |
+
+**Amendment (Lars, 2026-11-27).** In the morning path, article-level
+omissions give `exported` (0) or `nothing_new` (10) according to the
+selection. A quota, credits or repeated rate-limit halt gives
+`cycle_failed` (20), reason `quota_halted`.
 
 ## Phases
 
@@ -1055,6 +1099,12 @@ Failing tests first (reducer and pure-function tests in `harvester_core`; persis
 Then implement the configured and observed messages, the extended checkpoint-load reply, the
 pure resolution, the effective window, the gate, the intent, the dedicated message, the extracted
 request builder and the record map.
+
+**Phase 5a and 5b amendment (Lars, 2026-11-27).** Exercise zero unfinished
+work with missing saved results, an individual failure with publication, a
+quota halt, failed source names, old records and the version 2 line. In W8,
+account for omissions using the actual reported URLs and verify that
+recovery of an omitted article during replay cannot select it.
 
 Checks: `cargo build`; `cargo test -p harvester_core -p harvester_io`; full workspace `cargo test`
 (quiet window); clippy (root and `-p harvester_ui`, which shares core); fmt.
@@ -1289,6 +1339,9 @@ No version bump of `CORPUS_SCHEMA_VERSION` or `export_schema`. Desktop IPC moves
    failures export and are counted; the carry-over list was examined and not adopted. The desktop
    rule that export is never blocked by unfinished or failed articles is unchanged. Never: export
    a morning archive with a backlog; move the checkpoint on a failed morning run.
+   **Amendment (Lars, 2026-11-27).** Only a run-level failure blocks the gate.
+   Missing required article results are reported as omissions, and model
+   quota, credit and rate-limit halts are run-level failures.
 8. **The portfolio start is a Harvester-owned per-target record that only the portfolio's sidecar
    advances.** Checkpoint ownership change: `since_utc` stays the desktop list and processing
    window; the per-target `confirmed_until_utc` is the morning window start; the desktop dialog's

@@ -10,7 +10,6 @@ use std::{
 };
 
 pub type PortfolioRecords = BTreeMap<String, PortfolioRecord>;
-pub type Strikes = BTreeMap<String, Strike>;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BriefingCheckpoint {
@@ -30,14 +29,20 @@ pub struct PortfolioRecord {
     pub confirmed_until_utc: Option<DateTime<Utc>>,
     pub last_archive_until_utc: Option<DateTime<Utc>>,
     pub pending_until_utc: Option<DateTime<Utc>>,
+    // Confirmed windows retire dated entries. Until then, an unconfirmed span
+    // may replay, and an empty selection has no archive to confirm.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub strikes: Strikes,
+    pub left_out: BTreeMap<String, Option<DateTime<Utc>>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub pending_left_out: BTreeMap<String, Option<DateTime<Utc>>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Strike {
-    pub count: u8,
-    pub last_until: DateTime<Utc>,
+impl PortfolioRecord {
+    pub(crate) fn complete_publication(&mut self, until_utc: DateTime<Utc>) {
+        self.last_archive_until_utc = Some(until_utc);
+        self.pending_until_utc = None;
+        self.left_out.append(&mut self.pending_left_out);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -250,12 +255,13 @@ pub fn resolve_window(
     if let Some(pending) = record.pending_until_utc.take() {
         if matches!(seen.archive, ObservedArchive::Present { index, .. } if index.window_until() == Some(pending))
         {
-            record.last_archive_until_utc = Some(pending);
+            record.complete_publication(pending);
             checkpoint_advance = desktop
                 .is_none_or(|since| since < pending)
                 .then_some(pending);
         }
     }
+    record.pending_left_out.clear();
     let sidecar = seen.sidecar.valid_until(now);
     let sidecar_status = match (record.confirmed_until_utc, sidecar) {
         (_, Err(status)) => status,
@@ -284,6 +290,9 @@ pub fn resolve_window(
         .or(desktop)
         .ok_or(BatchArchiveReason::NoWindowStart)?;
     record.confirmed_until_utc = Some(since_utc);
+    record
+        .left_out
+        .retain(|_, fetched| fetched.is_none_or(|fetched| fetched >= since_utc));
     let (disposition, previous_superseded) = match seen.archive {
         ObservedArchive::Absent => (PreviousArchiveDisposition::None, false),
         ObservedArchive::Present { stamp, index } => {
@@ -313,15 +322,15 @@ pub fn resolve_window(
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum FailedStage {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum FailedStage {
     Triage,
     Summary,
     Scoring,
 }
 
 impl FailedStage {
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Triage => "triage",
             Self::Summary => "summary",
@@ -330,64 +339,11 @@ impl FailedStage {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExcusedArticle {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LeftOutArticle {
     pub url: String,
-    pub stages: Vec<FailedStage>,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct BacklogArticle<'a> {
-    pub url: &'a str,
-    pub unsettled: bool,
-    pub failed_stages: &'a [FailedStage],
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct BacklogAssessment {
-    pub backlog_articles: usize,
-    pub excused: Vec<ExcusedArticle>,
-    pub strikes: Strikes,
-}
-
-pub fn assess_backlog(
-    previous: &Strikes,
-    backlog: &[BacklogArticle<'_>],
-    until: DateTime<Utc>,
-) -> BacklogAssessment {
-    let mut result = BacklogAssessment {
-        backlog_articles: 0,
-        excused: Vec::new(),
-        strikes: Strikes::new(),
-    };
-    for item in backlog {
-        result.backlog_articles += usize::from(item.unsettled);
-        if item.failed_stages.is_empty() {
-            continue;
-        }
-        let prior = previous.get(item.url);
-        let count = prior.map_or(0, |strike| strike.count);
-        let excused = count >= 2 && prior.is_some_and(|strike| strike.last_until < until);
-        if excused {
-            result.backlog_articles -= usize::from(item.unsettled);
-            result.excused.push(ExcusedArticle {
-                url: item.url.to_owned(),
-                stages: item.failed_stages.to_vec(),
-            });
-        }
-        if !item.unsettled && !excused {
-            continue;
-        }
-        let strike = match prior {
-            Some(strike) if strike.last_until >= until => *strike,
-            _ => Strike {
-                count: count.saturating_add(1).min(2),
-                last_until: until,
-            },
-        };
-        result.strikes.insert(item.url.to_owned(), strike);
-    }
-    result
+    pub title: Option<String>,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -398,8 +354,8 @@ pub enum BatchArchiveReason {
     Interrupted,
     ResultStoreUnavailable,
     SavedResultsUnavailable,
+    QuotaHalted,
     TotalFailure,
-    Backlog,
     ExportWriteFailed,
     CheckpointNotSaved,
 }
@@ -413,8 +369,8 @@ impl BatchArchiveReason {
             Self::Interrupted => "interrupted",
             Self::ResultStoreUnavailable => "result_store_unavailable",
             Self::SavedResultsUnavailable => "saved_results_unavailable",
+            Self::QuotaHalted => "quota_halted",
             Self::TotalFailure => "total_failure",
-            Self::Backlog => "backlog",
             Self::ExportWriteFailed => "export_write_failed",
             Self::CheckpointNotSaved => "checkpoint_not_saved",
         }
@@ -434,9 +390,7 @@ pub enum BatchArchiveStatus {
 pub struct BatchArchiveOutcome {
     pub status: BatchArchiveStatus,
     pub reason: Option<BatchArchiveReason>,
-    pub backlog_articles: usize,
-    pub excused_articles: usize,
-    pub excused: Vec<ExcusedArticle>,
+    pub left_out: Vec<LeftOutArticle>,
     pub failed_sources: usize,
     pub path: Option<PathBuf>,
     pub doc_count: usize,
@@ -450,33 +404,24 @@ pub(crate) struct GateFacts {
     pub interrupted: bool,
     pub result_store_refused: bool,
     pub readiness: StartupReadinessStatus,
+    pub quota_halted: bool,
     pub sources_scanned: usize,
     pub failed_sources: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum GateDecision {
-    Blocked(BatchArchiveReason),
-    NothingNew,
-    Publish,
-}
-
-pub(crate) fn morning_gate(facts: GateFacts, backlog: usize, selected: usize) -> GateDecision {
+pub(crate) fn morning_block_reason(facts: GateFacts) -> Option<BatchArchiveReason> {
     use BatchArchiveReason as R;
-    use GateDecision as G;
     if facts.interrupted {
-        G::Blocked(R::Interrupted)
+        Some(R::Interrupted)
     } else if facts.result_store_refused {
-        G::Blocked(R::ResultStoreUnavailable)
+        Some(R::ResultStoreUnavailable)
     } else if facts.readiness != StartupReadinessStatus::Ready {
-        G::Blocked(R::SavedResultsUnavailable)
+        Some(R::SavedResultsUnavailable)
+    } else if facts.quota_halted {
+        Some(R::QuotaHalted)
     } else if facts.sources_scanned > 0 && facts.sources_scanned == facts.failed_sources {
-        G::Blocked(R::TotalFailure)
-    } else if backlog > 0 {
-        G::Blocked(R::Backlog)
-    } else if selected == 0 {
-        G::NothingNew
+        Some(R::TotalFailure)
     } else {
-        G::Publish
+        None
     }
 }

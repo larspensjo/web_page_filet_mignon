@@ -1,10 +1,9 @@
 //! Reads the consumer's sidecar and the target's authoritative archive bounds.
 
 use chrono::{DateTime, Utc};
-use engine_logging::{engine_info, engine_warn};
+use engine_logging::engine_warn;
 use harvester_core::morning_archive::{
-    ArchiveFileStamp, ArchiveIndex, ExcusedArticle, ObservedArchive, SidecarObservation,
-    TargetObservation,
+    ArchiveFileStamp, ArchiveIndex, ObservedArchive, SidecarObservation, TargetObservation,
 };
 use std::{
     fs::File,
@@ -237,21 +236,4 @@ fn parse_row(row: &str) -> Option<(usize, usize)> {
     let number = fields.next()?.parse().ok()?;
     let line = fields.next()?.parse().ok()?;
     (fields.count() == 4).then_some((number, line))
-}
-
-pub(crate) fn log_excused_articles(target: &Path, articles: &[ExcusedArticle], blocked: bool) {
-    for article in articles {
-        let stages = article
-            .stages
-            .iter()
-            .map(|stage| stage.as_str())
-            .collect::<Vec<_>>()
-            .join(",");
-        engine_info!(
-            "[morning-archive] excused url={} stage={} strikes=2 target={} blocked={blocked}",
-            article.url,
-            stages,
-            target.display()
-        );
-    }
 }

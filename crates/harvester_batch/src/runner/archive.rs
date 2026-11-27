@@ -1,4 +1,4 @@
-use super::dispatch_loop::reduce_and_dispatch;
+use super::dispatch_loop::{reduce_and_dispatch, truncate_for_log};
 use crate::{
     archive_result::{ArchiveResult, Status},
     no_progress::NoProgressWatchdog,
@@ -22,6 +22,15 @@ pub(super) fn cycle_failure(state: &AppState, reason: &'static str) -> ArchiveRe
     result.since_utc = state.batch_archive_since_utc();
     result.failed_sources = state.batch_archive_failed_sources();
     result
+}
+
+pub(super) fn report_failed_sources(failures: &[(String, String)]) {
+    for (id, error) in failures {
+        let reason = truncate_for_log(error.lines().next().unwrap_or_default(), 120);
+        let line = format!("[morning-archive] failed_source id={id} reason={reason}");
+        engine_warn!("{line}");
+        println!("{line}");
+    }
 }
 
 fn submission_time(previous_until: Option<DateTime<Utc>>, shutdown: &AtomicBool) -> DateTime<Utc> {

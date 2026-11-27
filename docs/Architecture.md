@@ -205,20 +205,25 @@ malformed bytes under a dated backup name before replacing the checkpoint.
 A checkpoint I/O read failure stops morning startup before intake.
 
 Each normalized target key owns a confirmed bound, a last-published bound, a
-pending publication bound, and article failure streaks in
-`.briefing_checkpoint.ron`. The reducer reconciles a pending bound against the
-validated trailing index of the target. A match recovers the last-published
-bound and advances an earlier desktop checkpoint. A mismatch clears the
-pending bound. If the target is unconfirmed, a superseding archive replays
-the unconfirmed span and the publish worker keeps the old bytes.
+pending publication bound, and the URLs left out of that target's still-open
+window in `.briefing_checkpoint.ron`. Publication intent includes any new
+omissions. The reducer reconciles a pending bound against the validated
+trailing index of the target. A match recovers the last-published bound and
+omissions and advances an earlier desktop checkpoint. A mismatch clears the
+pending bound and its omissions. A superseding archive can replay an
+unconfirmed span with its reported omissions removed, and the publish worker
+keeps the old bytes. A confirmation past a dated omission retires its URL
+from the record because the new window excludes it by date.
 
 The morning gate checks interruption, result-store refusal, startup readiness,
-total failure of this run's source intake, archive backlog, and empty signal
-selection in that order. It uses the desktop archive's pinned signal selection
-and request builder with summaries enabled. Two consecutive genuine
-article-stage failures excuse the article on the next genuine failure. The
-gate resets skipped or recovered articles' streaks, logs each excused URL and
-stage, and leaves eligible current-key scores in control of selection.
+LLM quota, credit or rate-limit halt, then total failure of this run's source
+intake. A run that passes the gate uses the desktop archive's signal selection
+and request builder with summaries enabled. The saved-results projection
+supplies in-window articles missing required current results, including files
+the pipeline never loaded. The version 2 result line lists their URLs, source
+titles and current-run failed stages, or `not_finished`. An empty selection
+gives `nothing_new` and saves any new omissions in the per-target record.
+The batch prints and logs each failed source ID and a short reason.
 
 The reducer saves publication intent before issuing the export effect. The host
 drains a graceful interrupt before export and applies the morning gate. After
@@ -231,7 +236,9 @@ If the publication reply is lost, the host checks whether the target's
 validated index has the pending bound and sends that result through the same
 reducer. The host keeps the effect runner alive through the checkpoint save,
 flushes paid results and persists final state, and then prints the result line
-as its last stdout line.
+as its last stdout line. Under the tolerance-over-refusal preference, if the
+process dies after publication but before printing the result line, the next
+startup retires that run's omissions without their appearing in a brief.
 
 Archive export previously filtered by checkpoint after a full read. The export worker now
 takes an owned hint snapshot from the process-lifetime root scan index and releases the lock

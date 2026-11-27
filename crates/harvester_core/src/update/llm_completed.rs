@@ -55,17 +55,10 @@ pub(super) fn handle(
     if owner.is_some() {
         note_article_model_result(state, &result);
     }
-    // A provider throttle or an exhausted allowance denied the stage work.
-    // Other in-flight completions can still record genuine failures after a halt.
-    let may_be_genuine_failure = pending
-        && state.morning_archive.is_some()
-        && !matches!(
-            result,
-            LlmResultKind::QuotaExhausted { .. } | LlmResultKind::RateLimited { .. }
-        );
+    let track_failure = pending && state.morning_archive.is_some();
     match owner {
         Some(RequestOwner::Scoring) => {
-            let url = may_be_genuine_failure
+            let url = track_failure
                 .then(|| {
                     state
                         .signal_candidate()
@@ -90,7 +83,7 @@ pub(super) fn handle(
         Some(RequestOwner::Summary(article_idx)) => {
             handle_summary_completion(state, article_idx, &result);
             let article = &state.briefing().articles()[article_idx];
-            if may_be_genuine_failure
+            if track_failure
                 && matches!(
                     article.summary_state,
                     crate::briefing::ArticleSummaryState::Failed { .. }
@@ -107,7 +100,7 @@ pub(super) fn handle(
         Some(RequestOwner::Triage(article_idx)) => {
             handle_triage_completion(state, article_idx, &result);
             let article = &state.triage().articles()[article_idx];
-            let failed = may_be_genuine_failure
+            let failed = track_failure
                 && matches!(
                     article.triage_state,
                     crate::triage::ArticleTriageState::Failed { .. }

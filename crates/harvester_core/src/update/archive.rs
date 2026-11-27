@@ -278,15 +278,15 @@ fn pin_archive_selection(
 }
 
 pub(super) fn prepare_morning_request(
-    state: &mut AppState,
+    state: &AppState,
     request_id: u64,
     target: crate::morning_archive::ExternalArchiveTarget,
     window: ArchiveWindow,
-    excused: &[crate::morning_archive::ExcusedArticle],
+    record: &PortfolioRecord,
 ) -> Effect {
-    let signal = pin_archive_selection(state);
-    state.clear_pinned_archive_corpus();
-    state.clear_pinned_signal_candidate_selection();
+    let signal = state.signal_candidate_selection_matching(|url| {
+        !record.left_out.contains_key(&archive_url_key(url))
+    });
     let basename = target
         .path
         .file_name()
@@ -305,19 +305,8 @@ pub(super) fn prepare_morning_request(
         true,
         true,
     );
-    if let Effect::ArchiveRequested {
-        external,
-        summaries,
-        ..
-    } = &mut effect
-    {
+    if let Effect::ArchiveRequested { external, .. } = &mut effect {
         *external = Some(target);
-        for article in excused.iter().filter(|a| {
-            a.stages
-                .contains(&crate::morning_archive::FailedStage::Summary)
-        }) {
-            summaries.remove(&archive_url_key(&article.url));
-        }
     }
     effect
 }

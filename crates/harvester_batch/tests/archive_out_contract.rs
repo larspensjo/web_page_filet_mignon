@@ -124,27 +124,90 @@ fn nothing_new_leaves_files_and_checkpoint_unchanged_but_records_confirmation() 
 }
 
 #[test]
-fn a_scoring_failure_blocks_export_as_backlog() {
+fn a_scoring_failure_is_named_in_the_result_without_blocking_the_run() {
     let fixture = Fixture::with_article();
-    let result = fixture
-        .run("scoring-failure")
-        .result(20, "cycle_failed", Some("backlog"));
-    assert_eq!(result["backlog_articles"], 1);
-    assert_eq!(result["excused_articles"], 0);
-    assert!(!fixture.target.exists());
-    assert_eq!(fixture.checkpoint_since().as_deref(), Some(SINCE));
-}
-
-#[test]
-fn two_failed_mornings_are_reported_as_excused_on_the_third() {
-    let fixture = Fixture::with_article();
-    fixture.seed_strikes();
     let result = fixture
         .run("scoring-failure")
         .result(10, "nothing_new", None);
-    assert_eq!(result["excused_articles"], 1);
-    assert_eq!(result["backlog_articles"], 0);
+    assert_eq!(result["left_out_articles"], 1);
+    assert_eq!(
+        result["left_out"],
+        serde_json::json!([{
+            "url": "https://carry-over.synthetic/article-0",
+            "title": "Synthetic carry-over article 0",
+            "reason": "failed:scoring"
+        }])
+    );
+    assert!(result["until_utc"].is_null());
     assert!(!fixture.target.exists());
+    let retry = fixture.run("normal").result(10, "nothing_new", None);
+    assert_eq!(retry["left_out"], serde_json::json!([]));
+    assert!(!fixture.target.exists());
+}
+
+#[test]
+fn morning_logs_each_left_out_url_and_reason() {
+    for (mode, code, status, result_reason, url, omission_reason) in [
+        (
+            "scoring-failure",
+            10,
+            "nothing_new",
+            None,
+            "https://carry-over.synthetic/article-0",
+            "failed:scoring",
+        ),
+        (
+            "export-failure",
+            21,
+            "export_failed",
+            Some("export_write_failed"),
+            "https://carry-over.synthetic/unfinished",
+            "not_finished",
+        ),
+    ] {
+        let fixture = Fixture::with_article();
+        fixture.run(mode).result(code, status, result_reason);
+        let log = fixture.log();
+        let omissions: Vec<_> = log
+            .lines()
+            .filter_map(|line| line.split_once("[morning-archive] left_out "))
+            .map(|(_, entry)| entry)
+            .collect();
+        let expected = format!(
+            "target={} url={url} reason={omission_reason}",
+            fixture.target.display()
+        );
+        assert_eq!(omissions, [expected.as_str()], "{mode}");
+    }
+}
+
+#[test]
+fn archive_result_v2_keys_are_in_contract_order() {
+    let fixture = Fixture::with_article();
+    let run = fixture.run("normal");
+    let result = run.result(0, "exported", None);
+    assert_eq!(result["v"], 2);
+    assert_eq!(result["left_out_articles"], 0);
+    assert_eq!(result["left_out"], serde_json::json!([]));
+    run.assert_result_key_order(&[
+        "v",
+        "status",
+        "articles",
+        "path",
+        "previous_kept",
+        "previous_superseded",
+        "cost_usd",
+        "cost_basis",
+        "archive_schema",
+        "since_utc",
+        "until_utc",
+        "failed_sources",
+        "left_out_articles",
+        "left_out",
+        "lock_holder",
+        "reason",
+        "commit",
+    ]);
 }
 
 #[test]
@@ -451,14 +514,17 @@ fn a_missing_brave_key_is_counted_and_only_total_poll_failure_blocks() {
     for has_success in [true, false] {
         let fixture = Fixture::empty();
         fixture.brave_sources(has_success);
+        let run = fixture.run("normal");
         let result = if has_success {
-            fixture.run("normal").result(10, "nothing_new", None)
+            run.result(10, "nothing_new", None)
         } else {
-            fixture
-                .run("normal")
-                .result(20, "cycle_failed", Some("total_failure"))
+            run.result(20, "cycle_failed", Some("total_failure"))
         };
         assert_eq!(result["failed_sources"], 1);
+        run.assert_printed_failed_source("brave");
+        assert!(fixture
+            .log()
+            .contains("[morning-archive] failed_source id=brave reason="));
         assert!(!fixture.target.exists());
     }
 }
@@ -519,10 +585,29 @@ fn intent_save_failure_prevents_publication_and_completion_save_failure_keeps_it
 #[test]
 fn worker_failure_is_export_failed_without_advancing_the_checkpoint() {
     let fixture = Fixture::with_article();
-    fixture
-        .run("export-failure")
-        .result(21, "export_failed", Some("export_write_failed"));
+    let result =
+        fixture
+            .run("export-failure")
+            .result(21, "export_failed", Some("export_write_failed"));
+    assert_eq!(result["left_out_articles"], 0);
+    assert_eq!(result["left_out"], serde_json::json!([]));
+    assert!(fixture
+        .record()
+        .contains("https://carry-over.synthetic/unfinished"));
     assert!(!fixture.target.is_file());
+    assert_eq!(fixture.checkpoint_since().as_deref(), Some(SINCE));
+}
+
+#[test]
+fn quota_halted_reports_an_empty_omission_list() {
+    let fixture = Fixture::with_article();
+    let result = fixture
+        .run("quota-halt")
+        .result(20, "cycle_failed", Some("quota_halted"));
+    assert_eq!(result["left_out_articles"], 0);
+    assert_eq!(result["left_out"], serde_json::json!([]));
+    assert!(result["until_utc"].is_null());
+    assert!(!fixture.target.exists());
     assert_eq!(fixture.checkpoint_since().as_deref(), Some(SINCE));
 }
 

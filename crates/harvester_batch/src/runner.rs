@@ -370,6 +370,11 @@ fn run_host(args: Args, services: HostServices) -> Result<HostOutcome, String> {
             },
             Some(&mut progress),
         );
+        let failures = state.batch_archive_source_failures();
+        if !failures.is_empty() {
+            progress.suspend_for_output();
+            archive::report_failed_sources(failures);
+        }
         let mut result = match dispatched {
             Ok(outcome) => {
                 after_dispatch(outcome, &state, &mut progress);

@@ -1,7 +1,6 @@
 use super::*;
 use crate::morning_archive::*;
 use chrono::{DateTime, Utc};
-use harvester_engine::ArchiveWindow;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -458,7 +457,16 @@ fn save_id(effects: &[Effect]) -> u64 {
         .expect("record save must be requested")
 }
 
-fn load_window(mut state: AppState, articles: &[LoadedArticle], since: &str) -> AppState {
+fn load_window(state: AppState, articles: &[LoadedArticle], since: &str) -> AppState {
+    load_window_with_projection(state, articles, articles, since)
+}
+
+fn load_window_with_projection(
+    mut state: AppState,
+    articles: &[LoadedArticle],
+    saved: &[LoadedArticle],
+    since: &str,
+) -> AppState {
     state = update(
         state,
         Msg::EvaluatePreTriageRefresh {
@@ -478,7 +486,7 @@ fn load_window(mut state: AppState, articles: &[LoadedArticle], since: &str) -> 
             } = effect
             {
                 assert_eq!(since_utc, Some(date(since)));
-                return resolve(scan(state, request_id, articles), request_id, articles);
+                return resolve(scan(state, request_id, saved), request_id, articles);
             }
         }
     }
@@ -706,6 +714,131 @@ fn assert_cycle_failed(state: AppState, reason: BatchArchiveReason) {
 }
 
 #[test]
+fn morning_reports_missing_results_even_when_the_pipeline_has_no_work() {
+    let mut fixture = Fixture::new(&[
+        ("low", Some(1), false, None),
+        ("excluded", None, false, None),
+        ("missing-a", None, false, None),
+        ("missing-b", None, false, None),
+        ("missing-c", None, false, None),
+        ("needs-summary", Some(5), false, None),
+    ]);
+    fixture.articles[1].prepared_text = "tiny".into();
+    fixture.articles[4].source_title = None;
+    let (state, effects) = set_up(
+        metadata_replies(fixture.hydrate()),
+        persisted(A, record(START, Some(LAST), None)),
+        observation(SidecarObservation::Missing, None),
+        true,
+    );
+    assert!(effects.is_empty());
+    let state =
+        load_window_with_projection(state, &fixture.articles[..2], &fixture.articles, START);
+    assert_eq!(state.startup_readiness(), Readiness::Ready);
+    for article in &fixture.articles[2..5] {
+        assert!(state.pre_triage().entry_for_url(&article.url).is_none());
+    }
+    assert!(matches!(
+        state.unfinished_work(),
+        crate::UnfinishedWork::Known(work) if work.articles_with_work == 0
+    ));
+    let (state, effects) = request(state, now());
+    let (state, effects) = acknowledge(state, &effects);
+    assert!(effects.is_empty());
+    assert_outcome(&state, BatchArchiveStatus::NothingNew, None);
+    assert_eq!(
+        state.batch_archive_outcome().unwrap().left_out,
+        fixture.articles[2..]
+            .iter()
+            .map(|article| LeftOutArticle {
+                url: article.url.clone(),
+                title: article.source_title.clone(),
+                reason: "not_finished".into(),
+            })
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn scoring_failure_is_left_out_and_other_articles_are_published() {
+    let fixture = Fixture::new(&[
+        ("retry", Some(5), true, None),
+        ("other", Some(5), true, Some((95, "other"))),
+    ]);
+    for failure in [
+        crate::LlmResultKind::Failed {
+            reason: "fixture failure".into(),
+        },
+        crate::LlmResultKind::RateLimited {
+            reason: "isolated throttle".into(),
+        },
+    ] {
+        let state = fail_article(
+            normal(&fixture),
+            &fixture.articles[0],
+            FailedStage::Scoring,
+            failure,
+        );
+        let (state, effects) = request(state, now());
+        let (state, publication) = acknowledge(state, &effects);
+        assert!(publication.iter().any(|effect| matches!(
+            effect,
+            Effect::ArchiveRequested { ordered_urls, .. } if ordered_urls == &["https://meter.example/other"]
+        )));
+        let (state, save) = completed(state);
+        let (state, _) = acknowledge(state, &save);
+        assert_outcome(&state, BatchArchiveStatus::Exported, None);
+        assert_eq!(
+            state.batch_archive_outcome().unwrap().left_out,
+            [LeftOutArticle {
+                url: fixture.articles[0].url.clone(),
+                title: fixture.articles[0].source_title.clone(),
+                reason: "failed:scoring".into(),
+            }]
+        );
+    }
+}
+
+#[test]
+fn quota_halt_blocks_even_with_a_selection_and_keeps_the_window() {
+    use crate::state::ModelDispatchHalt;
+    let mut fixture = Fixture::selected();
+    fixture.articles.push(article("unfinished"));
+    for halt in [
+        ModelDispatchHalt::RunQuota("limit".into()),
+        ModelDispatchHalt::ProviderCredits("credits".into()),
+        ModelDispatchHalt::RateLimit("rate".into()),
+    ] {
+        let mut state = normal(&fixture);
+        state.halt_model_dispatch(halt);
+        let (state, effects) = request(state, now());
+        assert!(effects.is_empty());
+        assert_outcome(
+            &state,
+            BatchArchiveStatus::CycleFailed,
+            Some(BatchArchiveReason::QuotaHalted),
+        );
+        let outcome = state.batch_archive_outcome().unwrap();
+        assert!(outcome.left_out.is_empty());
+        assert_eq!(outcome.window, None);
+        assert_eq!(state.batch_archive_since_utc(), Some(date(START)));
+    }
+}
+
+#[test]
+fn stop_before_archive_blocks_without_saving_omissions() {
+    let (state, effects) = update(
+        normal(&Fixture::new(&[("withdrawn", Some(5), false, None)])),
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
+    assert!(effects.contains(&Effect::PollAllSources));
+    let state = update(state, Msg::StopFinishClicked).0;
+    assert_cycle_failed(state, BatchArchiveReason::Interrupted);
+}
+
+#[test]
 fn gate_interrupt_precedes_all_other_reasons() {
     let state = update(normal(&Fixture::selected()), Msg::BatchArchiveInterrupted).0;
     let state = update(
@@ -792,61 +925,6 @@ fn gate_ignores_whole_state_source_failures_from_earlier_runs() {
         "prior run".into(),
     );
     export(state, now());
-}
-
-#[test]
-fn gate_quota_halt_and_withdrawals_leave_backlog() {
-    for quota_halt in [true, false] {
-        let fixture = Fixture::new(&[("unfinished", Some(5), false, None)]);
-        let mut state = normal(&fixture);
-        if quota_halt {
-            state.halt_model_dispatch(crate::state::ModelDispatchHalt::RunQuota("limit".into()));
-        } else {
-            state.briefing_mut().set_articles(fixture.articles.clone());
-            assert_eq!(state.briefing_mut().withdraw_pending(), 1);
-        }
-        let (state, effects) = request(state, now());
-        assert!(effects.is_empty());
-        assert_outcome(
-            &state,
-            BatchArchiveStatus::CycleFailed,
-            Some(BatchArchiveReason::Backlog),
-        );
-        assert_eq!(state.batch_archive_outcome().unwrap().backlog_articles, 1);
-    }
-
-    let fixture = Fixture::new(&[("withdrawn", Some(5), false, None)]);
-    let mut durable = record(START, None, None);
-    durable.strikes.insert(
-        fixture.articles[0].url.clone(),
-        Strike {
-            count: 1,
-            last_until: date(LAST),
-        },
-    );
-    let state = ready(
-        &fixture,
-        persisted(A, durable),
-        observation(SidecarObservation::Missing, None),
-        true,
-        START,
-    );
-    let state = update(
-        state,
-        Msg::PipelineRunRequested {
-            scope: crate::PipelineRunScope::Full,
-        },
-    )
-    .0;
-    let state = update(state, Msg::StopFinishClicked).0;
-    let (state, effects) = request(state, now());
-    assert!(effects.iter().any(|effect| matches!(effect, Effect::SavePortfolioRecord { record, .. } if record.strikes.is_empty())));
-    let (state, _) = acknowledge(state, &effects);
-    assert_outcome(
-        &state,
-        BatchArchiveStatus::CycleFailed,
-        Some(BatchArchiveReason::Interrupted),
-    );
 }
 
 #[test]
@@ -963,7 +1041,9 @@ fn stop_after_archive_requested_preserves_publication_outcome() {
 
 #[test]
 fn intent_save_failure_prevents_publication() {
-    let (state, effects) = request(normal(&Fixture::selected()), now());
+    let mut fixture = Fixture::selected();
+    fixture.articles.push(article("unfinished"));
+    let (state, effects) = request(normal(&fixture), now());
     let (state, effects) = update(
         state,
         Msg::PortfolioRecordSaved {
@@ -977,6 +1057,27 @@ fn intent_save_failure_prevents_publication() {
         BatchArchiveStatus::ExportFailed,
         Some(BatchArchiveReason::RecordNotSaved),
     );
+    assert!(state.batch_archive_outcome().unwrap().left_out.is_empty());
+}
+
+#[test]
+fn failed_nothing_new_record_write_does_not_report_omissions() {
+    let fixture = Fixture::new(&[("unfinished", None, false, None)]);
+    let (state, effects) = request(normal(&fixture), now());
+    let (state, effects) = update(
+        state,
+        Msg::PortfolioRecordSaved {
+            save_id: save_id(&effects),
+            result: Err("record refused".into()),
+        },
+    );
+    assert!(effects.is_empty());
+    assert_outcome(
+        &state,
+        BatchArchiveStatus::CycleFailed,
+        Some(BatchArchiveReason::RecordNotSaved),
+    );
+    assert!(state.batch_archive_outcome().unwrap().left_out.is_empty());
 }
 
 #[test]
@@ -1011,7 +1112,19 @@ fn completion_save_failure_reports_exported_with_checkpoint_not_saved() {
 
 #[test]
 fn worker_failure_reports_export_failed_without_checkpoint_save() {
-    let (state, _) = export(normal(&Fixture::selected()), now());
+    let mut fixture = Fixture::selected();
+    let unfinished = article("unfinished");
+    fixture.articles.push(unfinished.clone());
+    let mut checkpoint = persisted(A, record(START, Some(LAST), None));
+    let (state, save) = request(normal(&fixture), now());
+    apply_portfolio_writes(&mut checkpoint, &save);
+    assert!(checkpoint.portfolio[&key(A)]
+        .pending_left_out
+        .contains_key(&unfinished.url));
+    let (state, effects) = acknowledge(state, &save);
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::ArchiveRequested { .. })));
     let (state, effects) = update(
         state,
         Msg::BatchArchivePublicationFailed {
@@ -1027,134 +1140,31 @@ fn worker_failure_reports_export_failed_without_checkpoint_save() {
         BatchArchiveStatus::ExportFailed,
         Some(BatchArchiveReason::ExportWriteFailed),
     );
-}
+    assert!(state.batch_archive_outcome().unwrap().left_out.is_empty());
 
-#[test]
-fn consecutive_real_failures_block_at_most_two_mornings() {
-    let items = [BacklogArticle {
-        url: "https://meter.example/a",
-        unsettled: true,
-        failed_stages: &[FailedStage::Scoring],
-    }];
-    let mut strikes = Default::default();
-    for day in 10..=12 {
-        let until = DateTime::from_timestamp(1_790_000_000 + day * 86_400, 0).unwrap();
-        let gate = assess_backlog(&strikes, &items, until);
-        if day < 12 {
-            assert_eq!(gate.backlog_articles, 1);
-            assert!(gate.excused.is_empty());
-        } else {
-            assert_eq!(gate.backlog_articles, 0);
-            assert_eq!(
-                gate.excused,
-                [ExcusedArticle {
-                    url: items[0].url.into(),
-                    stages: vec![FailedStage::Scoring]
-                }]
-            );
-        }
-        strikes = gate.strikes;
-    }
-}
-
-#[test]
-fn mixed_quota_morning_records_actual_failure_and_resets_skipped_article() {
-    let fixture = Fixture::new(&[
-        ("genuine", Some(5), false, None),
-        ("skipped", Some(5), false, None),
-    ]);
-    let mut durable = record(START, None, None);
-    for article in &fixture.articles {
-        durable.strikes.insert(
-            article.url.clone(),
-            Strike {
-                count: 1,
-                last_until: date(LAST),
-            },
-        );
-    }
-    let mut state = ready(
+    let retry = ready(
         &fixture,
-        persisted(A, durable),
-        observation(SidecarObservation::Missing, None),
-        true,
-        START,
-    );
-    state.briefing_mut().set_articles(fixture.articles.clone());
-    for (index, request_id) in [41, 42].into_iter().enumerate() {
-        state.briefing_mut().start_article(index, request_id);
-        state.record_pending_llm_request(request_id, PromptId::ArticleSummary);
-    }
-    for (request_id, result) in [
-        (
-            41,
-            crate::LlmResultKind::Failed {
-                reason: "genuine failure".into(),
-            },
-        ),
-        (
-            42,
-            crate::LlmResultKind::QuotaExhausted {
-                reason: "not admitted by runtime budget".into(),
-                origin: harvester_engine::llm::QuotaOrigin::SessionBudget,
-            },
-        ),
-    ] {
-        state = update(
-            state,
-            Msg::LlmCompleted {
-                request_id,
-                result,
-                metadata: None,
-            },
-        )
-        .0;
-    }
-    assert!(state.run_quota_halt_reason().is_some());
-    let (state, effects) = request(state, date(PENDING));
-    let saved = effects
-        .iter()
-        .find_map(|effect| match effect {
-            Effect::SavePortfolioRecord { record, .. } => Some(record),
-            _ => None,
-        })
-        .unwrap();
-    assert_eq!(saved.strikes["https://meter.example/genuine"].count, 2);
-    assert!(!saved.strikes.contains_key("https://meter.example/skipped"));
-    let (state, _) = acknowledge(state, &effects);
-    let outcome = state.batch_archive_outcome().unwrap();
-    assert_eq!(outcome.backlog_articles, 2);
-    assert_eq!(outcome.excused_articles, 0);
-}
-
-#[test]
-fn success_between_failures_resets_strike_count() {
-    let item = [BacklogArticle {
-        url: "retry",
-        unsettled: true,
-        failed_stages: &[FailedStage::Summary],
-    }];
-    let first = assess_backlog(&Default::default(), &item, date(LAST));
-    let success = assess_backlog(&first.strikes, &[], date(PENDING));
-    let next = assess_backlog(&success.strikes, &item, now());
-    assert_eq!(next.strikes["retry"].count, 1);
-    assert_eq!(next.backlog_articles, 1);
-}
-
-fn morning_with_failure(
-    fixture: &Fixture,
-    checkpoint: BriefingCheckpoint,
-    at: DateTime<Utc>,
-    stage: FailedStage,
-) -> (AppState, Vec<Effect>) {
-    let mut state = ready(
-        fixture,
         checkpoint,
         observation(SidecarObservation::Missing, None),
         true,
         START,
     );
-    let retry = &fixture.articles[0];
+    let (retry, _) = export(retry, now());
+    let (retry, save) = completed(retry);
+    let (retry, _) = acknowledge(retry, &save);
+    assert_outcome(&retry, BatchArchiveStatus::Exported, None);
+    assert_eq!(
+        retry.batch_archive_outcome().unwrap().left_out[0].url,
+        unfinished.url
+    );
+}
+
+fn fail_article(
+    mut state: AppState,
+    retry: &LoadedArticle,
+    stage: FailedStage,
+    result: crate::LlmResultKind,
+) -> AppState {
     let request_id = 89;
     let prompt = match stage {
         FailedStage::Summary => {
@@ -1174,240 +1184,49 @@ fn morning_with_failure(
         FailedStage::Triage => unreachable!(),
     };
     state.record_pending_llm_request(request_id, prompt);
-    let state = update(
+    update(
         state,
         Msg::LlmCompleted {
             request_id,
-            result: crate::LlmResultKind::Failed {
-                reason: "fixture failure".into(),
-            },
+            result,
             metadata: None,
         },
     )
-    .0;
-    request(state, at)
+    .0
 }
 
 #[test]
-fn excused_summary_is_omitted_from_request_when_a_current_score_selects_it() {
-    let mut state = normal(&Fixture::selected());
-    let url = "https://meter.example/a";
-    let effect = crate::update::archive::prepare_morning_request(
-        &mut state,
-        9,
-        ExternalArchiveTarget {
-            path: A.into(),
-            disposition: PreviousArchiveDisposition::None,
-        },
-        ArchiveWindow::from_submission(Some(date(START)), now()),
-        &[ExcusedArticle {
-            url: url.into(),
-            stages: vec![FailedStage::Summary],
-        }],
-    );
-    let Effect::ArchiveRequested {
-        ordered_urls,
-        summaries,
-        ..
-    } = effect
-    else {
-        unreachable!()
-    };
-    assert!(ordered_urls.iter().any(|candidate| candidate == url));
-    assert!(!summaries.contains_key(url));
-    assert!(!summaries.is_empty());
-}
-
-#[test]
-fn gate_exports_excused_summary_failure_without_summary_when_current_score_survives() {
-    let fixture = Fixture::selected();
+fn a_left_out_article_reports_each_failed_stage_once_in_pipeline_order() {
+    let fixture = Fixture::new(&[("retry", Some(5), false, None)]);
     let article = &fixture.articles[0];
-    let mut prior = record(START, Some(LAST), None);
-    prior.strikes.insert(
-        article.url.clone(),
-        Strike {
-            count: 2,
-            last_until: date(PENDING),
+    let mut state = fail_article(
+        normal(&fixture),
+        article,
+        FailedStage::Summary,
+        crate::LlmResultKind::Failed {
+            reason: "fixture failure".into(),
         },
-    );
-    let mut state = ready(
-        &fixture,
-        persisted(A, prior),
-        observation(SidecarObservation::Missing, None),
-        true,
-        START,
-    );
-    let retry_id = 93;
-    state.briefing_mut().set_articles(vec![article.clone()]);
-    state.briefing_mut().start_article(0, retry_id);
-    state.record_pending_llm_request(retry_id, PromptId::ArticleSummary);
-    let state = update(
-        state,
-        Msg::LlmCompleted {
-            request_id: retry_id,
-            result: crate::LlmResultKind::Failed {
-                reason: "summary retry failed".into(),
-            },
-            metadata: None,
-        },
-    )
-    .0;
-    let current = state.saved_results_for_url(&article.url).unwrap();
-    assert!(current.signal.is_some() && current.summary.is_some());
-    let (state, pending) = request(state, now());
-    assert!(pending.iter().any(|effect| matches!(effect,
-        Effect::LogMorningArchiveExcusals { articles, .. } if articles.iter().any(|excused| excused.url == article.url)
-    )));
-    let (state, effects) = acknowledge(state, &pending);
-    assert!(effects.iter().any(|effect| matches!(effect, Effect::ArchiveRequested { ordered_urls, summaries, .. }
-        if ordered_urls.contains(&article.url) && !summaries.contains_key(&article.url) && !summaries.is_empty())));
-    let (state, effects) = completed(state);
-    let (state, _) = acknowledge(state, &effects);
-    assert_eq!(state.batch_archive_outcome().unwrap().excused_articles, 1);
-}
-
-#[test]
-fn blocked_morning_reports_every_failed_stage_for_the_excused_article() {
-    let fixture = Fixture::new(&[
-        ("retry", Some(5), false, None),
-        ("other-backlog", Some(5), true, None),
-    ]);
-    let url = &fixture.articles[0].url;
-    let mut prior = record(START, Some(LAST), None);
-    prior.strikes.insert(
-        url.clone(),
-        Strike {
-            count: 2,
-            last_until: date(PENDING),
-        },
-    );
-    let mut state = ready(
-        &fixture,
-        persisted(A, prior),
-        observation(SidecarObservation::Missing, None),
-        true,
-        START,
     );
     let morning = state.morning_archive.as_mut().unwrap();
-    morning.note_failure(url, FailedStage::Summary);
-    morning.note_failure(url, FailedStage::Scoring);
-    let (state, pending) = request(state, now());
-    let expected = [ExcusedArticle {
-        url: url.clone(),
-        stages: vec![FailedStage::Summary, FailedStage::Scoring],
-    }];
-    assert!(pending.iter().any(|effect| matches!(effect, Effect::LogMorningArchiveExcusals { articles, blocked: true, .. } if articles == &expected)));
-    let (state, effects) = acknowledge(state, &pending);
-    assert!(effects.is_empty());
-    assert_outcome(
-        &state,
-        BatchArchiveStatus::CycleFailed,
-        Some(BatchArchiveReason::Backlog),
-    );
-    let result = state.batch_archive_outcome().unwrap();
-    assert_eq!((result.excused_articles, result.backlog_articles), (1, 1));
-    assert_eq!(result.excused, expected);
-}
-
-#[test]
-fn failed_summary_is_reported_and_recovery_can_enter_only_an_unconfirmed_replay() {
-    let failed = Fixture::new(&[
-        ("retry", Some(5), false, None),
-        ("other", Some(5), true, Some((95, "other"))),
-    ]);
-    let mut checkpoint = persisted(A, record(START, None, None));
-    for day in [date(LAST), date(PENDING), now()] {
-        let (state, effects) =
-            morning_with_failure(&failed, checkpoint.clone(), day, FailedStage::Summary);
-        let saved = effects
-            .iter()
-            .find_map(|e| match e {
-                Effect::SavePortfolioRecord { record, .. } => Some(record),
-                _ => None,
-            })
-            .unwrap();
-        checkpoint.portfolio.insert(key(A), saved.clone());
-        let (state, followup) = acknowledge(state, &effects);
-        if day != now() {
-            assert_outcome(
-                &state,
-                BatchArchiveStatus::CycleFailed,
-                Some(BatchArchiveReason::Backlog),
-            );
-            continue;
-        }
-        assert!(effects.iter().any(|e| matches!(e, Effect::LogMorningArchiveExcusals { articles, blocked: false, .. } if articles == &[ExcusedArticle { url: "https://meter.example/retry".into(), stages: vec![FailedStage::Summary] }])));
-        assert!(followup.iter().any(|e| matches!(e, Effect::ArchiveRequested { ordered_urls, .. } if ordered_urls == &["https://meter.example/other"])));
-        let (state, saved) = completed(state);
-        let (state, _) = acknowledge(state, &saved);
-        assert_outcome(&state, BatchArchiveStatus::Exported, None);
-        assert_eq!(state.batch_archive_outcome().unwrap().excused_articles, 1);
-        checkpoint
-            .portfolio
-            .insert(key(A), record(START, Some("2026-10-03T12:00:00Z"), None));
+    for stage in [
+        FailedStage::Scoring,
+        FailedStage::Summary,
+        FailedStage::Triage,
+        FailedStage::Summary,
+    ] {
+        morning.note_failure(&article.url, stage);
     }
-    let recovered = Fixture::new(&[
-        ("retry", Some(5), true, Some((99, "retry"))),
-        ("other", Some(5), true, Some((95, "other"))),
-    ]);
-    let state = ready(
-        &recovered,
-        checkpoint.clone(),
-        observation(
-            SidecarObservation::Parsed(None),
-            Some(windowed(START, "2026-10-03T12:00:00Z")),
-        ),
-        false,
-        START,
-    );
-    let (_, effect) = export(state, now() + chrono::TimeDelta::hours(1));
-    assert!(
-        matches!(effect, Effect::ArchiveRequested { ordered_urls, summaries, .. } if ordered_urls.contains(&"https://meter.example/retry".into()) && summaries.contains_key("https://meter.example/retry"))
-    );
-    let state = ready(
-        &recovered,
-        checkpoint,
-        observation(
-            sidecar("2026-10-03T12:00:00Z"),
-            Some(windowed(START, "2026-10-03T12:00:00Z")),
-        ),
-        true,
-        "2026-10-03T12:00:00Z",
-    );
-    let (state, effects) = request(state, now() + chrono::TimeDelta::hours(2));
-    assert!(effects.is_empty());
+    let (state, save) = request(state, now());
+    let (state, _) = acknowledge(state, &save);
     assert_outcome(&state, BatchArchiveStatus::NothingNew, None);
-}
-
-#[test]
-fn scoring_failure_on_third_morning_exports_other_articles_and_logs_url() {
-    let fixture = Fixture::new(&[
-        ("retry", Some(5), true, None),
-        ("other", Some(5), true, Some((95, "other"))),
-    ]);
-    let mut durable = record(START, None, None);
-    for day in [date(LAST), date(PENDING), now()] {
-        let (state, effects) =
-            morning_with_failure(&fixture, persisted(A, durable), day, FailedStage::Scoring);
-        durable = effects
-            .iter()
-            .find_map(|e| match e {
-                Effect::SavePortfolioRecord { record, .. } => Some(record.clone()),
-                _ => None,
-            })
-            .unwrap();
-        let (state, followup) = acknowledge(state, &effects);
-        if day == now() {
-            assert!(effects.iter().any(|e| matches!(e, Effect::LogMorningArchiveExcusals { articles, blocked: false, .. } if articles[0].url == "https://meter.example/retry" && articles[0].stages == [FailedStage::Scoring])));
-            assert!(followup.iter().any(|e| matches!(e, Effect::ArchiveRequested { ordered_urls, .. } if ordered_urls == &["https://meter.example/other"])));
-        } else {
-            assert_outcome(
-                &state,
-                BatchArchiveStatus::CycleFailed,
-                Some(BatchArchiveReason::Backlog),
-            );
-        }
-    }
+    assert_eq!(
+        state.batch_archive_outcome().unwrap().left_out,
+        [LeftOutArticle {
+            url: article.url.clone(),
+            title: article.source_title.clone(),
+            reason: "failed:triage+summary+scoring".into(),
+        }]
+    );
 }
 
 fn apply_portfolio_writes(stored: &mut BriefingCheckpoint, effects: &[Effect]) {
@@ -1425,11 +1244,41 @@ fn apply_portfolio_writes(stored: &mut BriefingCheckpoint, effects: &[Effect]) {
 }
 
 #[test]
+fn relaxed_fetch_timestamp_is_retained_as_undated_after_confirmation() {
+    let relaxed = "2026-10-03T09:00:00UTC";
+    assert!(date(relaxed) < date(LAST));
+    assert!(DateTime::parse_from_rfc3339(relaxed).is_err());
+
+    let mut fixture = Fixture::selected();
+    let mut unfinished = article("unfinished");
+    unfinished.fetched_utc = Some(relaxed.into());
+    let url = unfinished.url.clone();
+    fixture.articles.push(unfinished);
+
+    let mut checkpoint = persisted(A, record(START, Some(LAST), None));
+    let (_, intent) = request(normal(&fixture), date(LAST));
+    apply_portfolio_writes(&mut checkpoint, &intent);
+    assert!(checkpoint.portfolio[&key(A)]
+        .pending_left_out
+        .contains_key(&url));
+
+    let confirmed = resolve_window(
+        &checkpoint,
+        &key(A),
+        &observation(sidecar(LAST), Some(windowed(START, LAST))),
+        now(),
+    )
+    .unwrap();
+    assert_eq!(confirmed.since_utc, date(LAST));
+    assert_eq!(confirmed.record.left_out.get(&url), Some(&None));
+}
+
+#[test]
 fn window_sequence_accounts_for_membership_export_uniqueness_and_selection() {
     let bootstrap = "2026-09-27T06:00:00.123456Z";
     let boundary = "2026-09-30T10:00:00Z";
     let skipped = "2026-09-28T08:00:00Z";
-    let backlog_day = "2026-09-29T08:30:00Z";
+    let quota_day = "2026-09-29T08:30:00Z";
     let second = "2026-10-01T11:00:00Z";
     let quiet_day = "2026-10-02T11:15:00Z";
     let final_until = "2026-10-03T12:00:00Z";
@@ -1466,20 +1315,68 @@ fn window_sequence_accounts_for_membership_export_uniqueness_and_selection() {
         );
     }
     fixture.exclusions.insert(exclusion("excluded"));
-    let mut backlog_fixture = fixture.clone();
     let mut incomplete = article("incomplete");
     incomplete.fetched_utc = Some(bootstrap.into());
-    backlog_fixture.articles.push(incomplete);
+    let mut incomplete_next = article("incomplete-next");
+    incomplete_next.fetched_utc = Some(boundary.into());
+    let mut incomplete_replay = article("incomplete-replay");
+    incomplete_replay.fetched_utc = Some("2026-09-29T09:00:00Z".into());
+    let mut incomplete_quiet = article("incomplete-quiet");
+    incomplete_quiet.fetched_utc = Some("2026-10-02T09:00:00Z".into());
+    let omissions = [
+        incomplete,
+        incomplete_replay,
+        incomplete_next,
+        incomplete_quiet,
+    ];
+    fixture.articles.extend(omissions.iter().cloned());
+    let mut recovered = fixture.clone();
+    let formerly_incomplete = &omissions[0];
+    let triage_key = configured
+        .current_triage_cache_key(&formerly_incomplete.content_hash)
+        .unwrap();
+    let summary_key = configured
+        .current_summary_cache_key(&formerly_incomplete.content_hash)
+        .unwrap();
+    let signal_key = crate::update::signal_candidate::input_key_for_current_results(
+        &configured,
+        formerly_incomplete,
+        &triage(5),
+        &summary_key,
+        &summary(),
+    )
+    .unwrap();
+    recovered.triages.insert_entry(
+        triage_key,
+        TriageCacheEntry {
+            result: triage(5),
+            created_at_utc: DATE.into(),
+        },
+    );
+    recovered.summaries.insert(
+        summary_key,
+        SummaryCacheEntry {
+            result: summary(),
+            created_at_utc: DATE.into(),
+        },
+    );
+    recovered.scores.insert(
+        signal_key,
+        SignalCandidateCacheEntry {
+            result: score("recovered", 99),
+            created_at_utc: DATE.into(),
+        },
+    );
     let mut cp = BriefingCheckpoint {
         since_utc: Some(DESKTOP.into()),
         ..Default::default()
     };
     let mut confirmed = Vec::new();
     let mut previous = None;
-    let mut blocked_window = None;
+    let mut reported = HashSet::new();
     for (until, sidecar, publish, confirm) in [
         (skipped, sidecar(bootstrap), true, false),
-        (backlog_day, SidecarObservation::Parsed(None), false, false),
+        (quota_day, SidecarObservation::Parsed(None), false, false),
         (boundary, SidecarObservation::Parsed(None), true, true),
         (second, self::sidecar(boundary), true, true),
         (quiet_day, self::sidecar(second), false, false),
@@ -1487,17 +1384,17 @@ fn window_sequence_accounts_for_membership_export_uniqueness_and_selection() {
     ] {
         let seen = observation(sidecar, previous);
         let resolved = resolve_window(&cp, &key(A), &seen, now()).unwrap();
-        let active = if until == backlog_day {
-            &backlog_fixture
+        let active = if until == boundary {
+            &recovered
         } else {
             &fixture
         };
         let (state, startup_effects) =
             set_up(metadata_replies(active.hydrate()), cp.clone(), seen, false);
-        let state = ready_after_setup(
+        let mut state = ready_after_setup(
             state,
             &startup_effects,
-            &active.articles,
+            &fixture.articles,
             &resolved.since_utc.to_rfc3339(),
             |effects| apply_portfolio_writes(&mut cp, effects),
         );
@@ -1513,22 +1410,28 @@ fn window_sequence_accounts_for_membership_export_uniqueness_and_selection() {
             })
             .map(|entry| entry.article.url.clone())
             .collect();
+        if until == quota_day {
+            state.halt_model_dispatch(crate::state::ModelDispatchHalt::RunQuota("limit".into()));
+        }
         let (state, effects) = request(state, date(until));
         apply_portfolio_writes(&mut cp, &effects);
         if !publish {
-            assert!(effects.is_empty());
-            if until == backlog_day {
+            if until == quota_day {
+                assert!(effects.is_empty());
                 assert_outcome(
                     &state,
                     BatchArchiveStatus::CycleFailed,
-                    Some(BatchArchiveReason::Backlog),
+                    Some(BatchArchiveReason::QuotaHalted),
                 );
-                blocked_window = Some((
-                    ArchiveWindow::from_submission(Some(resolved.since_utc), date(until)),
-                    state.batch_archive_outcome().unwrap().backlog_articles,
-                ));
+                assert_eq!(state.batch_archive_since_utc(), Some(date(bootstrap)));
             } else {
+                let (state, effects) = acknowledge(state, &effects);
+                assert!(effects.is_empty());
                 assert_outcome(&state, BatchArchiveStatus::NothingNew, None);
+                let left_out = &state.batch_archive_outcome().unwrap().left_out;
+                assert_eq!(left_out.len(), 1);
+                assert_eq!(left_out[0].url, omissions[3].url);
+                assert!(reported.insert(left_out[0].url.clone()));
             }
             continue;
         }
@@ -1548,7 +1451,7 @@ fn window_sequence_accounts_for_membership_export_uniqueness_and_selection() {
             .expect("durable intent releases publication");
         previous = Some(windowed(&resolved.since_utc.to_rfc3339(), until));
         let (state, save) = completed(state);
-        if until == boundary {
+        let state = if until == boundary {
             let (state, _) = update(
                 state,
                 Msg::PortfolioRecordSaved {
@@ -1564,9 +1467,21 @@ fn window_sequence_accounts_for_membership_export_uniqueness_and_selection() {
             let stored = &cp.portfolio[&key(A)];
             assert_eq!(stored.pending_until_utc, Some(date(boundary)));
             assert_eq!(stored.last_archive_until_utc, Some(date(skipped)));
+            assert!(stored.pending_left_out.contains_key(&omissions[1].url));
+            assert!(!ordered_urls.contains(&formerly_incomplete.url));
+            state
         } else {
             apply_portfolio_writes(&mut cp, &save);
-            let _ = acknowledge(state, &save);
+            let (state, _) = acknowledge(state, &save);
+            assert_outcome(&state, BatchArchiveStatus::Exported, None);
+            state
+        };
+        for omission in &state.batch_archive_outcome().unwrap().left_out {
+            assert_eq!(omission.reason, "not_finished");
+            assert!(fixture.articles.iter().any(|a| a.url == omission.url
+                && a.source_title == omission.title
+                && window.contains(a.fetched_utc.as_deref())));
+            assert!(reported.insert(omission.url.clone()));
         }
         if confirm {
             confirmed.push((window, ordered_urls, folds, deliberate_omissions));
@@ -1631,9 +1546,8 @@ fn window_sequence_accounts_for_membership_export_uniqueness_and_selection() {
             assert!(once.insert(url));
         }
     }
-    // 4. Each unexported member has a concrete selection or backlog explanation.
-    let (blocked_window, backlog) = blocked_window.expect("backlog blocked one window");
-    assert!(blocked_window.contains(Some(bootstrap)) && backlog == 1);
+    // 4. Each unexported member has a concrete selection or left-out explanation.
+    assert_eq!(reported, omissions.into_iter().map(|a| a.url).collect());
     for (window, urls, folds, deliberate_omissions) in &confirmed {
         for a in fixture
             .articles
@@ -1642,6 +1556,7 @@ fn window_sequence_accounts_for_membership_export_uniqueness_and_selection() {
         {
             assert!(
                 deliberate_omissions.contains(&a.url)
+                    || reported.contains(&a.url)
                     || folds.values().flatten().any(|member| member.url == a.url),
                 "unexplained omission: {}",
                 a.url

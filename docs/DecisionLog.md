@@ -501,3 +501,23 @@ Refs: docs/EngineeringDiary.md 2026-08-16 "Fixed-policy SecretStore launch bound
 Decision: Archive windows are half-open. An archive shall cover the articles fetched from its start up to, but not including, its end, which is the time the export started. No article is ever in two consecutive archives, and none falls between them. An article with a missing or unreadable date stays in every archive, as before. The archive format version stays 2. This refines 2026-09-20 "Archive coverage counters measure the exporter's window".
 Context: Why: a morning export that ends where the next one starts must neither repeat nor drop an article. Approved by Lars 2026-11-27. He asked why the existing checkpoint mark is not used; he was told it stays the start of every archive, the fixed end makes the boundary exact, and the morning feed gets a second mark that follows what the portfolio step confirmed, with the simpler alternative (existing mark only, failed mornings processed by hand) named. His words: "approved."
 Refs: docs/ArchiveExportFormat.md; docs/plans/Plan.MorningBatchRun.md
+
+## 2026-11-27 - Keys are read only when a launcher asks
+Decision: Keys are read only when a launcher asks. The Harvester reads its stored keys once at start, and only when started by one of its launchers. A test or tool never reads them, and a key value is never shown anywhere. This refines 2026-11-27 "API keys are read from Windows Credential Manager; hosts start without a typed password".
+Context: Why: so no test, probe or agent-run command can touch the real keys. Approved by Lars 2026-11-27.
+Refs: docs/Architecture.md (launch policy); docs/ThreatModel.md
+
+## 2026-11-27 - The morning run builds only the released morning branch
+Decision: The morning run builds only the released morning branch. That branch moves forward only on purpose, to a commit on main whose full checks are green. Nobody commits on it, and the morning copy is never an agent's working folder. This refines 2026-09-30 "The Batch API and batch-only modes are removed" (its consequence that the Batch launch policy supplies no runtime arguments): the morning path accepts only the archive target.
+Context: Why: the run uses real keys and will later run unattended. Approved by Lars 2026-11-27.
+Refs: docs/Architecture.md (launch policy and morning checkout); scripts/Advance-MorningBranch.ps1
+
+## 2026-11-27 - Failed articles never hold back the morning archive
+Decision: Failed articles never hold back the morning archive. An article whose scoring or summary failed is left out and named in the brief with its link. The archive is held back only when the run as a whole failed. This refines 2026-10-30 "LLM quotas apply per pipeline run, and a halted run says so": a quota halt is a failure of the run as a whole and still holds the archive back. It replaces the two-morning waiting rule of docs/plans/Plan.MorningBatchRun.md, which no earlier entry recorded.
+Context: Why: a few failed articles are normal. Approved by Lars 2026-11-27. His words behind it: "It is common that one or a few articles fails. This should be expected."
+Refs: docs/ArchiveExportFormat.md (Batch result line); docs/Architecture.md
+
+## 2026-11-27 - The morning feed has its own starting mark
+Decision: The morning feed has its own starting mark. It only moves forward, and only when the portfolio step has confirmed an archive as processed. Desktop exports never move it once it exists. This refines 2026-10-15 "A completed archive checkpoint selects the since-archive view" and 2026-11-27 "Archive windows are half-open".
+Context: Why: a failed or skipped morning rolls into the next one. Approved by Lars 2026-11-27.
+Refs: docs/Architecture.md (morning window); docs/ArchiveExportFormat.md

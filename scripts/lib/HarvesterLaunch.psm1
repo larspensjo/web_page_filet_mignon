@@ -179,7 +179,7 @@ function Write-HarvesterMorningFailure {
     param([string]$Status, [string]$Reason, $Commit)
 
     $result = [ordered]@{
-        v                   = 1
+        v                   = 2
         status              = $Status
         articles            = 0
         path                = $null
@@ -191,8 +191,8 @@ function Write-HarvesterMorningFailure {
         since_utc           = $null
         until_utc           = $null
         failed_sources      = 0
-        backlog_articles    = 0
-        excused_articles    = 0
+        left_out_articles   = 0
+        left_out            = @()
         lock_holder         = $null
         reason              = $Reason
         commit              = $Commit

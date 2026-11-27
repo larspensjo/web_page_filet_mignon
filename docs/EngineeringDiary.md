@@ -3021,3 +3021,11 @@ Context: AI_portfolio writes `archive.md.processed` after processing an archive,
 Change: The Harvester keeps its own per-target record of the confirmed start in `.briefing_checkpoint.ron`; the mark may only move it forward, never past the last published archive, and a null, older, future, missing or unreadable mark changes nothing.
 Lessons Learned: Treat another repository's status file as a signal that can only advance your own durable state, never as the state itself, and keep a positive confirmation separate from "file exists".
 Refs: crates/harvester_core/src/morning_archive.rs, docs/ArchiveExportFormat.md, docs/plans/Plan.MorningBatchRun.md
+
+## 2026-11-27 - Morning archive blocked by articles the pipeline never loaded
+Type: Bug Fix
+Context: The first morning run started with zero unfinished work and later blocked on three saved articles absent from the pipeline's window.
+Change: The morning gate handles run-level failures. Result line version 2 names articles missing required results and the stage of any recorded failure. Failure results carry an empty omission array. The per-target checkpoint retains omissions through empty mornings and unconfirmed replays, prunes dated entries when the confirmed window passes them, and ignores old strikes. The morning run logs each omitted URL and reason and prints and logs failed source IDs.
+Lessons Learned: Saved results can include files intake never loaded, so a publication gate cannot assume a missing result has a task that can finish it. Published archives and durably recorded empty mornings settle their omissions. Omissions from a failed publication can still be re-evaluated on retry.
+Prevention: Reducer and batch tests cover the zero-work mismatch, failed writes and replay. The formatter fixtures pin the consumer-visible bytes, and a checkpoint regression checks pruning across 32 confirmed mornings. A timestamp regression checks that omission dating follows archive-window parsing.
+Refs: crates/harvester_core/src/update/tests/morning_archive_tests.rs, crates/harvester_batch/tests/archive_out_contract.rs, crates/harvester_batch/tests/fixtures/result_line/, crates/harvester_io/src/morning_archive_tests.rs, docs/ArchiveExportFormat.md

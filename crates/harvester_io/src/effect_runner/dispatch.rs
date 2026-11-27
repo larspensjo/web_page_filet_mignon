@@ -648,13 +648,6 @@ impl EffectRunner {
                     }
                 });
             }
-            Effect::LogMorningArchiveExcusals {
-                target,
-                articles,
-                blocked,
-            } => {
-                crate::archive_observation::log_excused_articles(&target, &articles, blocked);
-            }
             Effect::SaveBriefingCheckpoint { save_id, since_utc } => {
                 let msg_tx = self.msg_tx.clone();
                 let path = self.paths.briefing_checkpoint_path.clone();

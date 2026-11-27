@@ -5,9 +5,7 @@ use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::{ArchiveDocAnnotations, ArchiveWindow};
 use serde::{Deserialize, Serialize};
 
-use crate::morning_archive::{
-    CheckpointWrite, ExcusedArticle, ExternalArchiveTarget, PortfolioRecord,
-};
+use crate::morning_archive::{CheckpointWrite, ExternalArchiveTarget, PortfolioRecord};
 
 /// The reducer-owned runtime projection written by the persistence worker.
 /// Capturing it while reducing keeps the host from reading state out of band.
@@ -140,11 +138,6 @@ pub enum Effect {
         target_key: String,
         record: PortfolioRecord,
         checkpoint: CheckpointWrite,
-    },
-    LogMorningArchiveExcusals {
-        target: PathBuf,
-        articles: Vec<ExcusedArticle>,
-        blocked: bool,
     },
     /// Save (or clear) the briefing time checkpoint.
     SaveBriefingCheckpoint {

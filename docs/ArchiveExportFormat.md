@@ -73,9 +73,6 @@ In summary mode the body is the newest saved summary for the article's content
 hash under any key, including a stale key; otherwise the exporter falls back to
 the full article. Dialog and header summary-token estimates resolve the same
 summary and count its output tokens, or full article tokens if none resolves.
-When the morning gate excuses a summary failure and an eligible current-key
-score selects the article, the request omits the summary and the exporter
-uses the full article body.
 Reading-pane summaries separately require a current key. The saved-results index
 supplies content hashes for these lookups without requiring a live session.
 These source changes preserve all field meanings and `export_schema: 2`.
@@ -267,7 +264,8 @@ archive the consumer processed. A null `until_utc` provides no confirmation for
 replacement. The Harvester never writes this sidecar.
 
 Harvester stores the desktop checkpoint and per-target portfolio records in
-`.briefing_checkpoint.ron`. When a read encounters malformed RON or an
+`.briefing_checkpoint.ron`. Older per-target records with a `strikes` field
+load with that field ignored. When a read encounters malformed RON or an
 undecodable record, it recovers the desktop `since_utc` if that field still
 decodes. Reads leave the checkpoint in place. On the next edit, Harvester
 moves the original bytes to
@@ -278,20 +276,23 @@ stops morning startup with `record_unreadable`.
 
 ## Batch result line
 
-Contract limits (approved by the Orchestrator, 2026-11-27, agreed with AI_portfolio): the
-result line is printed exactly once, as the last stdout line; within `v` 1 a field is never
-removed, renamed or reordered, and new fields are only appended; the target name is never left
-without a complete archive; the checkpoint is saved only after publication; an unprocessed
-previous archive is kept aside, never a reason to refuse.
+**Contract limits.** The result line is printed exactly once, as the last
+stdout line. Within a result-line version (`v`), fields are never removed,
+renamed, or reordered. New fields are only appended. Removing or renaming a
+field requires a new `v`. Version 2 carries the articles the morning left out.
+The published target always has complete archive bytes, and the desktop
+checkpoint advances after publication. An unprocessed previous archive is
+kept aside and is never a reason to refuse publication.
 
 The morning launcher and the batch executable's `--archive-out` path report
 their outcomes as a final stdout line beginning with `HARVESTER_RESULT ` followed
-by an ASCII JSON object, encoded as UTF-8 without a BOM. All keys are present,
-in this order.
+by an ASCII JSON object, encoded as UTF-8 without a BOM. Every result line uses
+version 2, including launcher-generated argument, update (23), and build (24)
+failures. All keys are present in this order.
 
 | Key | Value |
 | --- | --- |
-| `v` | Result line version, currently 1 |
+| `v` | Result line version, currently 2 |
 | `status` | Outcome from the exit-code table below |
 | `articles` | Document count, or 0 when no archive was published |
 | `path` | Published target path, or null |
@@ -303,15 +304,43 @@ in this order.
 | `since_utc` | Resolved window start, or null before resolution |
 | `until_utc` | Export window end, or null without an export request |
 | `failed_sources` | Sources whose poll failed this run |
-| `backlog_articles` | Unsettled articles that blocked export, or 0 |
-| `excused_articles` | Articles excused after two consecutive failed mornings |
+| `left_out_articles` | Exact length of `left_out`, with no cap |
+| `left_out` | Array of objects with `url`, `title` (source title or null), and `reason`, in URL order. |
 | `lock_holder` | Host, PID, and start time of the output lock holder when available, or null |
 | `reason` | Fixed outcome token, or null for a clean result |
-| `commit` | Additive final field. The full 40-hex commit hash, or null when unknown. The launcher reports the checkout's known HEAD on failures and passes the verified hash to the executable in `HARVESTER_MORNING_COMMIT`. The executable reports null when that variable is unset or invalid. |
+| `commit` | The full 40-hex commit hash, or null when unknown. The launcher reports the checkout's known HEAD on failures and passes the verified hash to the executable in `HARVESTER_MORNING_COMMIT`. The executable reports null when that variable is unset or invalid. |
 
 Window timestamps use the same RFC 3339 UTC spelling as the archive index,
 with a `Z` suffix and any fractional precision of the window start.
 Consumers should accept unfamiliar reason tokens.
+
+Only `exported` and `nothing_new` can carry omissions. All other statuses,
+including `quota_halted` cycle failures and publication failures, have
+`"left_out_articles":0,"left_out":[]`. The array is always present and
+uses `[]` for zero items.
+
+An in-window article is left out if it lacks current triage, a required
+summary, or a required score. Pre-triage exclusions and articles below the
+priority cutoff are ordinary selection omissions. An item's `reason` is
+`not_finished` when this run recorded no stage failure. Otherwise it is
+`failed:` followed by the failed stages, joined with `+` in pipeline order
+(`triage`, `summary`, `scoring`). Each failed stage appears once and the
+prefix appears once, as in `failed:summary+scoring`.
+
+A redo can re-evaluate articles in the pipeline. Provisional omissions
+from a failed run or publication can be reported on that retry. Each URL
+reported by an `exported` or `nothing_new` run is remembered for that target.
+It stays out of later morning selections and is not listed again, including
+after `nothing_new` or on an unconfirmed replay. Once the archive is confirmed
+processed and the window start passes an article's fetch date, the date keeps it out of
+the morning feed and the per-target record drops its URL. Undated omissions
+remain recorded because they have no date by which to age out.
+
+The morning run logs and prints each failed source before the result line.
+The byte-exact [formatter fixtures](../crates/harvester_batch/tests/fixtures/result_line/)
+cover `exported` with two omissions, `cycle_failed` with `quota_halted`,
+and `nothing_new` with an omission. Each file is one UTF-8 line with no
+BOM and a trailing LF.
 
 For `exported`, a results flush failure supplies `results_not_saved` only when
 the reason is still null. An earlier `checkpoint_not_saved` or `export_ack_lost`
@@ -320,8 +349,8 @@ reason takes precedence.
 | Exit code | Status | Effect |
 | --- | --- | --- |
 | 0 | `exported` | Archive published. A failed checkpoint save is reconciled on the next run. |
-| 10 | `nothing_new` | No selected documents or backlog. The target, sidecar and desktop checkpoint stay in place. |
-| 20 | `cycle_failed` | The run could not reach a publishable selection. This includes a graceful interrupt before export. |
+| 10 | `nothing_new` | No selected documents. The target, sidecar and desktop checkpoint stay in place. The per-target record marks any reported articles as left out. |
+| 20 | `cycle_failed` | A run-level failure held back publication. The ordered gate checks `interrupted`, `result_store_unavailable`, `saved_results_unavailable`, `quota_halted`, then `total_failure` of source polls. |
 | 21 | `export_failed` | The new archive was not published. |
 | 22 | `locked` | Another host holds the output folder lock. |
 | 23 | `update_failed` | The morning launcher could not prepare the checkout. Reasons include `no_morning_branch`, `morning_not_on_main`, `clone_failed`, `checkout_foreign`, `checkout_dirty`, `checkout_diverged`, and `fast_forward_failed`. |
@@ -334,7 +363,10 @@ argument refusals. The batch executable keeps its existing exit codes.
 The first interrupt after the export effect is issued leaves publication in
 control of the outcome. A second interrupt or an abrupt termination may leave
 no result line. The next run reconciles the recorded intent against the
-target's index. Completed publication steps reset the acknowledgement
-watchdog. The host waits while the worker can still replace the target. If the
+target's index. Under the tolerance-over-refusal preference, if the process dies
+after publication but before printing the result line, the next startup retires
+that run's omissions without their appearing in a brief. Completed publication
+steps reset the acknowledgement watchdog. The host waits while the worker can
+still replace the target. If the
 worker acknowledgement is lost, the host checks the index and reports reason
 `export_ack_lost`. Kept-aside paths are recorded when the copy becomes visible.

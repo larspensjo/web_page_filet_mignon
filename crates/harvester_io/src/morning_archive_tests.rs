@@ -211,13 +211,7 @@ fn set_set_now_and_clear_keep_every_portfolio_record() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join(".briefing_checkpoint.ron");
     let mut a = record(START);
-    a.strikes.insert(
-        "https://example.com/retry".into(),
-        Strike {
-            count: 1,
-            last_until: END.parse().unwrap(),
-        },
-    );
+    a.pending_until_utc = Some(LATER.parse().unwrap());
     let b = record(END);
     save_portfolio_record(&path, "a", &a, CheckpointWrite::Unchanged).unwrap();
     save_portfolio_record(&path, "b", &b, CheckpointWrite::Unchanged).unwrap();
@@ -241,6 +235,110 @@ fn old_checkpoint_without_map_loads_with_an_empty_map() {
     let checkpoint = load_checkpoint_record(&path).unwrap();
     assert_eq!(checkpoint.since_utc.as_deref(), Some(START));
     assert!(checkpoint.portfolio.is_empty());
+}
+
+#[test]
+fn legacy_strikes_load_without_losing_checkpoint_fields_and_are_not_written() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join(".briefing_checkpoint.ron");
+    fs::write(
+        &path,
+        format!(
+            r#"(since_utc: Some("{START}"), portfolio: {{
+                "a": (confirmed_until_utc: Some("{START}"), last_archive_until_utc: Some("{END}"),
+                      pending_until_utc: Some("{LATER}"), strikes: {{"https://example.com/retry": (count: 2, last_until: "{END}")}}),
+                "b": (confirmed_until_utc: Some("{END}"), last_archive_until_utc: None, pending_until_utc: None),
+            }})"#
+        ),
+    )
+    .unwrap();
+    let checkpoint = load_checkpoint_record(&path).unwrap();
+    assert_eq!(checkpoint.since_utc.as_deref(), Some(START));
+    assert_eq!(checkpoint.portfolio.len(), 2);
+    assert_eq!(
+        checkpoint.portfolio["a"].confirmed_until_utc,
+        Some(START.parse().unwrap())
+    );
+    assert_eq!(
+        checkpoint.portfolio["a"].last_archive_until_utc,
+        Some(END.parse().unwrap())
+    );
+    assert_eq!(
+        checkpoint.portfolio["a"].pending_until_utc,
+        Some(LATER.parse().unwrap())
+    );
+    assert_eq!(
+        checkpoint.portfolio["b"].confirmed_until_utc,
+        Some(END.parse().unwrap())
+    );
+
+    save_briefing_checkpoint(&path, Some(START)).unwrap();
+    assert!(!fs::read_to_string(&path).unwrap().contains("strikes"));
+    let rewritten = load_checkpoint_record(&path).unwrap();
+    assert_eq!(rewritten, checkpoint);
+}
+
+#[test]
+fn confirmed_windows_prune_persisted_omissions_across_many_mornings() {
+    use chrono::{DateTime, TimeDelta, Utc};
+
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join(".briefing_checkpoint.ron");
+    let key = "target";
+    let mut since: DateTime<Utc> = START.parse().unwrap();
+    let mut record = PortfolioRecord {
+        confirmed_until_utc: Some(since),
+        ..Default::default()
+    };
+    record.left_out.insert("undated".into(), None);
+    record
+        .left_out
+        .insert("boundary".into(), Some(since + TimeDelta::days(1)));
+
+    for morning in 0..32 {
+        let until = since + TimeDelta::days(1);
+        let url = format!("https://example.com/morning-{morning}");
+        record.pending_until_utc = Some(until);
+        record
+            .pending_left_out
+            .insert(url.clone(), Some(since + TimeDelta::hours(1)));
+        save_portfolio_record(&path, key, &record, CheckpointWrite::Unchanged).unwrap();
+        let checkpoint = load_checkpoint_record(&path).unwrap();
+        assert!(checkpoint.portfolio[key].left_out.len() <= 2);
+        assert_eq!(checkpoint.portfolio[key].pending_left_out.len(), 1);
+
+        // Recover publication intent and advance with the corresponding consumer mark.
+        let observed = TargetObservation {
+            sidecar: SidecarObservation::Parsed(Some(until)),
+            archive: ObservedArchive::Present {
+                stamp: None,
+                index: ArchiveIndex::Schema2 {
+                    window_since_utc: Some(since),
+                    window_until_utc: Some(until),
+                    fetched_from: None,
+                    fetched_to: None,
+                },
+            },
+        };
+        let resolved = resolve_window(&checkpoint, key, &observed, until).unwrap();
+        assert_eq!(resolved.since_utc, until);
+        assert_eq!(resolved.sidecar_status, SidecarStatus::Advanced);
+        save_portfolio_record(&path, key, &resolved.record, CheckpointWrite::Unchanged).unwrap();
+        record = load_checkpoint_record(&path)
+            .unwrap()
+            .portfolio
+            .remove(key)
+            .unwrap();
+        assert!(record.pending_left_out.is_empty());
+        assert!(!record.left_out.contains_key(&url));
+        assert_eq!(record.left_out.get("undated"), Some(&None));
+        assert_eq!(record.left_out.len(), if morning == 0 { 2 } else { 1 });
+        assert_eq!(
+            record.left_out.get("boundary"),
+            (morning == 0).then_some(&Some(until))
+        );
+        since = until;
+    }
 }
 
 #[test]
@@ -369,32 +467,4 @@ fn checkpoint_recovery_preserves_existing_aside_names_on_collision() {
         .to_string_lossy()
         .ends_with("-2.ron"));
     assert_eq!(fs::read(&saved[0]).unwrap(), b"invalid RON");
-}
-
-#[test]
-fn excused_article_is_logged_with_target_url_stage_and_strike_count() {
-    let (_, messages) = crate::test_logs::capture(|| {
-        crate::archive_observation::log_excused_articles(
-            Path::new("archive.md"),
-            &[ExcusedArticle {
-                url: "https://example.com/retry".into(),
-                stages: vec![FailedStage::Summary],
-            }],
-            false,
-        );
-        crate::archive_observation::log_excused_articles(
-            Path::new("archive.md"),
-            &[ExcusedArticle {
-                url: "https://example.com/retry".into(),
-                stages: vec![FailedStage::Summary, FailedStage::Scoring],
-            }],
-            true,
-        )
-    });
-    assert!(messages.iter().any(|line| line.contains(
-        "[morning-archive] excused url=https://example.com/retry stage=summary strikes=2"
-    ) && line.contains("target=archive.md blocked=false")));
-    assert!(messages.iter().any(
-        |line| line.contains("stage=summary,scoring strikes=2 target=archive.md blocked=true")
-    ));
 }

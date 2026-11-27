@@ -168,10 +168,17 @@ impl AppState {
     /// source of truth for identical-content and same-event folds shared by the
     /// meter, dialog snapshot and archive selection.
     pub(crate) fn signal_candidate_selection(&self) -> SignalCandidateSelection {
+        self.signal_candidate_selection_matching(|_| true)
+    }
+
+    pub(crate) fn signal_candidate_selection_matching(
+        &self,
+        include: impl Fn(&str) -> bool,
+    ) -> SignalCandidateSelection {
         let scored: Vec<ScoredCandidate> = self
             .saved_results
             .values()
-            .filter(|entry| entry.in_window && entry.actionable)
+            .filter(|entry| entry.in_window && entry.actionable && include(&entry.article.url))
             .filter_map(|entry| entry.signal.as_ref().map(|result| (entry, result)))
             .map(|(entry, result)| ScoredCandidate {
                 url: entry.article.url.clone(),

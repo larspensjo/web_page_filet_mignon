@@ -100,7 +100,8 @@ Run the morning batch and write the portfolio archive:
 The launcher accepts only `--archive-out <absolute path>` or `--archive-out=<absolute path>`.
 The target's parent directory must exist, and the target must be outside the batch
 output directory. A morning run requires the stored OpenAI key. A missing Brave
-key counts as a failed source and other sources still poll.
+key counts as a failed source and other sources still poll. The morning run
+prints and logs the ID and reason for each failed source.
 
 The launcher manages `C:\Users\larsp\src\harvester-morning` as a separate clone
 of the local `morning` branch. Commits on `main` take effect in the morning run
@@ -110,13 +111,16 @@ build the batch executable there, then runs it with the main repository's
 output, sources, contexts, and prompts.
 
 The launcher or batch executable ends each reported morning outcome with one
-ASCII line in the form `HARVESTER_RESULT {json}`. Exit codes are 0 for `exported`, 10 for
+ASCII line in the form `HARVESTER_RESULT {json}` with `"v":2`. Exit codes are 0 for `exported`, 10 for
 `nothing_new`, 20 for `cycle_failed`, 21 for `export_failed`, 22 for a held output
 lock, 23 for `update_failed`, 24 for `build_failed`, and 2 for `usage_error`.
 Exit 24 also covers an executable that the launcher cannot start.
 The JSON includes the commit hash, archive path, window bounds, source and
-article counts, and estimated OpenAI cost when available. The binary updates the
-checkpoint after publication. Plain runs keep their existing exit codes.
+article counts, and estimated OpenAI cost when available. The `left_out` array
+names articles missing required results by URL, title and reason, even on a
+`nothing_new` morning. A quota, provider-credit, or repeated rate-limit halt
+gives `cycle_failed` with reason `quota_halted`. The binary updates the checkpoint
+after publication. Plain runs keep their existing exit codes.
 See [Archive Export Format](docs/ArchiveExportFormat.md#batch-result-line).
 
 Each cycle shows a compact progress block with elapsed time, cost so far, and

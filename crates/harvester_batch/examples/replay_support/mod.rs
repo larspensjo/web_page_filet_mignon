@@ -1017,7 +1017,6 @@ fn effect_kind(effect: &Effect) -> &'static str {
         Effect::LoadBriefingCheckpoint => "LoadBriefingCheckpoint",
         Effect::ObserveArchiveTarget { .. } => "ObserveArchiveTarget",
         Effect::SavePortfolioRecord { .. } => "SavePortfolioRecord",
-        Effect::LogMorningArchiveExcusals { .. } => "LogMorningArchiveExcusals",
         Effect::SaveBriefingCheckpoint { .. } => "SaveBriefingCheckpoint",
         Effect::OpenUrlInBrowser { .. } => "OpenUrlInBrowser",
         Effect::ImportSavedWebpages { .. } => "ImportSavedWebpages",

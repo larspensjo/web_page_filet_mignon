@@ -143,6 +143,24 @@ SuccessCriteria:
 - The launcher probe was removed; the flags are invoked directly against the built binary.
 Related: FI-Architecture-BatchOrchestration-0006, FI-LLM-Briefing-0001
 
+#### [FI-Architecture-BatchOrchestration-0008] Morning run loads in-window saved files that are missing results
+Status: Deferred
+TopLevel: Architecture
+SubLevel: BatchOrchestration
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: docs/ArchiveExportFormat.md
+- SourceSection: Batch result line
+- Captured: 2026-11-27
+Tags: [archive, morning, pipeline]
+Summary: Load in-window saved files that still need triage, a summary, or a score before the morning archive.
+Rationale: A saved file skipped by a `quota_halted` morning can be retired on the next successful run after one `not_finished` mention, even if the pipeline never attempted it.
+SuccessCriteria:
+- The next morning admits eligible saved files with missing required results, including those skipped during a quota halt.
+- `not_finished` is rare because files with missing results usually receive an attempt before selection.
+
 ### DownloadPipeline
 
 #### [FI-Architecture-DownloadPipeline-0001] Unified download path for linked pages

@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use harvester_core::morning_archive::{BatchArchiveOutcome, BatchArchiveStatus};
+use harvester_core::morning_archive::{BatchArchiveOutcome, BatchArchiveStatus, LeftOutArticle};
 use harvester_engine::format_archive_timestamp;
 use std::{fmt::Write, path::PathBuf};
 
@@ -52,8 +52,7 @@ pub(crate) struct ArchiveResult {
     previous_kept: Option<PathBuf>,
     previous_superseded: bool,
     until_utc: Option<DateTime<Utc>>,
-    backlog_articles: usize,
-    excused_articles: usize,
+    left_out: Vec<LeftOutArticle>,
 }
 
 impl ArchiveResult {
@@ -69,8 +68,7 @@ impl ArchiveResult {
             since_utc: None,
             until_utc: None,
             failed_sources: 0,
-            backlog_articles: 0,
-            excused_articles: 0,
+            left_out: Vec::new(),
             lock_holder: None,
         }
     }
@@ -90,8 +88,7 @@ impl ArchiveResult {
             previous_superseded: outcome.previous_superseded,
             until_utc: outcome.window.map(|window| window.until_utc()),
             failed_sources: outcome.failed_sources,
-            backlog_articles: outcome.backlog_articles,
-            excused_articles: outcome.excused_articles,
+            left_out: outcome.left_out.clone(),
             ..Self::new(status, outcome.reason.map(|reason| reason.as_str()))
         }
     }
@@ -107,16 +104,20 @@ impl ArchiveResult {
             .map(|path| path.to_string_lossy());
         let since = self.since_utc.map(format_archive_timestamp);
         let until = self.until_utc.map(format_archive_timestamp);
+        let left_out = match self.status {
+            Status::Exported | Status::NothingNew => self.left_out.as_slice(),
+            _ => &[],
+        };
         let cost = self.cost_microdollars.map_or_else(
             || "null".to_string(),
             |cost| format!("{}.{:06}", cost / 1_000_000, cost % 1_000_000),
         );
         let line = format!(
             concat!(
-                r#"HARVESTER_RESULT {{"v":1,"status":{},"articles":{},"path":{},"#,
+                r#"HARVESTER_RESULT {{"v":2,"status":{},"articles":{},"path":{},"#,
                 r#""previous_kept":{},"previous_superseded":{},"cost_usd":{},"cost_basis":{},"#,
                 r#""archive_schema":2,"since_utc":{},"until_utc":{},"failed_sources":{},"#,
-                r#""backlog_articles":{},"excused_articles":{},"lock_holder":{},"reason":{},"commit":{}}}"#,
+                r#""left_out_articles":{},"left_out":{},"lock_holder":{},"reason":{},"commit":{}}}"#,
             ),
             json(Some(self.status.as_str())),
             self.articles,
@@ -128,8 +129,8 @@ impl ArchiveResult {
             json(since.as_deref()),
             json(until.as_deref()),
             self.failed_sources,
-            self.backlog_articles,
-            self.excused_articles,
+            left_out.len(),
+            serde_json::to_string(left_out).expect("JSON left-out articles"),
             json(self.lock_holder.as_deref()),
             json(self.reason),
             json(commit),

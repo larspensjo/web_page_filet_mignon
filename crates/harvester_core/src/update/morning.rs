@@ -1,16 +1,16 @@
 use super::archive;
 use crate::morning_archive::{
-    assess_backlog, morning_gate, resolve_window, target_key, BacklogArticle, BatchArchiveOutcome,
+    morning_block_reason, resolve_window, target_key, BatchArchiveOutcome,
     BatchArchiveReason as Reason, BatchArchiveStatus as Status, BriefingCheckpoint,
-    CheckpointWrite, ExternalArchiveTarget, FailedStage, GateDecision, GateFacts, PortfolioRecord,
-    ResolvedWindow, TargetObservation,
+    CheckpointWrite, ExternalArchiveTarget, FailedStage, GateFacts, LeftOutArticle,
+    PortfolioRecord, ResolvedWindow, TargetObservation,
 };
 use crate::{AppState, Effect, PipelineStage, StartupInputOutcome};
 use chrono::{DateTime, Utc};
 use engine_logging::{engine_info, engine_warn};
 use harvester_engine::{archive_url_key, ArchiveWindow};
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
 };
 
@@ -33,7 +33,7 @@ pub(crate) struct MorningArchive {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SavePurpose {
     Startup,
-    Strikes(BatchArchiveOutcome),
+    NothingNew(BatchArchiveOutcome),
     Intent {
         request: Box<Effect>,
         outcome: BatchArchiveOutcome,
@@ -77,6 +77,11 @@ impl AppState {
 
     pub fn batch_archive_failed_sources(&self) -> usize {
         self.batch_archive_poll_counts().1
+    }
+
+    pub fn batch_archive_source_failures(&self) -> &[(String, String)] {
+        self.run_progress()
+            .map_or(&[], |run| run.source_failures.as_slice())
     }
 
     fn batch_archive_poll_counts(&self) -> (usize, usize) {
@@ -302,16 +307,11 @@ pub(super) fn record_saved(
                 None,
             ));
         }
-        (SavePurpose::Strikes(mut result), saved) => {
-            if !saved
-                && !matches!(
-                    result.reason,
-                    Some(Reason::Interrupted | Reason::TotalFailure)
-                )
-            {
+        (SavePurpose::NothingNew(mut result), saved) => {
+            if !saved {
                 result.status = Status::CycleFailed;
                 result.reason = Some(Reason::RecordNotSaved);
-                result.backlog_articles = 0;
+                result.left_out.clear();
             }
             morning.outcome = Some(result);
         }
@@ -325,10 +325,12 @@ pub(super) fn record_saved(
             if morning.interrupted {
                 result.status = Status::CycleFailed;
                 result.reason = Some(Reason::Interrupted);
+                result.left_out.clear();
                 morning.outcome = Some(result);
             } else if !saved {
                 result.status = Status::ExportFailed;
                 result.reason = Some(Reason::RecordNotSaved);
+                result.left_out.clear();
                 morning.outcome = Some(result);
             } else {
                 let Effect::ArchiveRequested { request_id, .. } = *request else {
@@ -365,9 +367,7 @@ fn outcome(
         reason,
         failed_sources,
         window,
-        backlog_articles: 0,
-        excused_articles: 0,
-        excused: Vec::new(),
+        left_out: Vec::new(),
         path: None,
         doc_count: 0,
         previous_kept: None,
@@ -398,21 +398,17 @@ pub(super) fn request(
         interrupted: morning.interrupted,
         result_store_refused: state.result_store_failure().is_some(),
         readiness: state.startup_readiness(),
+        quota_halted: state.model_dispatch_halt_kind().is_some(),
         sources_scanned,
         failed_sources,
     };
-    let early_block = match morning_gate(facts, 0, 0) {
-        GateDecision::Blocked(reason) => Some(reason),
-        _ => None,
-    };
-    if let Some(reason) = early_block.filter(|_| {
-        facts.result_store_refused || facts.readiness != crate::StartupReadinessStatus::Ready
-    }) {
-        state
-            .morning_archive
-            .as_mut()
-            .expect("configured morning")
-            .outcome = Some(outcome(
+    if let Some(reason) = morning_block_reason(facts) {
+        engine_info!(
+            "[morning-archive] target={} gate=blocked reason={}",
+            morning.target.display(),
+            reason.as_str()
+        );
+        state.morning_archive.as_mut().unwrap().outcome = Some(outcome(
             Status::CycleFailed,
             Some(reason),
             failed_sources,
@@ -420,116 +416,103 @@ pub(super) fn request(
         ));
         return Vec::new();
     }
-    let backlog: Vec<_> = state
-        .saved_results_entries()
-        .filter(|entry| {
-            entry.actionable
-                && entry.in_window
-                && window.contains(entry.article.fetched_utc.as_deref())
-        })
-        .filter_map(|entry| {
-            let failed_stages = morning
-                .failures
-                .get(&archive_url_key(&entry.article.url))
-                .map_or(&[][..], Vec::as_slice);
-            let unsettled = entry.is_unsettled(state.briefing_triage_policy());
-            // A failed retry may leave a saved current score eligible for selection.
-            // Consider its summary excusal without growing the ordinary backlog.
-            let can_omit_summary =
-                entry.signal.is_some() && failed_stages.contains(&FailedStage::Summary);
-            (unsettled || can_omit_summary).then_some(BacklogArticle {
-                url: &entry.article.url,
-                unsettled,
-                failed_stages,
-            })
-        })
-        .collect();
+
     let mut record = resolved.record.clone();
-    let assessment = assess_backlog(&record.strikes, &backlog, window.until_utc());
-    let strike_change = record.strikes != assessment.strikes;
-    record.strikes = assessment.strikes;
-    if let Some(reason) = early_block {
-        // An interrupted run can withdraw previously struck work. Persist its
-        // updated streaks while keeping the earlier gate reason authoritative.
-        let result = outcome(Status::CycleFailed, Some(reason), failed_sources, None);
-        if strike_change {
-            return vec![save_record(
-                state,
-                record,
-                CheckpointWrite::Unchanged,
-                SavePurpose::Strikes(result),
-            )];
+    let mut left_out = Vec::new();
+    let mut omissions = BTreeMap::new();
+    for entry in state.saved_results_entries().filter(|entry| {
+        entry.is_unsettled(state.briefing_triage_policy())
+            && window.contains(entry.article.fetched_utc.as_deref())
+    }) {
+        let article = &entry.article;
+        let key = archive_url_key(&article.url);
+        if record.left_out.contains_key(&key) {
+            continue;
         }
-        state
-            .morning_archive
-            .as_mut()
-            .expect("configured morning")
-            .outcome = Some(result);
-        return Vec::new();
+        let reason = match morning.failures.get(&key) {
+            Some(stages) => format!(
+                "failed:{}",
+                stages
+                    .iter()
+                    .map(|stage| stage.as_str())
+                    .collect::<Vec<_>>()
+                    .join("+")
+            ),
+            None => "not_finished".to_owned(),
+        };
+        left_out.push(LeftOutArticle {
+            url: article.url.clone(),
+            title: article.source_title.clone(),
+            reason,
+        });
+        let fetched_utc = article.fetched_utc.as_deref().and_then(|date| {
+            DateTime::parse_from_rfc3339(date)
+                .map(|fetched| fetched.with_timezone(&Utc))
+                .ok()
+        });
+        omissions.insert(key, fetched_utc);
     }
+    left_out.sort_unstable_by(|a, b| a.url.cmp(&b.url));
+
     let target = ExternalArchiveTarget {
         path: morning.target.clone(),
         disposition: resolved.disposition,
     };
-    let mut effects = Vec::new();
-    let excused_articles = assessment.excused.len();
-    let prepared = (assessment.backlog_articles == 0).then(|| {
-        archive::prepare_morning_request(
-            state,
-            request_id,
-            target.clone(),
-            window,
-            &assessment.excused,
-        )
-    });
-    if !assessment.excused.is_empty() {
-        effects.push(Effect::LogMorningArchiveExcusals {
-            target: target.path,
-            articles: assessment.excused.clone(),
-            blocked: assessment.backlog_articles > 0,
-        });
-    }
-    let selected = match &prepared {
-        Some(Effect::ArchiveRequested { ordered_urls, .. }) => ordered_urls.len(),
-        _ => 0,
+    let prepared = archive::prepare_morning_request(state, request_id, target, window, &record);
+    let Effect::ArchiveRequested { ordered_urls, .. } = &prepared else {
+        unreachable!()
     };
-    let decision = morning_gate(facts, assessment.backlog_articles, selected);
-    let mut result = match decision {
-        GateDecision::Blocked(reason) => {
-            outcome(Status::CycleFailed, Some(reason), failed_sources, None)
+    let selected = ordered_urls.len();
+    engine_info!(
+        "[morning-archive] target={} selected={selected} left_out={}",
+        morning.target.display(),
+        left_out.len()
+    );
+    for article in &left_out {
+        engine_info!(
+            "[morning-archive] left_out target={} url={} reason={}",
+            morning.target.display(),
+            article.url,
+            article.reason
+        );
+    }
+    if selected == 0 {
+        let mut result = outcome(Status::NothingNew, None, failed_sources, None);
+        result.left_out = left_out;
+        if omissions.is_empty() {
+            state.morning_archive.as_mut().unwrap().outcome = Some(result);
+            return Vec::new();
         }
-        GateDecision::NothingNew => outcome(Status::NothingNew, None, failed_sources, None),
-        GateDecision::Publish => outcome(Status::Exported, None, failed_sources, Some(window)),
-    };
-    result.backlog_articles = assessment.backlog_articles;
-    result.excused_articles = excused_articles;
-    result.excused = assessment.excused;
-    let morning = state.morning_archive.as_mut().expect("configured morning");
-    engine_info!("[morning-archive] target={} gate={decision:?} selected={selected} backlog={} excused={excused_articles}", morning.target.display(), assessment.backlog_articles);
-    if decision == GateDecision::Publish {
-        record.pending_until_utc = Some(window.until_utc());
-        morning.window.as_mut().unwrap().record = record.clone();
-        let purpose = SavePurpose::Intent {
-            request: Box::new(prepared.expect("nonempty selection")),
-            outcome: result,
-        };
-        effects.push(save_record(
+        record.left_out.append(&mut omissions);
+        return vec![save_record(
             state,
             record,
             CheckpointWrite::Unchanged,
-            purpose,
-        ));
-    } else if strike_change {
-        effects.push(save_record(
-            state,
-            record,
-            CheckpointWrite::Unchanged,
-            SavePurpose::Strikes(result),
-        ));
-    } else {
-        morning.outcome = Some(result);
+            SavePurpose::NothingNew(result),
+        )];
     }
-    effects
+
+    let mut result = outcome(Status::Exported, None, failed_sources, Some(window));
+    result.left_out = left_out;
+    record.pending_until_utc = Some(window.until_utc());
+    record.pending_left_out = omissions;
+    state
+        .morning_archive
+        .as_mut()
+        .unwrap()
+        .window
+        .as_mut()
+        .unwrap()
+        .record = record.clone();
+    vec![save_record(
+        state,
+        record,
+        CheckpointWrite::Unchanged,
+        SavePurpose::Intent {
+            request: Box::new(prepared),
+            outcome: result,
+        },
+    )]
 }
 
 pub(super) fn published(
@@ -562,8 +545,7 @@ pub(super) fn published(
         .expect("ready window")
         .record
         .clone();
-    record.last_archive_until_utc = Some(window.until_utc());
-    record.pending_until_utc = None;
+    record.complete_publication(window.until_utc());
     archive::handle_export_completed(state, request_id, &path, doc_count, None);
     vec![save_record(
         state,
@@ -593,6 +575,7 @@ pub(super) fn publication_failed(
     let (_, mut result) = morning.publishing.take().expect("matched publication");
     result.status = Status::ExportFailed;
     result.reason = Some(Reason::ExportWriteFailed);
+    result.left_out.clear();
     result.previous_superseded = previous_kept.is_some() && previous_superseded;
     result.previous_kept = previous_kept;
     let target = morning.target.to_string_lossy().into_owned();
