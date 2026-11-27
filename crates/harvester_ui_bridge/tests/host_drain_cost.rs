@@ -506,7 +506,14 @@ fn seed_summary_titles_through_cache(mut state: AppState) -> (AppState, usize) {
 
 fn load_production_scale_window() -> AppState {
     let mut state = AppState::new();
-    state = update(state, Msg::BriefingCheckpointLoaded { since_utc: None }).0;
+    state = update(
+        state,
+        Msg::BriefingCheckpointLoaded {
+            since_utc: None,
+            portfolio: Default::default(),
+        },
+    )
+    .0;
     let (active_versions, effective_models) = production_metadata();
     let contexts = production_contexts();
     state = update(

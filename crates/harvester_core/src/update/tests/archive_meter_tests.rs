@@ -15,6 +15,9 @@ use harvester_engine::{
 };
 use std::collections::{HashMap, HashSet};
 
+#[path = "morning_archive_tests.rs"]
+mod morning_archive_tests;
+
 const DATE: &str = "2026-10-03T09:00:00Z";
 fn now() -> chrono::DateTime<chrono::Utc> {
     chrono::DateTime::parse_from_rfc3339("2026-10-03T12:00:00Z")
@@ -158,7 +161,10 @@ fn load(state: AppState, articles: &[LoadedArticle]) -> AppState {
 }
 fn replies(mut state: AppState) -> AppState {
     for msg in [
-        Msg::BriefingCheckpointLoaded { since_utc: None },
+        Msg::BriefingCheckpointLoaded {
+            since_utc: None,
+            portfolio: Default::default(),
+        },
         Msg::PromptTemplateFilesLoaded,
         metadata(),
         Msg::PromptContextsLoaded {
@@ -505,7 +511,10 @@ fn prompt_context_failure_reads_unavailable_with_zero() {
     .0;
     assert_zero(&state, Status::Unavailable);
     for msg in [
-        Msg::BriefingCheckpointLoaded { since_utc: None },
+        Msg::BriefingCheckpointLoaded {
+            since_utc: None,
+            portfolio: Default::default(),
+        },
         metadata(),
         Msg::PromptTemplateFilesLoaded,
     ] {
@@ -624,7 +633,10 @@ fn selection_restores_after_missing_or_blank_startup_model() {
                 active_versions,
                 effective_models,
             },
-            Msg::BriefingCheckpointLoaded { since_utc: None },
+            Msg::BriefingCheckpointLoaded {
+                since_utc: None,
+                portfolio: Default::default(),
+            },
             Msg::PromptTemplateFilesLoaded,
             Msg::PromptContextsLoaded {
                 contexts: HashMap::new(),
@@ -651,7 +663,10 @@ fn selection_restores_after_startup_prompt_context_failure() {
         Msg::PromptContextsLoadFailed {
             reason: "required context missing".into(),
         },
-        Msg::BriefingCheckpointLoaded { since_utc: None },
+        Msg::BriefingCheckpointLoaded {
+            since_utc: None,
+            portfolio: Default::default(),
+        },
         Msg::PromptTemplateFilesLoaded,
         metadata(),
     ] {
@@ -689,7 +704,10 @@ fn selection_restore_waits_for_every_pending_startup_input_even_after_failure() 
         .0;
         let mut delayed = None;
         for (index, msg) in [
-            Msg::BriefingCheckpointLoaded { since_utc: None },
+            Msg::BriefingCheckpointLoaded {
+                since_utc: None,
+                portfolio: Default::default(),
+            },
             metadata(),
             Msg::PromptContextsLoaded {
                 contexts: HashMap::new(),
@@ -826,6 +844,7 @@ fn meter_ignores_out_of_window_and_non_actionable_scores() {
     let state = update(
         replies(f.hydrate()),
         Msg::BriefingCheckpointLoaded {
+            portfolio: Default::default(),
             since_utc: Some("2026-10-03T06:00:00Z".into()),
         },
     )
@@ -869,6 +888,7 @@ fn unsettled_count_counts_only_unsettled_window_articles() {
     let state = update(
         replies(f.hydrate()),
         Msg::BriefingCheckpointLoaded {
+            portfolio: Default::default(),
             since_utc: Some("2026-10-03T06:00:00Z".into()),
         },
     )
@@ -924,7 +944,16 @@ fn startup_message_orders_never_over_count() {
         let mut request_id = None;
         for step in order {
             state = match step {
-                0 => update(state, Msg::BriefingCheckpointLoaded { since_utc: None }).0,
+                0 => {
+                    update(
+                        state,
+                        Msg::BriefingCheckpointLoaded {
+                            since_utc: None,
+                            portfolio: Default::default(),
+                        },
+                    )
+                    .0
+                }
                 1 => update(state, Msg::PromptTemplateFilesLoaded).0,
                 2 => update(state, metadata()).0,
                 3 => {

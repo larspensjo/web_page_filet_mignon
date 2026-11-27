@@ -147,6 +147,40 @@ identical copies and attempts to clear matching temporary files over an hour old
 The portfolio owns the processed sidecar. `ArchiveExportFormat.md` defines the
 external contract.
 
+The morning archive core joins checkpoint hydration with a separate observation
+of the target and processed sidecar, in either reply order. Article-window work
+waits for both replies and acknowledgement of any startup record write. A valid
+sidecar can seed a new target, with the desktop checkpoint as the fallback.
+After seeding, only a valid later confirmation at or before the target's last
+published bound can advance the start. The desktop window uses `since_utc`.
+Desktop exports and checkpoint commands update that field through
+read-modify-write, which preserves the per-target records. Reads recover a
+decodable desktop field from malformed checkpoint data. Edits keep the
+malformed bytes under a dated backup name before replacing the checkpoint.
+A checkpoint I/O read failure stops morning startup before intake.
+
+Each normalized target key owns a confirmed bound, a last-published bound, a
+pending publication bound, and article failure streaks in
+`.briefing_checkpoint.ron`. The reducer reconciles a pending bound against the
+validated trailing index of the target. A match recovers the last-published
+bound and advances an earlier desktop checkpoint. A mismatch clears the
+pending bound. If the target is unconfirmed, a superseding archive replays
+the unconfirmed span and the publish worker keeps the old bytes.
+
+The morning gate checks interruption, result-store refusal, startup readiness,
+total failure of this run's source intake, archive backlog, and empty signal
+selection in that order. It uses the desktop archive's pinned signal selection
+and request builder with summaries enabled. Two consecutive genuine
+article-stage failures excuse the article on the next genuine failure. The
+gate resets skipped or recovered articles' streaks, logs each excused URL and
+stage, and leaves eligible current-key scores in control of selection.
+
+The reducer saves publication intent before issuing the export effect. After
+issuance, publication and its checkpoint acknowledgement determine the outcome.
+A successful publication saves its bound in `since_utc` and the last-published
+field and clears the pending bound in one write. The batch command-line host is
+wired in the next phase.
+
 Archive export previously filtered by checkpoint after a full read. The export worker now
 takes an owned hint snapshot from the process-lifetime root scan index and releases the lock
 before reading files. The directory listing determines membership and order. A hint can

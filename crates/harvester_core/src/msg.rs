@@ -8,6 +8,7 @@ use harvester_engine::llm::QuotaOrigin;
 use harvester_engine::ExtractedLink;
 use serde::{Deserialize, Serialize};
 
+use crate::morning_archive::{PortfolioRecords, TargetObservation};
 use crate::state::{AiAvailability, ArchiveTokenEstimates};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -192,7 +193,15 @@ pub enum Msg {
     TriageArticlesLoadFailed { request_id: u64, reason: String },
     /// Briefing time checkpoint loaded from disk at startup.
     /// Raw wire type; the reducer parses the string into `DateTime<Utc>`.
-    BriefingCheckpointLoaded { since_utc: Option<String> },
+    BriefingCheckpointLoaded { since_utc: Option<String>, #[serde(default)] portfolio: PortfolioRecords },
+    BriefingCheckpointLoadFailed { reason: String },
+    BatchArchiveConfigured { target: PathBuf },
+    ArchiveTargetObserved { target: PathBuf, observation: TargetObservation, observed_at: DateTime<Utc> },
+    PortfolioRecordSaved { save_id: u64, result: Result<(), String> },
+    BatchArchiveInterrupted,
+    BatchArchiveRequested { request_id: u64, submitted_at: DateTime<Utc> },
+    BatchArchivePublished { request_id: u64, doc_count: usize, previous_kept: Option<PathBuf>, previous_superseded: bool },
+    BatchArchivePublicationFailed { request_id: u64, reason: String, previous_kept: Option<PathBuf>, previous_superseded: bool },
     /// Briefing time checkpoint persisted successfully.
     BriefingCheckpointSaveSucceeded { save_id: u64 },
     /// Briefing time checkpoint persistence failed.
@@ -304,6 +313,14 @@ impl Msg {
             Self::TriageArticlesLoadProgress { .. } => "TriageArticlesLoadProgress",
             Self::TriageArticlesLoadFailed { .. } => "TriageArticlesLoadFailed",
             Self::BriefingCheckpointLoaded { .. } => "BriefingCheckpointLoaded",
+            Self::BriefingCheckpointLoadFailed { .. } => "BriefingCheckpointLoadFailed",
+            Self::BatchArchiveConfigured { .. } => "BatchArchiveConfigured",
+            Self::ArchiveTargetObserved { .. } => "ArchiveTargetObserved",
+            Self::PortfolioRecordSaved { .. } => "PortfolioRecordSaved",
+            Self::BatchArchiveInterrupted => "BatchArchiveInterrupted",
+            Self::BatchArchiveRequested { .. } => "BatchArchiveRequested",
+            Self::BatchArchivePublished { .. } => "BatchArchivePublished",
+            Self::BatchArchivePublicationFailed { .. } => "BatchArchivePublicationFailed",
             Self::BriefingCheckpointSaveSucceeded { .. } => "BriefingCheckpointSaveSucceeded",
             Self::BriefingCheckpointSaveFailed { .. } => "BriefingCheckpointSaveFailed",
             Self::BriefingCheckpointSet(..) => "BriefingCheckpointSet",

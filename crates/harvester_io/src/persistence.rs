@@ -2,6 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use engine_logging::{engine_error, engine_info, engine_warn};
+use harvester_core::morning_archive::{
+    merge_portfolio_record, BriefingCheckpoint, CheckpointWrite, PortfolioRecord,
+};
 use harvester_core::{CompletedJobSnapshot, LinkSnapshotRecord, SlimJobRecord};
 use harvester_engine::{ensure_output_dir, AtomicFileWriter};
 use serde::{Deserialize, Serialize};
@@ -774,47 +777,126 @@ fn persist_runtime_state_with_existing(
 // Briefing Checkpoint Persistence
 // ──────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct PersistedBriefingCheckpoint {
+static CHECKPOINT_WRITE: Mutex<()> = Mutex::new(());
+
+enum ReadCheckpoint {
+    Valid(BriefingCheckpoint),
+    Malformed {
+        recovered: BriefingCheckpoint,
+        position: ron::error::Span,
+    },
+}
+
+#[derive(Deserialize)]
+struct DesktopCheckpointField {
     since_utc: Option<String>,
 }
 
-/// Loads the briefing time checkpoint from disk.
-/// Returns `None` on missing file (normal), malformed RON, or non-RFC3339 timestamp.
+fn read_checkpoint_record(path: &Path) -> Result<ReadCheckpoint, String> {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ReadCheckpoint::Valid(BriefingCheckpoint::default()))
+        }
+        Err(e) => return Err(format!("failed to read checkpoint {}: {e}", path.display())),
+    };
+    Ok(match ron::de::from_bytes(&bytes) {
+        Ok(checkpoint) => ReadCheckpoint::Valid(checkpoint),
+        Err(error) => {
+            let since_utc = ron::de::from_bytes::<DesktopCheckpointField>(&bytes)
+                .ok()
+                .and_then(|field| field.since_utc)
+                .filter(|raw| chrono::DateTime::parse_from_rfc3339(raw).is_ok());
+            ReadCheckpoint::Malformed {
+                recovered: BriefingCheckpoint {
+                    since_utc,
+                    ..Default::default()
+                },
+                position: error.span,
+            }
+        }
+    })
+}
+
+pub(crate) fn load_checkpoint_record(path: &Path) -> Result<BriefingCheckpoint, String> {
+    let mut persisted = match read_checkpoint_record(path)? {
+        ReadCheckpoint::Valid(checkpoint) => checkpoint,
+        ReadCheckpoint::Malformed {
+            recovered,
+            position,
+        } => {
+            engine_warn!(
+                "[briefing-checkpoint] malformed checkpoint RON in {} at {position}; recovered since_utc={:?}",
+                path.display(), recovered.since_utc
+            );
+            recovered
+        }
+    };
+    if let Some(value) = &persisted.since_utc {
+        match chrono::DateTime::parse_from_rfc3339(value) {
+            Ok(_) => engine_info!("[briefing-checkpoint] loaded: {value}"),
+            Err(e) => {
+                engine_warn!(
+                    "[briefing-checkpoint] invalid RFC3339 in {}: {e}",
+                    path.display()
+                );
+                persisted.since_utc = None;
+            }
+        }
+    }
+    Ok(persisted)
+}
+
+/// Loads the briefing time checkpoint, retaining the stored RFC3339 spelling.
 pub fn load_briefing_checkpoint(path: &Path) -> Option<String> {
-    let text = match fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(e) => {
-            engine_warn!("[briefing-checkpoint] failed to read {:?}: {}", path, e);
-            return None;
-        }
-    };
-    let persisted: PersistedBriefingCheckpoint = match ron::from_str(&text) {
-        Ok(p) => p,
-        Err(e) => {
-            engine_warn!("[briefing-checkpoint] malformed RON in {:?}: {}", path, e);
-            return None;
-        }
-    };
-    let value = persisted.since_utc?;
-    // Validate RFC3339 at IO boundary (defense-in-depth; reducer also validates)
-    match chrono::DateTime::parse_from_rfc3339(&value) {
-        Ok(_) => {
-            engine_info!("[briefing-checkpoint] loaded: {}", value);
-            Some(value)
-        }
-        Err(e) => {
-            engine_warn!("[briefing-checkpoint] invalid RFC3339 in {:?}: {}", path, e);
+    match load_checkpoint_record(path) {
+        Ok(checkpoint) => checkpoint.since_utc,
+        Err(error) => {
+            engine_warn!("[briefing-checkpoint] {error}");
             None
         }
     }
 }
 
-/// Saves (or clears) the briefing time checkpoint.
-/// `since_utc = None` deletes the file; otherwise the RFC3339 string is written atomically.
+/// Saves or clears the desktop window without changing the portfolio records.
 pub fn save_briefing_checkpoint(path: &Path, since_utc: Option<&str>) -> Result<(), String> {
-    if since_utc.is_none() {
+    edit_checkpoint(path, |persisted| {
+        persisted.set_since_utc(since_utc.map(str::to_owned))
+    })
+}
+
+pub(crate) fn save_portfolio_record(
+    path: &Path,
+    key: &str,
+    record: &PortfolioRecord,
+    checkpoint: CheckpointWrite,
+) -> Result<(), String> {
+    edit_checkpoint(path, |persisted| {
+        merge_portfolio_record(persisted, key, record, checkpoint)
+    })
+}
+
+fn edit_checkpoint(path: &Path, edit: impl FnOnce(&mut BriefingCheckpoint)) -> Result<(), String> {
+    let _write = CHECKPOINT_WRITE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut persisted = match read_checkpoint_record(path)? {
+        ReadCheckpoint::Valid(checkpoint) => checkpoint,
+        ReadCheckpoint::Malformed {
+            recovered,
+            position,
+        } => {
+            let aside = retain_malformed_checkpoint(path, chrono::Utc::now())
+                .map_err(|error| format!("malformed checkpoint RON at {position}: {error}"))?;
+            engine_warn!(
+                "[briefing-checkpoint] malformed checkpoint RON in {} at {position}; moved to {}; recovered since_utc={:?}",
+                path.display(), aside.display(), recovered.since_utc
+            );
+            recovered
+        }
+    };
+    edit(&mut persisted);
+    if persisted.since_utc.is_none() && persisted.portfolio.is_empty() {
         match fs::remove_file(path) {
             Ok(_) => return Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -823,9 +905,6 @@ pub fn save_briefing_checkpoint(path: &Path, since_utc: Option<&str>) -> Result<
     }
     let output_dir = path.parent().unwrap_or(Path::new("."));
     ensure_output_dir(output_dir).map_err(|e| format!("ensure_output_dir: {e}"))?;
-    let persisted = PersistedBriefingCheckpoint {
-        since_utc: since_utc.map(str::to_owned),
-    };
     let pretty = ron::ser::PrettyConfig::new();
     let content = ron::ser::to_string_pretty(&persisted, pretty)
         .map_err(|e| format!("RON serialize: {e}"))?;
@@ -838,6 +917,68 @@ pub fn save_briefing_checkpoint(path: &Path, since_utc: Option<&str>) -> Result<
         .write(filename, &content)
         .map(|_| ())
         .map_err(|e| format!("AtomicFileWriter: {e}"))
+}
+
+fn retain_malformed_checkpoint(
+    path: &Path,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<PathBuf, String> {
+    let stamp = now.format("%Y%m%dT%H%M%SZ");
+    let stem = path
+        .file_stem()
+        .unwrap_or(path.as_os_str())
+        .to_string_lossy();
+    for number in 1_u64.. {
+        let suffix = if number == 1 {
+            String::new()
+        } else {
+            format!("-{number}")
+        };
+        let aside = path.with_file_name(format!("{stem}.unreadable-{stamp}{suffix}.ron"));
+        match rename_checkpoint_without_replacing(path, &aside) {
+            Ok(()) => return Ok(aside),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(format!(
+                    "could not move {} to {}: {error}",
+                    path.display(),
+                    aside.display()
+                ))
+            }
+        }
+    }
+    unreachable!("ran out of checkpoint backup names")
+}
+
+#[cfg(windows)]
+fn rename_checkpoint_without_replacing(source: &Path, target: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::MoveFileW;
+
+    let wide_path = |path: &Path| -> std::io::Result<Vec<u16>> {
+        Ok(std::path::absolute(path)?
+            .as_os_str()
+            .encode_wide()
+            .chain([0])
+            .collect())
+    };
+    let source = wide_path(source)?;
+    let target = wide_path(target)?;
+    // MoveFileW refuses an existing destination and preserves the original file attributes.
+    // Both buffers are null-terminated and live through the call.
+    if unsafe { MoveFileW(source.as_ptr(), target.as_ptr()) } == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn rename_checkpoint_without_replacing(source: &Path, target: &Path) -> std::io::Result<()> {
+    let mut original = tempfile::TempPath::try_from_path(source)?;
+    original.disable_cleanup(true);
+    original
+        .persist_noclobber(target)
+        .map_err(|error| error.error)
 }
 
 #[cfg(test)]

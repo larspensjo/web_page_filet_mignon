@@ -148,7 +148,7 @@ impl AppState {
     }
 
     pub fn take_pre_triage_refresh_evaluation_request(&mut self) -> Option<bool> {
-        if !self.pre_triage_refresh_eval_pending {
+        if !self.archive_processing_window_available() || !self.pre_triage_refresh_eval_pending {
             return None;
         }
         self.pre_triage_refresh_eval_pending = false;

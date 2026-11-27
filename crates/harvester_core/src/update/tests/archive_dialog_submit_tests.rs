@@ -107,6 +107,7 @@ fn archive_dialog_submitted_validates_basename_and_checkpoint_flag() {
         Effect::ArchiveRequested {
             request_id,
             basename,
+            external,
             ordered_urls,
             window,
             requested_checkpoint,
@@ -116,6 +117,7 @@ fn archive_dialog_submitted_validates_basename_and_checkpoint_flag() {
             priority_snapshot: _,
             folds: _,
         } => {
+            assert!(external.is_none());
             assert_eq!(request_id, 1);
             assert_eq!(basename, "custom-archive.md");
             assert_eq!(ordered_urls.len(), 0);

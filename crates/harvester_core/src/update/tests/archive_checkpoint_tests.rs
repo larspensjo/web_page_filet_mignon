@@ -232,6 +232,7 @@ fn briefing_checkpoint_loaded_clears_pending_save_tracking() {
     let (state, follow_up) = update(
         state,
         Msg::BriefingCheckpointLoaded {
+            portfolio: Default::default(),
             since_utc: Some("2026-03-25T00:00:00Z".to_string()),
         },
     );

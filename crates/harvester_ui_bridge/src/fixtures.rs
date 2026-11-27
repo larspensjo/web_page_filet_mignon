@@ -860,7 +860,13 @@ fn triage_load_request(mut state: AppState) -> (AppState, u64) {
 fn add_llm_metadata(state: AppState) -> AppState {
     // These fixtures model completed startup hydration, preserving their existing stores.
     let state = harvester_core::fixture_support::hydrate_fixture_result_stores(state);
-    let state = reduce(state, Msg::BriefingCheckpointLoaded { since_utc: None });
+    let state = reduce(
+        state,
+        Msg::BriefingCheckpointLoaded {
+            since_utc: None,
+            portfolio: Default::default(),
+        },
+    );
     let active_versions = HashMap::from([
         (PromptId::ArticleTriage, 1),
         (PromptId::ArticleSummary, 1),

@@ -9,6 +9,7 @@ mod effect;
 pub mod fixture_support;
 pub mod import_session;
 mod llm_quota_view;
+pub mod morning_archive;
 mod msg;
 mod poll_stats_fmt;
 mod pre_triage_coordinator;

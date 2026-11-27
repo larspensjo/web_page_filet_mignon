@@ -1152,6 +1152,46 @@ fn clear_checkpoint_deletes_file() {
 }
 
 #[test]
+fn checkpoint_cli_resets_preserve_corrupt_originals() {
+    const NEW_SINCE: &str = "2025-12-31T23:00:00Z";
+    const BAD: &[u8] = b"(since_utc: None, portfolio: {";
+    for command in [
+        CheckpointCommand::Set(NEW_SINCE.into()),
+        CheckpointCommand::SetNow,
+        CheckpointCommand::Clear,
+    ] {
+        let temp_dir = TempDir::new().unwrap();
+        let paths = make_checkpoint_test_paths(&temp_dir);
+        let path = &paths.briefing_checkpoint_path;
+        std::fs::write(path, BAD).unwrap();
+        let clear = matches!(command, CheckpointCommand::Clear);
+        let set = matches!(command, CheckpointCommand::Set(_));
+        execute_checkpoint_write(command, &paths).unwrap();
+        if clear {
+            assert!(!path.exists());
+        } else {
+            let since = load_briefing_checkpoint(path).unwrap();
+            assert!(chrono::DateTime::parse_from_rfc3339(&since).is_ok());
+            if set {
+                assert_eq!(since, NEW_SINCE);
+            }
+        }
+        let aside: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with(".briefing_checkpoint.unreadable-")
+            })
+            .collect();
+        assert_eq!(aside.len(), 1);
+        assert_eq!(std::fs::read(&aside[0]).unwrap(), BAD);
+    }
+}
+
+#[test]
 fn show_checkpoint_prints_none_when_absent() {
     let temp_dir = TempDir::new().unwrap();
     let paths = make_checkpoint_test_paths(&temp_dir);

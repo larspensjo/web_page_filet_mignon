@@ -2970,3 +2970,18 @@ Change: Both publication paths share a replacing rename with bounded permission 
 Lessons Learned: On Windows, clear the staging file's temporary attribute before moving its name, and keep cleanup armed until replacement succeeds. Apply window bounds to election members as well as representatives before generating archive annotations.
 Prevention: Windows tests hold readers across replacement and cover attributes, failed retry cleanup, and housekeeping failures. Reducer and metadata tests cover election order, empty groups, and the window boundaries.
 Refs: crates/harvester_engine/src/persist.rs, crates/harvester_io/src/archive_publication_tests.rs, crates/harvester_core/src/update/tests/archive_dialog_submit_tests.rs, crates/harvester_engine/tests/archive_window_metadata.rs
+
+## 2026-11-27 - Morning archive window and gate
+Type: Implementation
+Context: The morning brief needs to replay unconfirmed fetched windows and recover when publication outlives the checkpoint write.
+Change: The reducer joins target observation and checkpoint hydration, reconciles the intent against the trailing index, and waits for a durable window before intake. The gate uses current-run facts, the shared signal selection, and per-target failure streaks. Desktop checkpoint writes retain the portfolio map.
+Lessons Learned: The confirmable publication bound and the desktop checkpoint have separate owners. Saved publication intent bridges a crash between replacing the target and saving the checkpoint. Individual failure provenance matters because a quota halt can leave genuine failures and skipped articles in the same batch.
+Refs: crates/harvester_core/src/morning_archive.rs, crates/harvester_core/src/update/morning.rs, crates/harvester_io/src/archive_observation.rs, docs/plans/Plan.MorningBatchRun.md
+
+## 2026-11-27 - Checkpoint recovery and morning gate review
+Type: Bug Fix
+Context: An undecodable portfolio record blocked checkpoint resets, while the effect runner treated an I/O read failure as an empty checkpoint.
+Change: Read-only loads recover the desktop checkpoint when possible. Writes move malformed bytes to a dated backup before applying edits. A morning with a checkpoint I/O read failure stops before intake. The gate reports every failed stage for an excused article, including whether other backlog still blocks publication.
+Lessons Learned: A parse failure permits preserving the original bytes and recovering individual fields. An I/O failure leaves the durable record unknown and must prevent reseeding. Apply the production checkpoint merge in simulations that exercise crash recovery.
+Prevention: Regression tests cover CLI resets, backup-name collisions, transient read failures, late morning configuration, scored summary excusal, and multiple failures on a blocked morning.
+Refs: crates/harvester_io/src/persistence.rs, crates/harvester_core/src/update/tests/morning_archive_tests.rs

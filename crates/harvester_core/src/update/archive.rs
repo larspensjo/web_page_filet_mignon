@@ -32,17 +32,16 @@ pub(super) fn handle_archive_clicked(state: &mut AppState) -> Vec<Effect> {
         request_id
     );
     clear_export_unavailable_status(state);
-    let corpus = state.archive_corpus(); // triage-only; pre-triage excluded
+    let signal_candidate_snapshot = pin_archive_selection(state);
+    let corpus = state.pinned_archive_corpus().expect("just pinned");
     let corpus_count = corpus.count();
     let fingerprint = corpus.fingerprint();
     let source = corpus.source();
-    state.pin_archive_corpus(corpus);
     let full_selection = state
         .pinned_full_archive_selection()
         .expect("full-mode pin");
     let article_count = full_selection.ordered_urls.len();
     let token_estimates = state.archive_token_estimates(&full_selection.ordered_urls);
-    let signal_candidate_snapshot = build_signal_candidate_snapshot(state);
     engine_info!(
         "[working-corpus] source={:?} count={} identical_content_folded={} fingerprint={:#010x} caller=archive-open request_id={}",
         source,
@@ -55,7 +54,6 @@ pub(super) fn handle_archive_clicked(state: &mut AppState) -> Vec<Effect> {
     // returns empty when phase is Idle (after consume) or during Reviewing (phase-gated).
     let pending_pre_triage_count = state.pre_triage().resolved_included_urls().len();
     let since_utc = state.briefing_since_utc();
-    state.pin_signal_candidate_selection(signal_candidate_snapshot.clone());
     let saved_signal_count = state.saved_signal_count();
     let signal_candidate_default = {
         crate::signal_candidate::compute_dialog_default(
@@ -250,7 +248,7 @@ pub(super) fn handle_dialog_submitted(
     };
     state.clear_pinned_signal_candidate_selection();
     let window = ArchiveWindow::from_submission(state.briefing_since_utc(), submitted_at);
-    let mut effects = vec![build_archive_request(
+    let effect = build_archive_request(
         state,
         request_id,
         basename,
@@ -261,7 +259,72 @@ pub(super) fn handle_dialog_submitted(
         window,
         set_checkpoint,
         use_summaries,
-    )];
+    );
+    begin_export(state, request_id, set_checkpoint, effect)
+}
+
+fn pin_archive_selection(
+    state: &mut AppState,
+) -> crate::signal_candidate::SignalCandidateArchiveSelection {
+    let corpus = state.archive_corpus(); // triage-only; pre-triage excluded
+    state.pin_archive_corpus(corpus);
+    let signal = build_signal_candidate_snapshot(state);
+    state.pin_signal_candidate_selection(signal.clone());
+    signal
+}
+
+pub(super) fn prepare_morning_request(
+    state: &mut AppState,
+    request_id: u64,
+    target: crate::morning_archive::ExternalArchiveTarget,
+    window: ArchiveWindow,
+    excused: &[crate::morning_archive::ExcusedArticle],
+) -> Effect {
+    let signal = pin_archive_selection(state);
+    state.clear_pinned_archive_corpus();
+    state.clear_pinned_signal_candidate_selection();
+    let basename = target
+        .path
+        .file_name()
+        .unwrap_or(target.path.as_os_str())
+        .to_string_lossy()
+        .into_owned();
+    let mut effect = build_archive_request(
+        state,
+        request_id,
+        basename,
+        crate::signal_candidate::FullArchiveSelection {
+            ordered_urls: signal.selected_urls,
+            folds: signal.folds,
+        },
+        window,
+        true,
+        true,
+    );
+    if let Effect::ArchiveRequested {
+        external,
+        summaries,
+        ..
+    } = &mut effect
+    {
+        *external = Some(target);
+        for article in excused.iter().filter(|a| {
+            a.stages
+                .contains(&crate::morning_archive::FailedStage::Summary)
+        }) {
+            summaries.remove(&archive_url_key(&article.url));
+        }
+    }
+    effect
+}
+
+pub(super) fn begin_export(
+    state: &mut AppState,
+    request_id: u64,
+    set_checkpoint: bool,
+    effect: Effect,
+) -> Vec<Effect> {
+    let mut effects = vec![effect];
     state.begin_archive_export(request_id);
     state.set_archive_export_notice(Some(ArchiveExportNotice {
         kind: ArchiveExportNoticeKind::Working,
@@ -326,6 +389,7 @@ fn build_archive_request(
     Effect::ArchiveRequested {
         request_id,
         basename,
+        external: None,
         ordered_urls,
         window,
         requested_checkpoint,

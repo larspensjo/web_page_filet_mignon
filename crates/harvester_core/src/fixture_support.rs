@@ -134,6 +134,7 @@ pub fn complete_archive_meter_startup(mut state: AppState) -> AppState {
         },
         Msg::PromptContextsLoaded { contexts },
         Msg::BriefingCheckpointLoaded {
+            portfolio: Default::default(),
             since_utc: state.briefing_since_utc().map(|since| since.to_rfc3339()),
         },
         Msg::TriageCacheHydrated {

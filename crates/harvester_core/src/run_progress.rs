@@ -160,6 +160,9 @@ impl RunProgress {
     pub(crate) fn stage_mut(&mut self, stage: PipelineStage) -> &mut StageRecord {
         &mut self.stages[stage.index()]
     }
+    pub(crate) fn stage(&self, stage: PipelineStage) -> &StageRecord {
+        &self.stages[stage.index()]
+    }
     pub(crate) fn activate(
         &mut self,
         stage: PipelineStage,

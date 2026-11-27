@@ -2,10 +2,12 @@ use crate::{AppState, Effect, SessionState};
 use engine_logging::{engine_info, engine_warn};
 
 pub(super) fn handle_poll_sources_clicked(state: &mut AppState) -> Vec<Effect> {
-    if matches!(
-        state.session(),
-        SessionState::Finishing | SessionState::Finished
-    ) || state.is_poll_in_progress()
+    if !state.archive_processing_window_available()
+        || matches!(
+            state.session(),
+            SessionState::Finishing | SessionState::Finished
+        )
+        || state.is_poll_in_progress()
     {
         Vec::new()
     } else if state.start_poll() {

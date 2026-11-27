@@ -9,6 +9,9 @@ pub(super) fn handle_evaluate_pre_triage_refresh(
     ordered_urls: Vec<String>,
     triggered_by_job_done: bool,
 ) -> Vec<Effect> {
+    if !state.archive_processing_window_available() {
+        return Vec::new();
+    }
     state.take_pre_triage_refresh_evaluation_request();
     let stopping = state.pipeline_run_phase() == crate::PipelineRunPhase::Stopping
         || state.session() == crate::SessionState::Finishing;
@@ -159,7 +162,9 @@ pub(super) fn dispatch_pre_triage_if_due(
     tick: u64,
     has_in_flight_engine_jobs: bool,
 ) -> Vec<Effect> {
-    if state.pipeline_run_armed() && !state.pipeline_ready() {
+    if !state.archive_processing_window_available()
+        || (state.pipeline_run_armed() && !state.pipeline_ready())
+    {
         return Vec::new();
     }
     let armed = state.pipeline_run_armed();

@@ -3,6 +3,7 @@ use super::summary_cache_support::{
     log_summary_cache_lookup_mismatch, short_hash, summary_cache_key_error_reason,
 };
 use crate::briefing::ArticleSummaryResult;
+use crate::morning_archive::FailedStage;
 use crate::state::ModelDispatchHalt;
 use crate::triage::ArticleTriageResult;
 use crate::update::signal_candidate::{handle_signal_candidate_completion, try_enqueue};
@@ -54,17 +55,71 @@ pub(super) fn handle(
     if owner.is_some() {
         note_article_model_result(state, &result);
     }
+    // A provider throttle or an exhausted allowance denied the stage work.
+    // Other in-flight completions can still record genuine failures after a halt.
+    let may_be_genuine_failure = pending
+        && state.morning_archive.is_some()
+        && !matches!(
+            result,
+            LlmResultKind::QuotaExhausted { .. } | LlmResultKind::RateLimited { .. }
+        );
     match owner {
         Some(RequestOwner::Scoring) => {
+            let url = may_be_genuine_failure
+                .then(|| {
+                    state
+                        .signal_candidate()
+                        .url_for_request(request_id)
+                        .map(str::to_owned)
+                })
+                .flatten();
             handle_signal_candidate_completion(state, request_id, &result);
+            if let Some(url) = url.filter(|url| {
+                matches!(
+                    state.signal_candidate().state_for(url),
+                    Some(crate::signal_candidate::SignalCandidateState::Failed { .. })
+                )
+            }) {
+                state
+                    .morning_archive
+                    .as_mut()
+                    .unwrap()
+                    .note_failure(&url, FailedStage::Scoring);
+            }
         }
         Some(RequestOwner::Summary(article_idx)) => {
             handle_summary_completion(state, article_idx, &result);
+            let article = &state.briefing().articles()[article_idx];
+            if may_be_genuine_failure
+                && matches!(
+                    article.summary_state,
+                    crate::briefing::ArticleSummaryState::Failed { .. }
+                )
+            {
+                let url = article.url.clone();
+                state
+                    .morning_archive
+                    .as_mut()
+                    .unwrap()
+                    .note_failure(&url, FailedStage::Summary);
+            }
         }
         Some(RequestOwner::Triage(article_idx)) => {
             handle_triage_completion(state, article_idx, &result);
             let article = &state.triage().articles()[article_idx];
+            let failed = may_be_genuine_failure
+                && matches!(
+                    article.triage_state,
+                    crate::triage::ArticleTriageState::Failed { .. }
+                );
             let identity = (article.url.clone(), article.content_hash.clone());
+            if failed {
+                state
+                    .morning_archive
+                    .as_mut()
+                    .unwrap()
+                    .note_failure(&identity.0, FailedStage::Triage);
+            }
             super::waves::triage_changed(state, &identity.0, &identity.1);
         }
         None => {}

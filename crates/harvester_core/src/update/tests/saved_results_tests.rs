@@ -156,6 +156,7 @@ fn fixture() -> AppState {
     state = update(
         state,
         Msg::BriefingCheckpointLoaded {
+            portfolio: Default::default(),
             since_utc: Some("2026-10-02T00:00:00Z".into()),
         },
     )
@@ -346,6 +347,7 @@ fn restart_last_24_hours_retains_results_before_checkpoint_without_processing_or
     state = update(
         state,
         Msg::BriefingCheckpointLoaded {
+            portfolio: Default::default(),
             since_utc: Some("2026-10-03T10:00:00Z".into()),
         },
     )
@@ -424,6 +426,7 @@ fn saved_index_expires_articles_outside_window_when_last_24_hour_clock_moves() {
     let state = update(
         fixture(),
         Msg::BriefingCheckpointLoaded {
+            portfolio: Default::default(),
             since_utc: Some("2026-10-03T10:00:00Z".into()),
         },
     )

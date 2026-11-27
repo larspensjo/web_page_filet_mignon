@@ -543,6 +543,28 @@ fn enqueue_url_effect_is_rejected_by_url_policy() {
 }
 
 #[test]
+fn checkpoint_load_reports_io_error_instead_of_empty_checkpoint() {
+    let temp = tempdir().expect("tempdir");
+    let checkpoint = temp.path().join(".briefing_checkpoint.ron");
+    fs::create_dir(&checkpoint).expect("make checkpoint unreadable as a file");
+    let (runner, rx) = runner_with_receiver(temp.path());
+    runner.enqueue(vec![Effect::LoadBriefingCheckpoint]);
+    let msg = rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("checkpoint load reply");
+    assert!(matches!(msg, Msg::BriefingCheckpointLoadFailed { reason }
+        if reason.contains(&*checkpoint.to_string_lossy())));
+    assert!(checkpoint.is_dir());
+    assert!(fs::read_dir(temp.path()).unwrap().all(|entry| {
+        !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".briefing_checkpoint.unreadable-")
+    }));
+}
+
+#[test]
 fn save_briefing_checkpoint_dispatches_success_ack() {
     let temp = tempdir().expect("tempdir");
     let (runner, rx) = runner_with_receiver(temp.path());
@@ -886,6 +908,7 @@ fn archive_requested_writes_archive_markdown_for_selected_urls() {
     runner.enqueue(vec![Effect::ArchiveRequested {
         request_id: 7,
         basename: "archive.md".to_string(),
+        external: None,
         ordered_urls: vec!["https://example.com/b".to_string()],
         window: harvester_engine::ArchiveWindow::from_submission(
             None,
@@ -1058,6 +1081,7 @@ fn archive_requested_uses_read_hints_from_the_triage_load() {
     runner.enqueue(vec![Effect::ArchiveRequested {
         request_id: 2,
         basename: "archive.md".into(),
+        external: None,
         ordered_urls: vec![new_url.into()],
         window: harvester_engine::ArchiveWindow::from_submission(
             Some(since),

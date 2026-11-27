@@ -100,6 +100,7 @@ fn canned_run(paths: &RuntimePaths) -> (AppState, Vec<harvester_core::SavedResul
     state = update(
         state,
         Msg::BriefingCheckpointLoaded {
+            portfolio: Default::default(),
             since_utc: Some("2026-10-02T00:00:00Z".into()),
         },
     )

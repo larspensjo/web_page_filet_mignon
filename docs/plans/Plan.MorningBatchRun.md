@@ -269,11 +269,12 @@ Each line is one testable promise. Tags are referenced by phases and tests.
 
 - **W1** The Harvester keeps a durable per-target portfolio record in `.briefing_checkpoint.ron`:
   `confirmed_until_utc` (R), `last_archive_until_utc` (L), `pending_until_utc` (P).
-- **W2** The sidecar advances R only when its `until_utc` is a valid RFC 3339 instant, not in
-  the future, later than R and not later than L (after reconciliation); a missing, unreadable,
-  unparseable, null or older sidecar never moves or clears R.
-- **W3** Any change to the record at startup is saved and acknowledged before the poll starts;
-  a failed save stops the run before polling.
+- **W2** Once a target's record is seeded, the sidecar advances R only when L exists after
+  reconciliation and the sidecar's `until_utc` is a valid RFC 3339 instant later than R, at or
+  before L, and not in the future. A missing, unreadable, unparseable, null, older or equal
+  sidecar never moves or clears R. W4 governs seeding a new target.
+- **W3** Any change to the record at startup is saved and acknowledged before the poll starts.
+  A failed save or a checkpoint I/O read failure stops the run before polling.
 - **W4** With no record for the target, the first run seeds R from a valid sidecar, else from
   the Harvester checkpoint, else stops with `usage_error` reason `no_window_start`.
 - **W5** `--set-checkpoint`, `--set-checkpoint-now` and `--clear-checkpoint` change only
@@ -519,6 +520,7 @@ run `C:\Users\larsp\src\AI_portfolio\archive.md.processed`. Format (portfolio-ow
    length, modification time, and the parsed index: valid schema 2 with or without window
    fields, schema 1, or corrupt).
 3. `Msg::BriefingCheckpointLoaded` gains the full record (`since_utc` plus the portfolio map).
+   A checkpoint I/O read failure stops morning startup with `record_unreadable`.
 4. Whichever of the two replies arrives second triggers resolution (a pure core function). While
    the batch window is pending, the checkpoint startup input stays Pending, so no window load,
    pre-triage refresh or meter readiness uses the desktop `since_utc`.
@@ -535,12 +537,13 @@ in every `LoadArticlesForTriage` and in `ArchiveRequested`.
 1. **Reconcile P.** If P is set: when the target's valid index has `window_until_utc == P`,
    publication happened: set L = P, and set `since_utc = P` when the stored `since_utc` is
    earlier than P (the deferred checkpoint save); clear P. Otherwise clear P.
-2. **Advance R** from the sidecar when `until_utc` is non-null, parses, is not later than now, is
-   later than R (or R is absent), and is not later than L (or L is absent). Otherwise R stays,
-   and the log names the case: missing, unreadable, unparseable, null, older, equal, future, or
-   beyond the last archive.
-3. **Seed** (no record for this target): from a valid sidecar `until_utc`, else from the
-   Harvester checkpoint `since_utc`, else `usage_error` reason `no_window_start`.
+2. **Advance R** for an already-seeded target when L exists after reconciliation and the
+   sidecar's `until_utc` is non-null, parses, is not later than now, is later than R, and is not
+   later than L. Otherwise R stays, and the log names the case: missing, unreadable, unparseable,
+   null, older, equal, future, no last archive, or beyond the last archive.
+3. **Seed** (no record for this target): from a valid sidecar `until_utc` at or before now,
+   even when there is no L, else from the Harvester checkpoint `since_utc`, else `usage_error`
+   reason `no_window_start`.
 4. **Window:** `since = R`, applied as the batch's effective window for processing and
    selection; the persisted `since_utc` is not changed by it.
 5. **Disposition** of an existing target, positive confirmation only:
@@ -627,24 +630,31 @@ if its score selects it) or left out (scoring failed: it has no score and cannot
 never silently disappears and never blocks a third morning.
 
 - **Strikes.** The per-target record holds `strikes: {url → (count, last_until)}`, saved with the
-  record. A morning run that reaches the gate adds one strike to every window article whose stage
-  *failed* in this run (a recorded triage, scoring or summary failure). Articles that are merely
-  unprocessed because of a quota, credit or rate-limit halt or a Stop withdrawal get no strike, so
-  a halted morning can never excuse a batch of unprocessed articles. A strike count resets when the
-  article is no longer in the backlog. "Consecutive" means no intervening morning run in which the
-  article's stage succeeded or was not attempted because of a halt; such a run resets the count.
-- **Gate.** Articles with two strikes are excused from the backlog predicate (gate step 5). An
-  excused article with a score but no summary is exported without a summary; one without a score
-  is left out of the selection. Both are counted in `excused_articles` and listed by URL and failed
-  stage in an engine log line `[morning-archive] excused url=... stage=... strikes=2`.
-- **Not exported twice.** The archive window then advances past the excused article like any
-  other in-window article. A later successful summary does not re-export it. Strikes for URLs
-  outside the new window are dropped when the record is saved.
+  record. At the gate, a window article whose triage, scoring or summary stage recorded a genuine
+  failure earns one strike even if the same morning later hit a quota, credit or rate-limit halt.
+  An article merely skipped because of the halt or a Stop withdrawal earns no strike and its streak
+  resets. A strike count also resets when the article is no longer in the backlog, including when
+  its stage succeeds.
+- **Gate.** Articles with two strikes are excused from the backlog predicate (gate step 5).
+  The shared signal selection still requires an eligible current-key score. An excused
+  article with a failed summary is exported without a summary only if that score selects it.
+  An article without an eligible score is left out. Both are counted in `excused_articles`
+  and listed by URL and all failed stages in the core outcome and the engine log.
+  The log includes `blocked=true` when other backlog still blocks the morning.
+- **Repeat exports before confirmation.** Until the portfolio confirms the archive that carried
+  the excused article, a superseding archive replaying that span includes it again, without its
+  summary if the summary still failed and with it if the summary has since succeeded. After
+  confirmation the window advances past the article and it appears in no later archive. Strikes
+  for URLs outside the new window are dropped when the record is saved. An excused article left
+  out for lack of a score can enter a replay if its summary and scoring succeed before confirmation.
 - **Tests (Phase 5a, sequence; Phase 5b, contract host):** an article failing every morning blocks
   mornings 1 and 2 and is excused on morning 3, which exports (blocks at most two mornings); it is
-  reported in `excused_articles` and the log on morning 3; it appears in no later archive (not
-  exported twice); a summary-failed article is exported once without its summary; a quota-halted
-  morning adds no strikes; a success between two failures resets the count.
+  reported in `excused_articles` and the log on morning 3; a summary-failed article with no
+  eligible score is left out and reported, and can enter an unconfirmed replay after summary and
+  scoring succeed; an eligible selected article with a failed summary has no summary in the
+  archive; no article appears in two confirmed archives; one
+  quota-halted morning counts a genuine failure and resets the streak of an article skipped
+  because of the halt; a success between two failures resets the count.
 - **Result line:** adds `excused_articles` (integer). The cross-repo section lists it for
   ai-portfolio-59 to confirm; the brief shows it as a warning, like `backlog_articles`.
 
@@ -739,6 +749,7 @@ Stop drain and requests for articles the export did not select; prices come from
 
 `reason` tokens: `interrupted`, `result_store_unavailable`, `saved_results_unavailable`,
 `total_failure`, `backlog`, `startup_stalled`, `cycle_stalled`, `record_not_saved`,
+`record_unreadable`,
 `export_write_failed`, `export_ack_lost`, `checkpoint_not_saved`, `results_not_saved`,
 `missing_openai_key`, `credential_unreadable`, `no_window_start`, `invalid_archive_out`,
 `invalid_arguments`, `checkout_dirty`, `checkout_foreign`, `checkout_diverged`,
@@ -781,6 +792,7 @@ Without `--archive-out`, every row keeps today's code and prints no line.
 | `acquire_lock` refusal | 2 | `locked` 22 with `lock_holder` (typed lock error) | yes |
 | no window start (W4) | n/a | `usage_error` 2, reason `no_window_start` | yes |
 | startup record save fails (W3) | n/a | `cycle_failed` 20, reason `record_not_saved`, before polling | yes |
+| checkpoint I/O read fails (W3) | desktop checkpoint unavailable | `cycle_failed` 20, reason `record_unreadable`, before polling | yes |
 | OpenAI entry not found or empty | runs without AI, 0 | `usage_error` 2, reason `missing_openai_key`, before polling | yes |
 | OpenAI entry unreadable | n/a | `usage_error` 2, reason `credential_unreadable` | yes |
 | Brave entry missing | n/a | run continues; Brave sources fail; counted in `failed_sources` | yes (final) |
@@ -969,7 +981,8 @@ Failing tests first (reducer and pure-function tests in `harvester_core`; persis
   checkpoint present seeds from the checkpoint; nothing seeds gives `no_window_start`; a later
   sidecar advances R; **a null sidecar, an older sidecar, an equal sidecar, a missing sidecar, an
   unreadable file and unparseable JSON never move or clear R**; a future sidecar and one beyond L
-  are ignored;
+  are ignored; a valid sidecar seeds a new target without L, but cannot advance an already-seeded
+  target without L;
 - reconciliation: P with a target whose index shows `window_until_utc == P` sets L and the
   deferred `since_utc`, then accepts a sidecar equal to P (the failed-save case); P without that
   index is cleared and L unchanged; a crash after publication and before the checkpoint save
@@ -1019,6 +1032,10 @@ Checks: `cargo build`; `cargo test -p harvester_core -p harvester_io`; full work
 Estimate: 35-50 min. Quiet window: yes.
 
 ### Phase 5b: batch host: `--archive-out`, result line and exit paths (B1, B2, B9, B10, B12, P4)
+
+Reduce `BatchArchiveConfigured` before delivering `BriefingCheckpointLoaded`.
+If the checkpoint reply arrives first, configuration requests a fresh checkpoint load
+so the reducer can resolve the target from the durable record.
 
 Failing tests first:
 

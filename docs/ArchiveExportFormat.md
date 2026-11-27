@@ -73,6 +73,9 @@ In summary mode the body is the newest saved summary for the article's content
 hash under any key, including a stale key; otherwise the exporter falls back to
 the full article. Dialog and header summary-token estimates resolve the same
 summary and count its output tokens, or full article tokens if none resolves.
+When the morning gate excuses a summary failure and an eligible current-key
+score selects the article, the request omits the summary and the exporter
+uses the full article body.
 Reading-pane summaries separately require a current key. The saved-results index
 supplies content hashes for these lookups without requiring a live session.
 These source changes preserve all field meanings and `export_schema: 2`.
@@ -262,3 +265,13 @@ The portfolio consumer owns `<target>.processed`, for example
 `archive.md.processed`. Its `until_utc`, `doc_count`, and `commit` describe an
 archive the consumer processed. A null `until_utc` provides no confirmation for
 replacement. The Harvester never writes this sidecar.
+
+Harvester stores the desktop checkpoint and per-target portfolio records in
+`.briefing_checkpoint.ron`. When a read encounters malformed RON or an
+undecodable record, it recovers the desktop `since_utc` if that field still
+decodes. Reads leave the checkpoint in place. On the next edit, Harvester
+moves the original bytes to
+`.briefing_checkpoint.unreadable-<YYYYMMDDTHHMMSSZ>[-n].ron` beside the
+checkpoint, logs both paths and the recovered value, and applies the edit.
+It uses a numbered suffix if the backup name is taken. An I/O read failure
+stops morning startup with `record_unreadable`.

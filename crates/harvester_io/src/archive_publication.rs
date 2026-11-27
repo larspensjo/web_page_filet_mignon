@@ -40,6 +40,7 @@ pub enum PreviousArchiveDisposition {
 #[derive(Debug, PartialEq, Eq)]
 pub struct ArchivePublication {
     pub previous_kept: Option<PathBuf>,
+    pub previous_since_utc: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -49,6 +50,7 @@ pub struct ArchivePublicationError {
     pub source: io::Error,
     /// Available even when the final rename failed.
     pub previous_kept: Option<PathBuf>,
+    pub previous_since_utc: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +84,7 @@ fn publish_archive_with(
         target.display()
     );
     let mut previous_kept = None;
+    let mut previous_since_utc = None;
     let result: io::Result<()> = (|| {
         let paths = PublicationPaths::new(target)?;
         paths.remove_stale_temps(now)?;
@@ -109,7 +112,12 @@ fn publish_archive_with(
         };
         after_step(PublishStep::CheckedTarget)?;
 
-        if let Some((file, current)) = previous {
+        if let Some((mut file, current)) = previous {
+            previous_since_utc =
+                crate::archive_observation::read_archive_index(BufReader::new(&mut file))
+                    .ok()
+                    .and_then(|index| index.archive_start());
+            file.rewind()?;
             previous_kept = Some(paths.keep_previous(file, current, &mut after_step)?);
         }
         after_step(PublishStep::KeptPrevious)?;
@@ -120,12 +128,16 @@ fn publish_archive_with(
         after_step(PublishStep::ReportedCompletion)
     })();
     match result {
-        Ok(()) => Ok(ArchivePublication { previous_kept }),
+        Ok(()) => Ok(ArchivePublication {
+            previous_kept,
+            previous_since_utc,
+        }),
         Err(source) => {
             engine_warn!("[archive-publication] failed target={} disposition={disposition:?} previous_kept={previous_kept:?} reason={source}", target.display());
             Err(ArchivePublicationError {
                 source,
                 previous_kept,
+                previous_since_utc,
             })
         }
     }

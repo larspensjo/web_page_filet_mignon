@@ -107,7 +107,11 @@ impl AppState {
     pub(crate) fn record_startup_reply(&mut self, msg: &Msg) {
         use StartupInputOutcome as I;
         match msg {
-            Msg::BriefingCheckpointLoaded { .. } => self.startup_inputs.checkpoint = I::Loaded,
+            Msg::BriefingCheckpointLoaded { .. } | Msg::BriefingCheckpointLoadFailed { .. }
+                if self.morning_archive.is_none() =>
+            {
+                self.startup_inputs.checkpoint = I::Loaded;
+            }
             Msg::PromptContextsLoaded { .. } => self.startup_inputs.prompt_contexts = I::Loaded,
             Msg::PromptContextsLoadFailed { .. } => self.startup_inputs.prompt_contexts = I::Failed,
             Msg::LlmMetadataLoaded {

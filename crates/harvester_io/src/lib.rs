@@ -1,5 +1,6 @@
 //! Harvester IO: shared runtime paths, effect execution, and persistence.
 
+pub mod archive_observation;
 pub mod archive_publication;
 mod article_links;
 mod blacklist_store;
@@ -7,6 +8,8 @@ pub mod credentials;
 mod effect_helpers;
 mod effect_runner;
 pub mod host_bootstrap;
+#[cfg(test)]
+mod morning_archive_tests;
 mod persistence;
 mod persistence_worker;
 mod prompt_template_store;

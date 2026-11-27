@@ -6,6 +6,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use engine_logging::{engine_error, engine_info, engine_warn};
+use harvester_core::morning_archive::{ExternalArchiveTarget, PreviousArchiveDisposition};
 use harvester_core::{Effect, LlmResultKind, Msg, StopPolicy};
 #[cfg(test)]
 use harvester_engine::llm::prompt::PromptId;
@@ -14,12 +15,30 @@ use harvester_engine::llm::prompt_context::ContextMeta;
 use harvester_engine::llm::prompt_context::PromptContextFile;
 use harvester_engine::llm::LlmCommand;
 use harvester_engine::{
-    build_triage_archive_with, import_saved_webpages, ArchiveReadProgress, ArchiveTarget,
-    ImportOptions,
+    build_triage_archive_with, import_saved_webpages, prepare_triage_archive_with,
+    ArchiveReadProgress, ArchiveTarget, ImportOptions,
 };
 
 use super::worker::run_triage_refresh_load;
 use super::{truncate_url_for_log, EffectRunner};
+
+fn publication_disposition(
+    target: &ExternalArchiveTarget,
+) -> crate::archive_publication::PreviousArchiveDisposition {
+    use crate::archive_publication::{
+        ArchiveTargetObservation, PreviousArchiveDisposition as IoDisposition,
+    };
+    match target.disposition {
+        PreviousArchiveDisposition::None => IoDisposition::None,
+        PreviousArchiveDisposition::KeepAside => IoDisposition::KeepAside,
+        PreviousArchiveDisposition::Replace { observed } => IoDisposition::Replace {
+            observed: ArchiveTargetObservation {
+                len: observed.len,
+                modified: observed.modified,
+            },
+        },
+    }
+}
 
 pub(crate) fn ordered_context_pairs(ctx_file: &PromptContextFile) -> Vec<(String, String)> {
     let mut pairs: Vec<(String, String)> = ctx_file
@@ -122,6 +141,7 @@ impl EffectRunner {
             Effect::ArchiveRequested {
                 request_id,
                 basename,
+                external,
                 ordered_urls,
                 window,
                 requested_checkpoint,
@@ -134,14 +154,17 @@ impl EffectRunner {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.paths.output_dir.clone();
                 let corpus_scan_index = Arc::clone(&self.corpus_scan_index);
+                let path = external.as_ref().map_or_else(
+                    || output_dir.join(&basename),
+                    |external| external.path.clone(),
+                );
                 engine_info!(
                     "[archive-dialog] export queued request_id={} path={} urls={} use_summaries={} summaries={} fold_groups={} requested_checkpoint={:?}",
-                    request_id, output_dir.join(&basename).display(), ordered_urls.len(), use_summaries,
+                    request_id, path.display(), ordered_urls.len(), use_summaries,
                     summaries.len(), folds.len(), requested_checkpoint
                 );
                 thread::spawn(move || {
                     let started = Instant::now();
-                    let path = output_dir.join(&basename);
                     engine_info!(
                         "[archive-dialog] worker started request_id={} path={}",
                         request_id,
@@ -180,6 +203,65 @@ impl EffectRunner {
                             });
                         }
                     };
+                    if let Some(external) = external {
+                        let prepared = prepare_triage_archive_with(
+                            &output_dir,
+                            ArchiveTarget::External { path: &path },
+                            &ordered_urls,
+                            window,
+                            use_summaries,
+                            &summaries,
+                            &annotations,
+                            &priority_snapshot,
+                            Some(&folds),
+                            hints.as_ref(),
+                            &mut on_progress,
+                        );
+                        let result = match prepared {
+                            Ok(prepared) => prepared
+                                .publish(|target, markdown| {
+                                    crate::archive_publication::publish_archive(
+                                        target,
+                                        markdown.as_bytes(),
+                                        publication_disposition(&external),
+                                    )
+                                })
+                                .map_err(|error| {
+                                    (
+                                        error.to_string(),
+                                        error.previous_kept,
+                                        error.previous_since_utc,
+                                    )
+                                }),
+                            Err(error) => Err((error.to_string(), None, None)),
+                        };
+                        let supersedes = |previous_start| {
+                            window
+                                .since_utc()
+                                .zip(previous_start)
+                                .is_some_and(|(since, previous)| since <= previous)
+                        };
+                        let reply = match result {
+                            Ok((summary, publication)) => Msg::BatchArchivePublished {
+                                request_id,
+                                doc_count: summary.doc_count,
+                                previous_kept: publication.previous_kept,
+                                previous_superseded: supersedes(publication.previous_since_utc),
+                            },
+                            Err((reason, previous_kept, previous_start)) => {
+                                Msg::BatchArchivePublicationFailed {
+                                    request_id,
+                                    reason,
+                                    previous_kept,
+                                    previous_superseded: supersedes(previous_start),
+                                }
+                            }
+                        };
+                        if msg_tx.send(reply).is_err() {
+                            engine_warn!("[morning-archive] target={} publication acknowledgement lost request_id={request_id}", path.display());
+                        }
+                        return;
+                    }
                     match build_triage_archive_with(
                         &output_dir,
                         ArchiveTarget::InOutput {
@@ -489,9 +571,59 @@ impl EffectRunner {
                 let msg_tx = self.msg_tx.clone();
                 let path = self.paths.briefing_checkpoint_path.clone();
                 thread::spawn(move || {
-                    let since_utc = crate::load_briefing_checkpoint(&path);
-                    let _ = msg_tx.send(Msg::BriefingCheckpointLoaded { since_utc });
+                    let reply = match crate::persistence::load_checkpoint_record(&path) {
+                        Ok(checkpoint) => Msg::BriefingCheckpointLoaded {
+                            since_utc: checkpoint.since_utc,
+                            portfolio: checkpoint.portfolio,
+                        },
+                        Err(reason) => {
+                            engine_warn!("[briefing-checkpoint] {reason}");
+                            Msg::BriefingCheckpointLoadFailed { reason }
+                        }
+                    };
+                    let _ = msg_tx.send(reply);
                 });
+            }
+            Effect::ObserveArchiveTarget { target } => {
+                let msg_tx = self.msg_tx.clone();
+                thread::spawn(move || {
+                    let observation = crate::archive_observation::observe_archive_target(&target);
+                    let _ = msg_tx.send(Msg::ArchiveTargetObserved {
+                        target,
+                        observation,
+                        observed_at: chrono::Utc::now(),
+                    });
+                });
+            }
+            Effect::SavePortfolioRecord {
+                save_id,
+                target_key,
+                record,
+                checkpoint,
+            } => {
+                let msg_tx = self.msg_tx.clone();
+                let path = self.paths.briefing_checkpoint_path.clone();
+                thread::spawn(move || {
+                    let result = crate::persistence::save_portfolio_record(
+                        &path,
+                        &target_key,
+                        &record,
+                        checkpoint,
+                    );
+                    if msg_tx
+                        .send(Msg::PortfolioRecordSaved { save_id, result })
+                        .is_err()
+                    {
+                        engine_warn!("[morning-archive] target={target_key} record acknowledgement lost save_id={save_id}");
+                    }
+                });
+            }
+            Effect::LogMorningArchiveExcusals {
+                target,
+                articles,
+                blocked,
+            } => {
+                crate::archive_observation::log_excused_articles(&target, &articles, blocked);
             }
             Effect::SaveBriefingCheckpoint { save_id, since_utc } => {
                 let msg_tx = self.msg_tx.clone();

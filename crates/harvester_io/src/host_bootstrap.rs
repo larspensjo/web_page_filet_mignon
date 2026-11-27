@@ -494,7 +494,10 @@ mod tests {
         assert!(!pumped);
         assert!(pump_effects.is_empty());
         for msg in [
-            Msg::BriefingCheckpointLoaded { since_utc: None },
+            Msg::BriefingCheckpointLoaded {
+                since_utc: None,
+                portfolio: Default::default(),
+            },
             Msg::PromptTemplateFilesLoaded,
             Msg::PromptContextsLoaded {
                 contexts: HashMap::new(),
@@ -601,6 +604,7 @@ mod tests {
         update(
             state,
             Msg::BriefingCheckpointLoaded {
+                portfolio: Default::default(),
                 since_utc: Some("2026-09-01T00:00:00Z".into()),
             },
         )

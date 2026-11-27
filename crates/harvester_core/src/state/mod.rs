@@ -276,6 +276,7 @@ pub enum BatchStatus {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppState {
     pub(crate) startup_inputs: StartupReadiness,
+    pub(crate) morning_archive: Option<crate::update::morning::MorningArchive>,
     session: SessionState,
     jobs: BTreeMap<JobId, JobState>,
     archive_article_tokens: batch::ArchiveArticleTokenLookup,
@@ -409,6 +410,7 @@ impl Default for AppState {
             archive_article_tokens: batch::ArchiveArticleTokenLookup::default(),
             saved_articles_ready: false,
             restored_checkpoint_ready: false,
+            morning_archive: None,
             pending_selected_article_url: None,
             saved_articles: BTreeMap::new(),
             saved_newest_summaries: HashMap::new(),

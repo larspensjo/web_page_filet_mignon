@@ -8,6 +8,7 @@ mod briefing;
 mod import;
 mod llm_completed;
 mod model_dispatch;
+pub(crate) mod morning;
 mod pipeline_run;
 mod polling;
 pub(crate) mod processing;
@@ -163,6 +164,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::StopFinishClicked => {
             if let Some(policy) = state.stop_finish_button_state().policy() {
+                morning::interrupt(&mut state);
                 pipeline_run::handle_stop_for_pipeline(&mut state);
                 state.finish_session();
                 vec![Effect::StopFinish { policy }]
@@ -251,6 +253,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.set_job_list_mode(mode);
             Vec::new()
         }
+        Msg::PipelineRunRequested { .. } if !state.archive_processing_window_available() => {
+            Vec::new()
+        }
         Msg::PipelineRunRequested { scope } => {
             pipeline_run::handle_pipeline_requested(&mut state, scope)
         }
@@ -313,9 +318,27 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             Vec::new()
         }
 
-        Msg::BriefingCheckpointLoaded { since_utc } => {
+        Msg::BriefingCheckpointLoaded {
+            since_utc,
+            portfolio,
+        } if state.morning_archive.is_some() => morning::checkpoint_loaded(
+            &mut state,
+            crate::morning_archive::BriefingCheckpoint {
+                since_utc,
+                portfolio,
+            },
+        ),
+        Msg::BriefingCheckpointLoaded { since_utc, .. } => {
             state.restored_checkpoint_ready = true;
             briefing::handle_checkpoint_loaded(&mut state, since_utc)
+        }
+        Msg::BriefingCheckpointLoadFailed { reason } if state.morning_archive.is_some() => {
+            morning::checkpoint_load_failed(&mut state, &reason);
+            Vec::new()
+        }
+        Msg::BriefingCheckpointLoadFailed { .. } => {
+            state.restored_checkpoint_ready = true;
+            briefing::handle_checkpoint_loaded(&mut state, None)
         }
         Msg::BriefingCheckpointSaveSucceeded { save_id } => {
             briefing::handle_checkpoint_save_succeeded(&mut state, save_id)
@@ -323,7 +346,49 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::BriefingCheckpointSaveFailed { save_id, reason } => {
             briefing::handle_checkpoint_save_failed(&mut state, save_id, reason)
         }
+        Msg::BriefingCheckpointSet(_) if state.morning_archive.is_some() => Vec::new(),
         Msg::BriefingCheckpointSet(since) => briefing::handle_checkpoint_set(&mut state, since),
+        Msg::BatchArchiveConfigured { target } => morning::configure(&mut state, target),
+        Msg::ArchiveTargetObserved {
+            target,
+            observation,
+            observed_at,
+        } => morning::observed(&mut state, &target, observation, observed_at),
+        Msg::PortfolioRecordSaved { save_id, result } => {
+            morning::record_saved(&mut state, save_id, result)
+        }
+        Msg::BatchArchiveInterrupted => {
+            morning::interrupt(&mut state);
+            Vec::new()
+        }
+        Msg::BatchArchiveRequested {
+            request_id,
+            submitted_at,
+        } => morning::request(&mut state, request_id, submitted_at),
+        Msg::BatchArchivePublished {
+            request_id,
+            doc_count,
+            previous_kept,
+            previous_superseded,
+        } => morning::published(
+            &mut state,
+            request_id,
+            doc_count,
+            previous_kept,
+            previous_superseded,
+        ),
+        Msg::BatchArchivePublicationFailed {
+            request_id,
+            reason,
+            previous_kept,
+            previous_superseded,
+        } => morning::publication_failed(
+            &mut state,
+            request_id,
+            &reason,
+            previous_kept,
+            previous_superseded,
+        ),
         Msg::ArchiveDialogReady {
             request_id,
             article_count,
