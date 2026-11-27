@@ -54,8 +54,9 @@ Lars runs one script in the morning and gets a portfolio brief. For that:
 1. The hidden `--use-stored-keys` flag is approved; only the launchers pass it.
 2. Plain batch and desktop launches keep building the working tree; only the morning
    `--archive-out` path uses the morning checkout.
-3. An article that keeps failing blocks every morning, visibly through `backlog_articles`;
-   accepted for now, revisited after two weeks of result lines.
+3. ~~An article that keeps failing blocks every morning~~ Replaced by the Orchestrator on
+   2026-11-27: an article that fails on two consecutive mornings is excused on the third (see
+   "Two-morning cap"), reported in `excused_articles`.
 4. A missing Brave key is not fatal; the Brave sources count in `failed_sources`.
 5. The morning build uses `CARGO_INCREMENTAL=0`.
 6. No command moves the portfolio start backwards in this plan.
@@ -447,7 +448,8 @@ as `BatchArchiveOutcome`:
    failed (Brave sources skipped by the 20-hour rule count as scanned): `cycle_failed`, reason
    `total_failure`. Download failures never block, and earlier runs' counters are not used; the
    plain-run `classify_cycle_outcome` is unchanged.
-5. Archive-meter backlog > 0: `cycle_failed`, reason `backlog`, `backlog_articles = N`.
+5. Archive-meter backlog > 0, after excusing struck-out articles (see "Two-morning cap" below):
+   `cycle_failed`, reason `backlog`, `backlog_articles = N`. Excused articles never count here.
 6. Zero selected: `nothing_new`.
 7. Otherwise: save the publication intent P = `until` and wait for its acknowledgement (a failed
    save is `export_failed`, reason `record_not_saved`, no publication), then emit
@@ -614,9 +616,37 @@ Why the carry-over list is not cheap or provable here:
 5. **The desktop would have to honour it** in its list, meter and dialog.
 
 Plain A composes with the confirmed start for free: a blocked morning leaves R and the span alone,
-and the next run retries it (2026-09-27). Residual risk, accepted for now (answer 3): an article
-that fails deterministically blocks every morning; `reason: "backlog"` and `backlog_articles` show
-it, and the engine log names the URLs.
+and the next run retries it (2026-09-27).
+
+### Two-morning cap (Orchestrator on Lars's delegation, 2026-11-27; replaces answer 3)
+
+An article cannot block the brief indefinitely. Requirement **B-CAP**: an article whose scoring
+(triage or signal score) or summary has *failed* on two consecutive morning runs is excused on the
+next gate: it is exported without the failed part (summary failed: exported without its summary,
+if its score selects it) or left out (scoring failed: it has no score and cannot be selected). It
+never silently disappears and never blocks a third morning.
+
+- **Strikes.** The per-target record holds `strikes: {url → (count, last_until)}`, saved with the
+  record. A morning run that reaches the gate adds one strike to every window article whose stage
+  *failed* in this run (a recorded triage, scoring or summary failure). Articles that are merely
+  unprocessed because of a quota, credit or rate-limit halt or a Stop withdrawal get no strike, so
+  a halted morning can never excuse a batch of unprocessed articles. A strike count resets when the
+  article is no longer in the backlog. "Consecutive" means no intervening morning run in which the
+  article's stage succeeded or was not attempted because of a halt; such a run resets the count.
+- **Gate.** Articles with two strikes are excused from the backlog predicate (gate step 5). An
+  excused article with a score but no summary is exported without a summary; one without a score
+  is left out of the selection. Both are counted in `excused_articles` and listed by URL and failed
+  stage in an engine log line `[morning-archive] excused url=... stage=... strikes=2`.
+- **Not exported twice.** The archive window then advances past the excused article like any
+  other in-window article. A later successful summary does not re-export it. Strikes for URLs
+  outside the new window are dropped when the record is saved.
+- **Tests (Phase 5a, sequence; Phase 5b, contract host):** an article failing every morning blocks
+  mornings 1 and 2 and is excused on morning 3, which exports (blocks at most two mornings); it is
+  reported in `excused_articles` and the log on morning 3; it appears in no later archive (not
+  exported twice); a summary-failed article is exported once without its summary; a quota-halted
+  morning adds no strikes; a success between two failures resets the count.
+- **Result line:** adds `excused_articles` (integer). The cross-repo section lists it for
+  ai-portfolio-59 to confirm; the brief shows it as a warning, like `backlog_articles`.
 
 ### Credential-free real-process tests
 
@@ -699,6 +729,7 @@ Printed by the binary for every morning outcome it reaches, and by the launcher 
 | `until_utc` | string or null | export request time rounded up; null when no export was requested | agreed (null case to confirm) |
 | `failed_sources` | integer | sources whose poll failed this run (Brave included) | addition, to confirm |
 | `backlog_articles` | integer | actionable window articles missing current-key work; nonzero only with reason `backlog` | addition, to confirm |
+| `excused_articles` | integer | articles excused after two consecutive failed mornings (exported without the failed part, or left out); URLs in the engine log | addition, to confirm |
 | `lock_holder` | string or null | holder text (host, PID, start time) when `locked` | agreed |
 | `reason` | string or null | short fixed token; null for a clean `exported` or `nothing_new` | addition, to confirm |
 
