@@ -30,6 +30,7 @@ fn fresh_target_is_published_and_the_result_appears_once_at_the_end() {
     assert!(result["previous_kept"].is_null());
     assert!(result["cost_usd"].as_f64().unwrap() > 0.0);
     assert_eq!(result["archive_schema"], 2);
+    assert_eq!(result.get("commit"), Some(&serde_json::Value::Null));
     let until = result["until_utc"].as_str().unwrap();
     assert!(until.ends_with('Z') && !until.contains('.'));
     assert!(fixture
@@ -39,6 +40,33 @@ fn fresh_target_is_published_and_the_result_appears_once_at_the_end() {
     assert_eq!(fixture.checkpoint_since().as_deref(), Some(until));
     assert!(fixture.record().contains("pending_until_utc: None"));
     assert!(!fixture.sidecar().exists());
+}
+
+#[test]
+fn real_batch_reports_the_startup_commit_on_argument_errors() {
+    const ENV: &str = "HARVESTER_MORNING_COMMIT";
+    const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+    let fixture = Fixture::empty();
+    for (flag, reason) in [
+        (Some("--unknown-option"), "invalid_arguments"),
+        (None, "invalid_archive_out"),
+    ] {
+        for (commit, expected) in [
+            (None, serde_json::Value::Null),
+            (Some("invalid"), serde_json::Value::Null),
+            (Some(COMMIT), serde_json::Value::from(COMMIT)),
+        ] {
+            let mut command = fixture.binary();
+            command.args(["--archive-out", "relative.md"]).args(flag);
+            if let Some(commit) = commit {
+                command.env(ENV, commit);
+            } else {
+                command.env_remove(ENV);
+            }
+            let result = command.capture().result(2, "usage_error", Some(reason));
+            assert_eq!(result.get("commit"), Some(&expected));
+        }
+    }
 }
 
 #[test]

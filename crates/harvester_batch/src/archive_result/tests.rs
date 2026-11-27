@@ -16,7 +16,7 @@ fn result_line_is_ordered_ascii_json_with_exact_cost_and_utc_precision() {
         excused_articles: 2,
         ..ArchiveResult::new(Status::Exported, None)
     }
-    .line();
+    .line(Some("0123456789abcdef0123456789ABCDEF01234567"));
     assert!(line.is_ascii());
     assert!(!line.contains('\n'));
     assert_eq!(
@@ -26,7 +26,8 @@ fn result_line_is_ordered_ascii_json_with_exact_cost_and_utc_precision() {
             r#""previous_kept":"c:/utg\u00e5va/old.md","previous_superseded":true,"cost_usd":0.412305,"#,
             r#""cost_basis":"openai_price_table","#,
             r#""archive_schema":2,"since_utc":"2025-09-17T06:10:31.123456Z","until_utc":"2025-09-18T06:12:04Z","#,
-            r#""failed_sources":1,"backlog_articles":0,"excused_articles":2,"lock_holder":null,"reason":null}"#,
+            r#""failed_sources":1,"backlog_articles":0,"excused_articles":2,"lock_holder":null,"reason":null,"#,
+            r#""commit":"0123456789abcdef0123456789ABCDEF01234567"}"#,
         )
     );
     let value: Value =
@@ -36,7 +37,7 @@ fn result_line_is_ordered_ascii_json_with_exact_cost_and_utc_precision() {
 
 #[test]
 fn result_line_includes_nulls_and_zero_counts_for_early_usage_failure() {
-    let line = ArchiveResult::new(Status::UsageError, Some("invalid_arguments")).line();
+    let line = ArchiveResult::new(Status::UsageError, Some("invalid_arguments")).line(None);
     assert_eq!(
         line,
         concat!(
@@ -44,7 +45,21 @@ fn result_line_includes_nulls_and_zero_counts_for_early_usage_failure() {
             r#""previous_kept":null,"previous_superseded":false,"cost_usd":null,"#,
             r#""cost_basis":"openai_price_table","#,
             r#""archive_schema":2,"since_utc":null,"until_utc":null,"failed_sources":0,"backlog_articles":0,"#,
-            r#""excused_articles":0,"lock_holder":null,"reason":"invalid_arguments"}"#,
+            r#""excused_articles":0,"lock_holder":null,"reason":"invalid_arguments","commit":null}"#,
         )
     );
+}
+
+#[test]
+fn result_line_omits_invalid_commit_values() {
+    let result = ArchiveResult::new(Status::UsageError, None);
+    for invalid in [
+        "",
+        &"a".repeat(39),
+        &"a".repeat(41),
+        &"g".repeat(40),
+        &"é".repeat(20),
+    ] {
+        assert!(result.line(Some(invalid)).ends_with(r#","commit":null}"#));
+    }
 }

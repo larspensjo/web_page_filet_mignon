@@ -96,8 +96,10 @@ impl ArchiveResult {
         }
     }
 
-    pub(crate) fn line(&self) -> String {
+    pub(crate) fn line(&self, commit: Option<&str>) -> String {
         let json = |value: Option<&str>| serde_json::to_string(&value).expect("JSON string");
+        let commit = commit
+            .filter(|value| value.len() == 40 && value.bytes().all(|b| b.is_ascii_hexdigit()));
         let path = self.path.as_deref().map(|path| path.to_string_lossy());
         let previous = self
             .previous_kept
@@ -114,7 +116,7 @@ impl ArchiveResult {
                 r#"HARVESTER_RESULT {{"v":1,"status":{},"articles":{},"path":{},"#,
                 r#""previous_kept":{},"previous_superseded":{},"cost_usd":{},"cost_basis":{},"#,
                 r#""archive_schema":2,"since_utc":{},"until_utc":{},"failed_sources":{},"#,
-                r#""backlog_articles":{},"excused_articles":{},"lock_holder":{},"reason":{}}}"#,
+                r#""backlog_articles":{},"excused_articles":{},"lock_holder":{},"reason":{},"commit":{}}}"#,
             ),
             json(Some(self.status.as_str())),
             self.articles,
@@ -130,6 +132,7 @@ impl ArchiveResult {
             self.excused_articles,
             json(self.lock_holder.as_deref()),
             json(self.reason),
+            json(commit),
         );
         let mut ascii = String::with_capacity(line.len());
         for ch in line.chars() {

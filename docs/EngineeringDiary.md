@@ -2999,3 +2999,10 @@ Context: Desktop exports can update the checkpoint before the first morning arch
 Change: The archive dialog puts the approved morning archive wording above the unchecked checkpoint box. The reducer selects the latest confirmed record from checkpoint hydration, and the dialog shows that timestamp in local time. Desktop IPC 19 carries the timestamp in the channel-2 dialog command.
 Lessons Learned: A populated channel-2 fixture exercises the confirmed-date path across the reducer and the modal. Unconfirmed records use the first-run wording because the morning run still needs to seed a start. A fixed-zone test covers the local date rolling back across midnight.
 Refs: crates/harvester_core/src/update/tests/archive_dialog_submit_tests.rs, crates/harvester_ui_bridge/src/fixtures.rs, frontend/src/components/ArchiveModal.test.tsx
+
+## 2026-11-27 - Explicit release branch for the morning batch
+Type: Implementation
+Context: The unattended morning batch uses stored keys and needs a deliberate release step when work on local main advances.
+Change: The launcher validates and builds the fetched morning tip. The advance command checks ancestry and updates the ref with its expected old value. Both launcher and batch result lines append the known checkout commit.
+Lessons Learned: Check the fetched commit against the validated release tip before merging. Use the verified checkout hash for child process metadata and validate it at the formatter boundary before reporting it.
+Refs: scripts/lib/HarvesterLaunch.psm1, scripts/Advance-MorningBranch.ps1, scripts/tests/HarvesterMorningLaunch.Tests.ps1, crates/harvester_batch/src/archive_result.rs

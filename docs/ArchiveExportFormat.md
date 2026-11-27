@@ -278,9 +278,10 @@ stops morning startup with `record_unreadable`.
 
 ## Batch result line
 
-The binary's `--archive-out` path reports one final stdout line beginning with
-`HARVESTER_RESULT ` followed by an ASCII JSON object, encoded as UTF-8 without a
-BOM. All keys are present, in this order.
+The morning launcher and the batch executable's `--archive-out` path report
+their outcomes as a final stdout line beginning with `HARVESTER_RESULT ` followed
+by an ASCII JSON object, encoded as UTF-8 without a BOM. All keys are present,
+in this order.
 
 | Key | Value |
 | --- | --- |
@@ -300,6 +301,7 @@ BOM. All keys are present, in this order.
 | `excused_articles` | Articles excused after two consecutive failed mornings |
 | `lock_holder` | Host, PID, and start time of the output lock holder when available, or null |
 | `reason` | Fixed outcome token, or null for a clean result |
+| `commit` | Additive final field. The full 40-hex commit hash, or null when unknown. The launcher reports the checkout's known HEAD on failures and passes the verified hash to the executable in `HARVESTER_MORNING_COMMIT`. The executable reports null when that variable is unset or invalid. |
 
 Window timestamps use the same RFC 3339 UTC spelling as the archive index,
 with a `Z` suffix and any fractional precision of the window start.
@@ -316,7 +318,12 @@ reason takes precedence.
 | 20 | `cycle_failed` | The run could not reach a publishable selection. This includes a graceful interrupt before export. |
 | 21 | `export_failed` | The new archive was not published. |
 | 22 | `locked` | Another host holds the output folder lock. |
-| 2 | `usage_error` | The arguments, stored OpenAI key or initial window are unusable. |
+| 23 | `update_failed` | The morning launcher could not prepare the checkout. Reasons include `no_morning_branch`, `morning_not_on_main`, `clone_failed`, `checkout_foreign`, `checkout_dirty`, `checkout_diverged`, and `fast_forward_failed`. |
+| 24 | `build_failed` | The morning launcher could not build or start the executable. Reasons are `cargo_failed`, `binary_missing`, and `child_start_failed`. |
+| 2 | `usage_error` | The arguments, stored OpenAI key or initial window are unusable. The launcher uses `invalid_arguments` or `invalid_archive_out` for argument refusals. |
+
+The morning launcher emits the lines for exit codes 23 and 24, and for its own
+argument refusals. The batch executable keeps its existing exit codes.
 
 The first interrupt after the export effect is issued leaves publication in
 control of the outcome. A second interrupt or an abrupt termination may leave

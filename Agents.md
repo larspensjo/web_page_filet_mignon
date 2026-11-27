@@ -40,7 +40,15 @@ terms of observable outcomes.
 ## Secrets and verification
 
 - Do not obtain API keys, run Harvester launchers, or iterate against live LLM
-  APIs. Use the keyless build, test, Pester, and IPC-probe paths.
+  APIs. This includes the morning launcher. Use the keyless build, test, Pester,
+  and IPC-probe paths. Tests and tools never pass `--use-stored-keys` to a Harvester
+  executable.
+- The morning launcher owns `C:\Users\larsp\src\harvester-morning` and updates it
+  by clone and fast-forward only. Agents never use it as a working directory,
+  build location, or command location. Lars measures its size after the first build.
+  The morning run builds the local `morning` branch, which only the Orchestrator
+  advances with `Advance-MorningBranch.ps1` to a green commit on `main`, and
+  agents never commit to the release branch directly.
 - Select checks appropriate to the change. Documentation-only edits do not need
   application builds or tests. Report checks that could not be completed.
 - For Rust changes, build with `cargo build`, run relevant tests, and finish with
@@ -50,8 +58,10 @@ terms of observable outcomes.
   `cargo clippy -p harvester_ui --all-targets -- -D warnings`.
 - Frontend checks run from `frontend/`: `npm run check`, `npm run build`, and
   `npm run fmt`.
-- A running batch locks `target/debug/harvester_batch.exe`. While it runs, build
-  shared-crate changes with `cargo build --workspace --exclude harvester_batch`.
+- A running plain batch locks the main repository's `target/debug/harvester_batch.exe`.
+  While it runs, build shared-crate changes with
+  `cargo build --workspace --exclude harvester_batch`. A morning run locks
+  `C:\Users\larsp\src\harvester-morning\target\debug\harvester_batch.exe`.
 - The keyless IPC probe is `cargo run -p harvester_ui -- --probe-ipc`. It needs a
   display and the GUI lock, takes about 150 seconds, writes
   `.local/probe/ipc-report.json`, and exits non-zero on a failed gate.

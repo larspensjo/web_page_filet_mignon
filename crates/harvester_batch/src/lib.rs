@@ -17,6 +17,10 @@ pub fn initialize_logging() {
     engine_logging::initialize_file_only();
 }
 
+fn read_morning_commit() -> Option<String> {
+    std::env::var("HARVESTER_MORNING_COMMIT").ok()
+}
+
 /// Parse the process arguments with clap's normal help, version and diagnostics.
 pub fn parse_command_line() -> Result<Args, i32> {
     let argv: Vec<_> = std::env::args_os().collect();
@@ -33,7 +37,8 @@ pub fn parse_command_line() -> Result<Args, i32> {
                 archive_result::Status::UsageError,
                 Some("invalid_arguments"),
             );
-            println!("{}", result.line());
+            let commit = read_morning_commit();
+            println!("{}", result.line(commit.as_deref()));
         }
         code
     })

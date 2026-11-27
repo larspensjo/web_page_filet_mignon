@@ -206,6 +206,7 @@ impl Fixture {
         let mut run = Command::new(std::env::current_exe().unwrap())
             .current_dir(self.root.path())
             .args(["--exact", "archive_contract_child", "--nocapture"])
+            .env_remove("HARVESTER_MORNING_COMMIT")
             .env(CHILD_MARKER, serde_json::to_string(&argv).unwrap())
             .env("HARVESTER_ARCHIVE_CONTRACT_MODE", mode)
             .capture();

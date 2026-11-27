@@ -24,9 +24,10 @@ Lars runs one script in the morning and gets a portfolio brief. For that:
 1. The batch and desktop hosts read their API keys from Windows Credential Manager at run time
    and start without a typed password (DecisionLog 2026-11-27).
 2. `scripts\Start-HarvesterBatch.ps1 --archive-out C:\Users\larsp\src\AI_portfolio\archive.md`
-   runs one full cycle from a clean build of local `main`, writes the archive with the same
-   selection as the desktop Archive button, advances the checkpoint only after the file is in
-   place, and ends with one machine-readable result line and an agreed exit code.
+   runs one full cycle from a clean build of the local `morning` release branch, writes the
+   archive with the same selection as the desktop Archive button, advances the checkpoint
+   only after the file is in place, and ends with one machine-readable result line and an
+   agreed exit code.
 3. Every key-free path (build, tests, Pester, IPC probe) stays key-free.
 
 ## Settled inputs this plan builds on
@@ -193,19 +194,28 @@ Each line is one testable promise. Tags are referenced by phases and tests.
 
 ### Morning build
 
+**Orchestrator 2026-11-27.** The unattended run uses the local `morning` release branch
+because it runs with Lars's stored keys. This replaces following local `main`.
+
 - **M1** With `--archive-out`, the launcher builds and runs only from the morning checkout.
-- **M2** The launcher alone creates the morning checkout (`git clone --branch main` from the
+- **M2** The launcher alone creates the morning checkout (`git clone --branch morning` from the
   local repository) and updates it only with `git fetch` plus `git merge --ff-only`; it never
-  resets, cleans, checks out files, stashes or rebases.
+  resets, cleans, checks out files, stashes, rebases or uses worktrees.
 - **M3** A dirty, foreign, wrong-branch, ahead or diverged morning checkout, or a failed fetch or
-  merge, stops the launch with an `update_failed` result line and exit 23, without modifying it.
-- **M4** The commit built is exactly the fetched tip of local `main`: `HEAD` equals the fetched
-  commit before `cargo` runs.
-- **M5** A failed `cargo build -p harvester_batch --bin harvester_batch` in the morning checkout,
-  or a missing binary, stops with a `build_failed` result line and exit 24.
+  merge, stops the launch with an `update_failed` result line and exit 23. A missing `morning`
+  ref or a `morning` tip that is outside `main` stops it with `no_morning_branch` or
+  `morning_not_on_main`, respectively.
+- **M4** The commit built is the fetched tip of `morning` after checking that it is an ancestor
+  of, or equal to, local `main`. `HEAD` equals the fetched commit before `cargo` runs. Advance
+  `morning` only on the Orchestrator's explicit go, after full checks pass for the target commit
+  on `main`. `Advance-MorningBranch.ps1 -Commit <hash>` creates or fast-forwards the ref using
+  its expected old value. Nobody commits directly on `morning`.
+- **M5** A failed `cargo build --locked -p harvester_batch --bin harvester_batch` in the morning
+  checkout, a missing binary or a child startup exception stops with `build_failed` and exit 24.
 - **M6** The morning binary runs with the main repository as working directory and absolute
   `--output-dir`, `--sources`, `--contexts-dir` and `--prompts-dir` pointing into the main
-  repository.
+  repository. The launcher passes the verified checkout `HEAD` as `HARVESTER_MORNING_COMMIT`,
+  and both launcher and binary result lines append `commit` after `reason`.
 
 ### Exporter
 
@@ -692,25 +702,33 @@ never silently disappears and never blocks a third morning.
 
 ### Morning checkout
 
-A separate local clone, not a `git worktree`: a worktree shares the main repository's refs and
-administrative files, which agents manipulate, and `main` cannot be checked out in two worktrees.
-The clone's `origin` is the main repository path.
+A separate local clone keeps its refs and administrative files independent of the main
+repository, whose path is the clone's `origin`. The release branch changes only through
+`Advance-MorningBranch.ps1 -Commit <hash>` on the Orchestrator's go after full checks pass.
+The command resolves the candidate, checks ancestry against `main` and the existing `morning`
+ref, and atomically updates `refs/heads/morning` with the expected old hash. An all-zero expected
+hash requires the branch to be absent. It prints the old and new hashes.
 
-- Create (only if the path does not exist):
-  `git clone --branch main --single-branch C:\Users\larsp\src\web_page_filet_mignon C:\Users\larsp\src\harvester-morning`
-- Check before every update, read-only: top level equals the path; `origin` URL equals the main
-  repository path; `HEAD` is branch `main`; `git status --porcelain` is empty. A failure is
-  `update_failed` and nothing is touched.
-- Update: `git -C <morning> fetch origin main`; read the fetched commit with
-  `git -C <morning> rev-parse FETCH_HEAD`; require `git -C <morning> merge-base --is-ancestor HEAD
+- Release preflight checks for `refs/heads/morning` in the main repository and requires its
+  tip to be contained in `refs/heads/main`. A newer `main` leaves the release unchanged.
+- Create (only if the path does not exist, after release preflight):
+  `git clone --branch morning --single-branch C:\Users\larsp\src\web_page_filet_mignon C:\Users\larsp\src\harvester-morning`
+- Check before every update, read-only. The top level must equal the path, `origin` must be
+  the main repository, `HEAD` must be branch `morning`, and `git status --porcelain` must be
+  empty. A failure stops the update. Read `HEAD` after verifying the top level so launcher
+  results can include it even if a later check fails.
+- Update with `git -C <morning> fetch origin morning` and read the fetched commit with
+  `git -C <morning> rev-parse FETCH_HEAD`. Require it to equal the tip checked in release
+  preflight. If the ref moved during the update, a later launch can check the new tip.
+  Require `git -C <morning> merge-base --is-ancestor HEAD
   FETCH_HEAD` (else `update_failed`, reason `checkout_diverged`, no merge); run
   `git -C <morning> merge --ff-only FETCH_HEAD`; then require `git -C <morning> rev-parse HEAD` to
-  equal the fetched commit (M4). A checkout that is ahead of or diverged from `main` has a `HEAD`
+  equal the fetched commit (M4). A checkout that is ahead of or diverged from `morning` has a `HEAD`
   that is not an ancestor of `FETCH_HEAD`, so it is refused before any merge and left untouched;
   without the ancestor check, `merge --ff-only` would report "Already up to date" and the extra
   commits would be built.
-- Build: `cargo build -p harvester_batch --bin harvester_batch` in the morning checkout with
-  `CARGO_INCREMENTAL=0`; a non-zero exit or a missing binary is `build_failed`.
+- Build with `cargo build --locked -p harvester_batch --bin harvester_batch` in the morning
+  checkout with `CARGO_INCREMENTAL=0`. A non-zero exit or a missing binary is `build_failed`.
 - Run: working directory the main repository; arguments, all fixed by policy except the target:
   `--use-stored-keys --output-dir C:\Users\larsp\src\web_page_filet_mignon\output
   --sources C:\Users\larsp\src\web_page_filet_mignon\output\.sources.ron
@@ -719,6 +737,8 @@ The clone's `origin` is the main repository path.
   --archive-out <forwarded absolute path>`.
   No path resolves into the morning checkout's own folders; the batch logs each resolved absolute
   path at startup and Pester pins the argument list. `engine.log` lands in the main repository.
+  The child receives the verified hash in `HARVESTER_MORNING_COMMIT`. A startup exception
+  gives `build_failed` with reason `child_start_failed`.
 - The morning run locks the morning checkout's `harvester_batch.exe`, not the dev target's.
 
 **Size, for the Orchestrator's disk table.** Source checkout about 30 MB (pack about 6.5 MB;
@@ -750,6 +770,7 @@ Printed by the binary for every morning outcome it reaches, and by the launcher 
 | `excused_articles` | integer | articles excused after two consecutive failed mornings (exported without the failed part, or left out); URLs in the engine log | addition, to confirm |
 | `lock_holder` | string or null | holder text (host, PID, start time) when `locked` | agreed |
 | `reason` | string or null | short fixed token; null for a clean `exported` or `nothing_new` | addition, to confirm |
+| `commit` | string or null | full 40-hex hash passed to the batch at startup or the launcher checkout's known `HEAD`; null when unknown or invalid | additive, Orchestrator 2026-11-27 |
 
 `cost_usd` covers every model request this run made, including requests that finished during a
 Stop drain and requests for articles the export did not select; prices come from the built-in
@@ -761,13 +782,13 @@ Stop drain and requests for articles the export did not select; prices come from
 `export_write_failed`, `export_ack_lost`, `checkpoint_not_saved`, `results_not_saved`,
 `missing_openai_key`, `credential_unreadable`, `no_window_start`, `invalid_archive_out`,
 `invalid_arguments`, `checkout_dirty`, `checkout_foreign`, `checkout_diverged`,
-`fast_forward_failed`, `clone_failed`, `cargo_failed`, `binary_missing`. Readers must accept
-unknown tokens.
+`fast_forward_failed`, `clone_failed`, `no_morning_branch`, `morning_not_on_main`,
+`cargo_failed`, `binary_missing`, `child_start_failed`. Readers must accept unknown tokens.
 
 Example:
 
 ```text
-HARVESTER_RESULT {"v":1,"status":"exported","articles":112,"path":"C:\\Users\\larsp\\src\\AI_portfolio\\archive.md","previous_kept":null,"previous_superseded":false,"cost_usd":0.412305,"cost_basis":"openai_price_table","archive_schema":2,"since_utc":"2026-11-26T06:10:31Z","until_utc":"2026-11-27T06:12:04Z","failed_sources":1,"backlog_articles":0,"lock_holder":null,"reason":null}
+HARVESTER_RESULT {"v":1,"status":"exported","articles":112,"path":"C:\\Users\\larsp\\src\\AI_portfolio\\archive.md","previous_kept":null,"previous_superseded":false,"cost_usd":0.412305,"cost_basis":"openai_price_table","archive_schema":2,"since_utc":"2026-11-26T06:10:31Z","until_utc":"2026-11-27T06:12:04Z","failed_sources":1,"backlog_articles":0,"excused_articles":0,"lock_holder":null,"reason":null,"commit":"0123456789abcdef0123456789abcdef01234567"}
 ```
 
 ## Exit codes
@@ -825,8 +846,8 @@ Without `--archive-out`, every row keeps today's code and prints no line.
 | exported | 0 | `exported` 0 | yes |
 | panic | 101 | crash | no |
 | launcher: unknown or extra argument, relative target | n/a | `usage_error` 2 | launcher |
-| launcher: clone, dirty, foreign, wrong branch, ahead, diverged, fetch or merge failure, HEAD not the fetched commit | n/a | `update_failed` 23 | launcher |
-| launcher: cargo failure or binary missing | throws, 1 | `build_failed` 24 | launcher |
+| launcher: release ref missing or outside main, clone failure, dirty, foreign, wrong branch, ahead, diverged, fetch or merge failure, HEAD not the fetched commit | n/a | `update_failed` 23 | launcher |
+| launcher: cargo failure, binary missing or child startup exception | throws, 1 | `build_failed` 24 | launcher |
 | launcher: unexpected exception | 1 | crash | no |
 
 ## Phases
@@ -1109,6 +1130,9 @@ Estimate: 25-40 min plus the probe. Quiet window: yes if a workspace run is need
 
 ### Phase 7: morning launcher (L4, L5, M1-M6)
 
+**Orchestrator 2026-11-27.** Use the deliberately advanced local `morning` release ref
+and name the verified commit in both launcher and batch result lines.
+
 Failing Pester tests first (all git, cargo and child calls through an injected process runner):
 
 - forwarding: only `--archive-out <abs>` and `--archive-out=<abs>`; any other or extra argument,
@@ -1120,18 +1144,29 @@ Failing Pester tests first (all git, cargo and child calls through an injected p
   merge call is made; HEAD differing from the fetched commit after the merge gives
   `update_failed` and no cargo call; no test path issues reset, clean, checkout, stash, rebase or
   worktree (asserted over every recorded call);
-- build: `cargo build -p harvester_batch --bin harvester_batch` in the morning checkout with
-  `CARGO_INCREMENTAL=0`; failure or missing binary gives `build_failed`, exit 24;
+- release policy: fetch `morning`, never `main`. An absent or off-`main` release gives
+  `no_morning_branch` or `morning_not_on_main`, exit 23, with no merge or build. A newer `main`
+  with unchanged `morning` gives an up-to-date merge and builds the same release commit;
+- advance command: refuse a candidate outside `main` or a non-fast-forward, create an absent
+  branch, and use `update-ref` with the observed old value. A concurrent ref change fails;
+- build: `cargo build --locked -p harvester_batch --bin harvester_batch` in the morning checkout
+  with `CARGO_INCREMENTAL=0`; failure, missing binary or child startup exception gives
+  `build_failed`, exit 24;
 - run: executable from the morning checkout, working directory the main repository, the exact
-  argument list in M6; child exit code passed through; nothing written after the child exits;
+  argument list in M6, and `HARVESTER_MORNING_COMMIT` set to the verified hash. Pass through the
+  child exit code and leave its result line last;
 - the plain launch (no arguments) and the UI launch are unchanged from Phase 3;
-- launcher-printed lines are valid JSON with the full key set and order.
+- launcher-printed lines are valid JSON with the full key set and order. `commit` is the known
+  checkout `HEAD` or null before `HEAD` is known.
+
+Rust tests pin the formatter's final key, including valid, invalid and absent values, and
+exercise the real batch's result on both CLI and runtime argument errors.
 
 Coupled docs: README (morning run and result line), Agents.md (morning checkout rule; batch lock
-note), Architecture (launch policy).
+note), ArchiveExportFormat (result line), Architecture (launch policy in Phase 8).
 
-Checks: `Invoke-Pester scripts/tests`. No compiler.
-Estimate: 0 min compiler; Pester about 1-2 min. No quiet window.
+Checks: `Invoke-Pester scripts/tests`, `cargo build`, `cargo test -p harvester_batch`, root and
+`harvester_ui` clippy, and `cargo fmt`. Coordinate compiler use with the Orchestrator.
 
 ### Phase 8: documentation and DecisionLog consolidation
 
@@ -1177,14 +1212,23 @@ and writes it with `CredWriteW` as UTF-16LE, built only then as its own short ph
 **M-B. First morning build and attended run** (after Phases 4-7, with an Orchestrator compiler
 slot, after ai-portfolio-59 has written the bootstrap sidecar and passed its fixture checks):
 
+Create the local release branch at the fully checked commit on `main` named in the
+Orchestrator's `advance morning to <hash>` go:
+
+```powershell
+.\scripts\Advance-MorningBranch.ps1 -Commit <hash>
+```
+
+Then launch the batch:
+
 ```powershell
 .\scripts\Start-HarvesterBatch.ps1 --archive-out C:\Users\larsp\src\AI_portfolio\archive.md
 ```
 
-from `C:\Users\larsp\src\web_page_filet_mignon`. Expected: the morning checkout is created and
-built (several minutes the first time), the key-status lines, one cycle, and a last line
-`HARVESTER_RESULT {...}` with `status` `exported` or `nothing_new`. Then measure the checkout for
-the disk table:
+from `C:\Users\larsp\src\web_page_filet_mignon`. The morning checkout is created and built
+(several minutes the first time), then the batch prints the key status, runs one cycle, and
+ends with `HARVESTER_RESULT {...}` with `status` `exported` or `nothing_new` and the approved
+`commit` hash. Then measure the checkout for the disk table:
 
 ```powershell
 "{0:N1} GB" -f ((Get-ChildItem C:\Users\larsp\src\harvester-morning -Recurse -File -Force | Measure-Object Length -Sum).Sum / 1GB)
@@ -1199,7 +1243,7 @@ once and check that it read the result line and wrote the sidecar.
 |---|---|---|
 | README.md | key setup with cmdkey; SecretStore prerequisites removed; the interactive paragraph replaced with the new position and what it gives up; Brave sources need no key field; morning run and result line | 2, 3, 7 |
 | docs/ThreatModel.md | assets, trust boundary, inheritance and persistent-variable items, residual risk, invariants, echo scrubbing | 3 |
-| docs/ArchiveExportFormat.md | half-open window and narrowed `window_count` population; window fields; external target; publication; temporary and kept-aside names; sidecar role; batch result-line contract | 4, 5b |
+| docs/ArchiveExportFormat.md | half-open window and narrowed `window_count` population; window fields; external target; publication; temporary and kept-aside names; sidecar role; result line and release commit | 4, 5b, 7 |
 | shared archive fixtures | regenerated with the window lines and the upper bound | 4 |
 | docs/Architecture.md | key source; Brave lookup; morning gate; portfolio record and startup ordering; desktop dialog; launch policy and morning checkout | 2, 4, 5a, 6, 7 |
 | docs/visual_design/VisualDesignSpec.md | archive dialog default, label, and morning archive wording | 6 |
@@ -1224,10 +1268,11 @@ No version bump of `CORPUS_SCHEMA_VERSION` or `export_schema`. Desktop IPC moves
    Refines 2026-09-30 ("supplies no runtime arguments"): fixed `--use-stored-keys` and, for the
    morning run, the four absolute path arguments. Never: forward any other argument,
    `--force-unlock` or a checkpoint command.
-4. **The morning run builds from a launcher-owned, fast-forward-only clone of local `main`.**
-   Never: reset, clean, check out files, stash or rebase there; build a commit other than the
-   fetched tip of `main`; build the morning run from a working tree; use it as an agent's working
-   folder.
+4. **The morning run builds from a launcher-owned, fast-forward-only clone of local `morning`.**
+   The Orchestrator authorizes advances to fully checked commits on `main` using
+   `Advance-MorningBranch.ps1`. Never: commit directly on `morning`; reset, clean, check out
+   files, stash or rebase in the clone; build a commit other than the verified release tip;
+   build the morning run from a working tree; use the clone as an agent's working folder.
 5. **The batch archive export contract** (result line v1, statuses and exit codes including the
    additive 22-24, publication that keeps the target present, rename-and-keep, publication
    intent, checkpoint after publication, window fields). Never: refuse because a previous archive
@@ -1267,7 +1312,8 @@ No version bump of `CORPUS_SCHEMA_VERSION` or `export_schema`. Desktop IPC moves
    crashes.
 6. `since_utc` and `until_utc` may be null when the run ended before the window was resolved or no
    export was requested; `since_utc` keeps fractional seconds when the start has them.
-7. The line is ASCII with non-ASCII escaped; keys always present, in the table order.
+7. The line is ASCII with non-ASCII escaped and all keys in the table order. The additive final
+   `commit` is a full 40-hex hash or null.
 8. Sidecar path: beside the target, `<target>.processed`
    (`C:\Users\larsp\src\AI_portfolio\archive.md.processed`); the Harvester reads it at startup and
    never writes it.

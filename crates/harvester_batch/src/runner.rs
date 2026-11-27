@@ -122,6 +122,7 @@ pub fn run(args: Args, stored_keys: Option<StoredKeyAccess>) -> Result<i32, Stri
 }
 
 pub(crate) fn run_with_services(args: Args, services: HostServices) -> Result<i32, String> {
+    let commit = crate::read_morning_commit();
     let target = args.archive_out.clone();
     let outcome = run_host(args, services)?;
     match outcome {
@@ -135,7 +136,7 @@ pub(crate) fn run_with_services(args: Args, services: HostServices) -> Result<i3
                 result.status.as_str(),
                 result.reason.unwrap_or("none")
             );
-            println!("{}", result.line());
+            println!("{}", result.line(commit.as_deref()));
             Ok(result.status.exit_code())
         }
     }

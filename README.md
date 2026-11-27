@@ -78,22 +78,45 @@ Launch one command-line cycle (poll, download, synchronous processing, then exit
 .\scripts\Start-HarvesterBatch.ps1
 ```
 
-The batch launcher builds the working tree and supplies the fixed stored-key
-flag. External scheduling starts a new process for each cycle. Run
+With no arguments, the batch launcher builds the working tree and supplies the
+fixed stored-key flag. External scheduling starts a new process for each cycle. Run
 `harvester_batch --help` for browser-page import and checkpoint commands.
 
-The `harvester_batch` binary accepts `--archive-out <absolute path>` for a
-morning archive. The parent directory must exist and the target must be outside
-the batch output directory. The flag conflicts with checkpoint commands and
-browser-page import. A morning run requires the stored OpenAI key. A missing
-Brave key counts as a failed source and other sources still poll.
+The unattended morning run uses the local release branch `morning`.
+Before the first run, create it at the commit on `main` whose full checks passed
+and which the Orchestrator named in `advance morning to <hash>`. Use the same
+command for each approved fast-forward. It prints the old and new commit hashes.
 
-The binary ends each reported morning outcome with one ASCII line in the form
-`HARVESTER_RESULT {json}`. Exit codes are 0 for `exported`, 10 for
-`nothing_new`, 20 for `cycle_failed`, 21 for `export_failed`, 22 for a held
-output lock, and 2 for `usage_error`. The JSON includes the archive path, window
-bounds, source and article counts, and estimated OpenAI cost. The binary updates
-the checkpoint after publication. Plain runs keep their existing exit codes.
+```powershell
+.\scripts\Advance-MorningBranch.ps1 -Commit <hash>
+```
+
+Run the morning batch and write the portfolio archive:
+
+```powershell
+.\scripts\Start-HarvesterBatch.ps1 --archive-out C:\Users\larsp\src\AI_portfolio\archive.md
+```
+
+The launcher accepts only `--archive-out <absolute path>` or `--archive-out=<absolute path>`.
+The target's parent directory must exist, and the target must be outside the batch
+output directory. A morning run requires the stored OpenAI key. A missing Brave
+key counts as a failed source and other sources still poll.
+
+The launcher manages `C:\Users\larsp\src\harvester-morning` as a separate clone
+of the local `morning` branch. Commits on `main` take effect in the morning run
+when the release branch advances. The launcher creates the clone on the first
+run and accepts only fast-forward updates. It uses `cargo build --locked` to
+build the batch executable there, then runs it with the main repository's
+output, sources, contexts, and prompts.
+
+The launcher or batch executable ends each reported morning outcome with one
+ASCII line in the form `HARVESTER_RESULT {json}`. Exit codes are 0 for `exported`, 10 for
+`nothing_new`, 20 for `cycle_failed`, 21 for `export_failed`, 22 for a held output
+lock, 23 for `update_failed`, 24 for `build_failed`, and 2 for `usage_error`.
+Exit 24 also covers an executable that the launcher cannot start.
+The JSON includes the commit hash, archive path, window bounds, source and
+article counts, and estimated OpenAI cost when available. The binary updates the
+checkpoint after publication. Plain runs keep their existing exit codes.
 See [Archive Export Format](docs/ArchiveExportFormat.md#batch-result-line).
 
 Each cycle shows a compact progress block with elapsed time, cost so far, and
