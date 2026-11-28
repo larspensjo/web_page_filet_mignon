@@ -204,6 +204,7 @@ mod tests {
                 tokens: Some(100),
                 bytes: Some(4_000),
                 links: Vec::new(),
+                final_url: None,
                 fetched_utc: article.fetched_utc.clone(),
             }]),
         );

@@ -1,5 +1,28 @@
 use super::*;
+use chrono::{DateTime, Utc};
 use std::time::SystemTime;
+
+mod matching;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TriageLoadEntry {
+    Job {
+        id: Option<crate::JobId>,
+        url: String,
+        final_url: Option<String>,
+        fetched_utc: Option<DateTime<Utc>>,
+    },
+    /// Articles retained by a session even when its completed job is unavailable.
+    Url(String),
+}
+
+impl TriageLoadEntry {
+    pub fn url(&self) -> &str {
+        match self {
+            Self::Job { url, .. } | Self::Url(url) => url,
+        }
+    }
+}
 
 /// Preparation validity is separate from the URL/content identity.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -203,6 +226,35 @@ impl CorpusScanIndex {
         self.files.clear();
     }
 
+    /// Load articles for callers that have only URLs, such as corpus replay tools.
+    #[allow(clippy::too_many_arguments)]
+    pub fn load_url_delta(
+        &mut self,
+        output_dir: &Path,
+        max_input_bytes: usize,
+        registry: &PromptRegistry,
+        ordered_urls: &[String],
+        since: Option<DateTime<Utc>>,
+        held: &[HeldArticle],
+        on_progress: impl FnMut(ArticleScanProgress),
+    ) -> Result<(TriageArticleDelta, CorpusScanStats), String> {
+        let entries: Vec<_> = ordered_urls
+            .iter()
+            .cloned()
+            .map(TriageLoadEntry::Url)
+            .collect();
+        self.load_delta(
+            output_dir,
+            max_input_bytes,
+            registry,
+            &entries,
+            since,
+            held,
+            None,
+            on_progress,
+        )
+    }
+
     /// Lists every scan, reuses unchanged metadata, and prepares only missing or
     /// differently budgeted identities. Membership follows requested download order.
     #[allow(clippy::too_many_arguments)]
@@ -211,9 +263,10 @@ impl CorpusScanIndex {
         output_dir: &Path,
         max_input_bytes: usize,
         registry: &PromptRegistry,
-        ordered_urls: &[String],
-        since: Option<chrono::DateTime<chrono::Utc>>,
+        ordered_entries: &[TriageLoadEntry],
+        since: Option<DateTime<Utc>>,
         held: &[HeldArticle],
+        request_id: Option<u64>,
         mut on_progress: impl FnMut(ArticleScanProgress),
     ) -> Result<(TriageArticleDelta, CorpusScanStats), String> {
         let budget = summary_preparation_budget(max_input_bytes, registry)?;
@@ -282,32 +335,27 @@ impl CorpusScanIndex {
                 },
             );
         }
-        let mut indexed_aliases = HashMap::new();
+        let mut matcher = matching::ArticleMatcher::default();
         let mut missing_dates = 0;
         let mut malformed_dates = 0;
         for (i, path) in paths.iter().enumerate() {
             if let Some(member) = self.files[path].article.as_ref() {
-                let inside_window = match (since, member.fetched_utc.as_deref()) {
-                    (Some(_), None) => {
+                let fetched = member.fetched_utc.as_deref().and_then(|raw| {
+                    DateTime::parse_from_rfc3339(raw)
+                        .ok()
+                        .map(|date| date.with_timezone(&Utc))
+                });
+                if since.is_some() && fetched.is_none() {
+                    if member.fetched_utc.is_none() {
                         missing_dates += 1;
-                        true
-                    }
-                    (Some(since), Some(raw)) => match parse_rfc3339_utc("article", raw) {
-                        Ok(date) => date >= since,
-                        Err(_) => {
-                            malformed_dates += 1;
-                            true
-                        }
-                    },
-                    _ => true,
-                };
-                if inside_window {
-                    for alias in url_lookup_aliases(&member.url) {
-                        indexed_aliases
-                            .entry(alias)
-                            .or_insert_with(|| (i, path.clone(), member.clone()));
+                    } else {
+                        malformed_dates += 1;
                     }
                 }
+                let inside_window = since
+                    .zip(fetched)
+                    .is_none_or(|(since, fetched)| fetched >= since);
+                matcher.index(i, &member.url, fetched, inside_window);
             }
         }
         if missing_dates > 0 {
@@ -322,24 +370,15 @@ impl CorpusScanIndex {
                 malformed_dates
             );
         }
-        let mut selected = Vec::new();
-        let mut selected_urls = HashSet::new();
-        for (request, url) in ordered_urls.iter().enumerate() {
-            let matched = url_lookup_aliases(url)
-                .into_iter()
-                .find_map(|alias| indexed_aliases.get(&alias));
-            if let Some((i, path, member)) = matched {
-                if selected_urls.insert(member.url.clone()) {
-                    selected.push((request, *i, path.clone(), member.clone()));
-                }
-            }
-        }
+        let selected = matcher.select(ordered_entries, since, request_id);
         let mut reprepare = Vec::new();
-        for (_, i, path, member) in &selected {
+        for &i in &selected {
+            let path = &paths[i];
+            let member = self.files[path].article.as_ref().expect("indexed article");
             if held.get(&(member.url.as_str(), member.content_hash.as_str())) != Some(&budget)
                 && !fresh.contains_key(path)
             {
-                reprepare.push((*i, path.clone()));
+                reprepare.push((i, path.clone()));
             }
         }
         stats.reprepared = reprepare.len();
@@ -352,15 +391,16 @@ impl CorpusScanIndex {
                 })?,
             );
         }
-        selected.sort_by_key(|(request, _, _, _)| *request);
         let mut delta = TriageArticleDelta {
             members: Vec::with_capacity(selected.len()),
             preparation_budget: budget,
             articles: Vec::new(),
         };
-        for (_, _, path, member) in selected {
+        for i in selected {
+            let path = &paths[i];
+            let member = self.files[path].article.as_ref().expect("indexed article");
             if held.get(&(member.url.as_str(), member.content_hash.as_str())) != Some(&budget) {
-                let package = fresh.remove(&path).ok_or_else(|| {
+                let package = fresh.remove(path).ok_or_else(|| {
                     format!("article changed during preparation: {}", path.display())
                 })?;
                 if package.clean_text.content_hash() != member.content_hash
@@ -373,7 +413,7 @@ impl CorpusScanIndex {
                 }
                 delta.articles.push(prepare_article(&package, budget));
             }
-            delta.members.push(member);
+            delta.members.push(member.clone());
         }
         Ok((delta, stats))
     }

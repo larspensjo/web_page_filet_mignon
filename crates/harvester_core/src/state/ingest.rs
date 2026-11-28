@@ -123,6 +123,7 @@ impl AppState {
                     bytes: None,
                     links: Vec::new(),
                     origin: JobOrigin::Direct,
+                    final_url: None,
                     fetched_utc: restored_fetched_utc,
                 },
             );
@@ -216,6 +217,7 @@ impl AppState {
             bytes: None,
             links: Vec::new(),
             origin,
+            final_url: None,
             fetched_utc: None,
         }
     }
@@ -256,10 +258,12 @@ impl AppState {
         result: JobResultKind,
         extracted_links: Vec<ExtractedLink>,
         msg_fetched_utc: Option<String>,
+        final_url: Option<String>,
     ) {
         let job_updated = if let Some(job) = self.jobs.get_mut(&job_id) {
             job.stage = Stage::Done;
             job.outcome = Some(result);
+            job.final_url = final_url.filter(|url| url != &job.url);
             job.fetched_utc = msg_fetched_utc
                 .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
                 .map(|dt| dt.with_timezone(&chrono::Utc));

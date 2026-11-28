@@ -41,7 +41,7 @@ pub use brave_seen_set::{normalize_url_for_dedupe, BraveSeenSet};
 pub use briefing::{
     scan_archive_article_metadata, scan_archive_window_metadata, summary_preparation_budget,
     ArchiveArticleMeta, ArchiveReadHints, ArticleScanProgress, CorpusScanIndex, CorpusScanStats,
-    HeldArticle, LoadedArticle, TriageArticleDelta, WindowArticle,
+    HeldArticle, LoadedArticle, TriageArticleDelta, TriageLoadEntry, WindowArticle,
 };
 pub use convert::{Converter, Html2MdConverter};
 pub use corpus_manifest::{

@@ -481,7 +481,7 @@ impl EffectRunner {
             Effect::LoadArticlesForTriage {
                 held,
                 request_id,
-                ordered_urls,
+                ordered_entries,
                 since_utc,
             } => {
                 let msg_tx = self.msg_tx.clone();
@@ -496,7 +496,7 @@ impl EffectRunner {
                         reset_requested,
                         held,
                         request_id,
-                        ordered_urls,
+                        ordered_entries,
                         since_utc,
                         msg_tx,
                         output_dir,

@@ -60,7 +60,7 @@ fn canned_run(paths: &RuntimePaths) -> (AppState, Vec<harvester_core::SavedResul
         .collect();
     let mut scan = harvester_engine::CorpusScanIndex::default();
     let (delta, _) = scan
-        .load_delta(
+        .load_url_delta(
             &paths.output_dir,
             100_000,
             &registry,
@@ -75,6 +75,7 @@ fn canned_run(paths: &RuntimePaths) -> (AppState, Vec<harvester_core::SavedResul
         .iter()
         .map(|a| harvester_core::CompletedJobSnapshot {
             url: a.url.clone(),
+            final_url: None,
             fetched_utc: a.fetched_utc.clone(),
             tokens: Some(660),
             bytes: Some(1000),
@@ -492,6 +493,7 @@ fn worker_shutdown_flushes_latest_tab_and_selection_and_geometry_save_preserves_
         AppState::new(),
         Msg::RestoreCompletedJobs(vec![harvester_core::CompletedJobSnapshot {
             url: "https://restart.example/0".into(),
+            final_url: None,
             fetched_utc: Some(date().to_rfc3339()),
             tokens: Some(10),
             bytes: Some(100),

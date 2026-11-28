@@ -1,5 +1,6 @@
 use crate::{AppState, Effect};
 use engine_logging::{engine_info, engine_warn};
+use harvester_engine::TriageLoadEntry;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PendingStart {
@@ -63,7 +64,7 @@ pub(super) fn resume(state: &mut AppState) -> Vec<Effect> {
     let Some(budget) = state.processing_budget else {
         return Vec::new();
     };
-    let current_window_has_members = !state.ordered_completed_job_urls_snapshot().is_empty()
+    let current_window_has_members = state.ordered_completed_jobs_for_triage().next().is_some()
         || state.pre_triage().window_articles().next().is_some()
         || !state.triage().articles().is_empty();
     let wait_for_first_download = state
@@ -85,22 +86,20 @@ pub(super) fn resume(state: &mut AppState) -> Vec<Effect> {
                 .as_mut()
                 .unwrap()
                 .preparation_requested = true;
-            let mut urls = state.ordered_completed_job_urls_snapshot();
             // Restored sessions can carry prepared articles before their job snapshot.
-            urls.extend(
+            let entries = preparation_entries(
+                state.ordered_completed_jobs_for_triage(),
                 state
                     .pre_triage()
                     .window_articles()
-                    .map(|(_, a)| a.url.clone()),
+                    .map(|(_, a)| a.url.as_str())
+                    .chain(state.triage().articles().iter().map(|a| a.url.as_str())),
             );
-            urls.extend(state.triage().articles().iter().map(|a| a.url.clone()));
-            let mut seen = std::collections::HashSet::new();
-            urls.retain(|url| seen.insert(url.clone()));
             let request_id = state.pre_triage_coordinator.begin_preparation_load();
             state.set_triage_in_flight(request_id);
             return vec![Effect::LoadArticlesForTriage {
                 request_id,
-                ordered_urls: urls,
+                ordered_entries: entries,
                 since_utc: state.briefing_since_utc(),
                 held: state.pre_triage().held_articles(),
             }];
@@ -141,16 +140,16 @@ pub(super) fn resume(state: &mut AppState) -> Vec<Effect> {
         return Vec::new();
     }
     let held = state.pre_triage().held_articles();
-    let mut window_urls = state.ordered_completed_job_urls_snapshot();
-    window_urls.extend(urls);
-    let mut seen = std::collections::HashSet::new();
-    window_urls.retain(|url| seen.insert(url.clone()));
+    let entries = preparation_entries(
+        state.ordered_completed_jobs_for_triage(),
+        urls.iter().map(String::as_str),
+    );
     let request_id = state.pre_triage_coordinator.begin_preparation_load();
     engine_info!(
         "[processing-start] reprepare request_id={} budget={} urls={}",
         request_id,
         budget,
-        window_urls.len()
+        entries.len()
     );
     state.set_triage_in_flight(request_id);
     state
@@ -160,8 +159,22 @@ pub(super) fn resume(state: &mut AppState) -> Vec<Effect> {
         .preparation_requested = true;
     vec![Effect::LoadArticlesForTriage {
         request_id,
-        ordered_urls: window_urls,
+        ordered_entries: entries,
         since_utc: state.briefing_since_utc(),
         held,
     }]
+}
+
+fn preparation_entries<'a>(
+    completed: impl Iterator<Item = TriageLoadEntry>,
+    retained: impl Iterator<Item = &'a str>,
+) -> Vec<TriageLoadEntry> {
+    let mut entries: Vec<_> = completed.collect();
+    let mut seen: std::collections::HashSet<_> = entries.iter().map(TriageLoadEntry::url).collect();
+    let supplemental: Vec<_> = retained
+        .filter(|url| seen.insert(url))
+        .map(|url| TriageLoadEntry::Url(url.to_owned()))
+        .collect();
+    entries.extend(supplemental);
+    entries
 }

@@ -126,7 +126,7 @@ fn scan_triage(
         .map(|a| a.url)
         .collect::<Vec<_>>();
     Ok(CorpusScanIndex::default()
-        .load_delta(dir, max, registry, &urls, None, &[], |_| {})?
+        .load_url_delta(dir, max, registry, &urls, None, &[], |_| {})?
         .0
         .articles)
 }

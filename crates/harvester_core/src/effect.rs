@@ -54,7 +54,7 @@ pub enum Effect {
     LoadArticlesForTriage {
         held: Vec<harvester_engine::HeldArticle>,
         request_id: u64,
-        ordered_urls: Vec<String>,
+        ordered_entries: Vec<harvester_engine::TriageLoadEntry>,
         since_utc: Option<chrono::DateTime<chrono::Utc>>,
     },
     LoadPromptContexts,

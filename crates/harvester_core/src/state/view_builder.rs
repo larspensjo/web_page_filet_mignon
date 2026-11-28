@@ -943,6 +943,7 @@ mod tests {
             tokens,
             bytes: None,
             links: Vec::new(),
+            final_url: None,
             fetched_utc: None,
         })
         .collect();

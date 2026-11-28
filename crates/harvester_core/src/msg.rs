@@ -122,6 +122,7 @@ pub enum Msg {
         result: crate::JobResultKind,
         extracted_links: Vec<ExtractedLink>,
         fetched_utc: Option<String>,
+        final_url: Option<String>,
     },
     /// Classification of a completed fetch for the domain blacklist. Emitted
     /// alongside `JobDone` from the engine→message translation, before `JobDone`

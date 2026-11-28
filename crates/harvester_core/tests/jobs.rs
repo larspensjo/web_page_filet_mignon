@@ -57,6 +57,7 @@ fn job_done_transitions_to_done() {
             job_id: 1,
             result: JobResultKind::Success,
             extracted_links: Vec::new(),
+            final_url: None,
             fetched_utc: None,
         },
     );
@@ -121,6 +122,7 @@ fn job_done_attaches_link_records_and_dedupes() {
                     kind: LinkKind::Hyperlink,
                 },
             ],
+            final_url: None,
             fetched_utc: None,
         },
     );

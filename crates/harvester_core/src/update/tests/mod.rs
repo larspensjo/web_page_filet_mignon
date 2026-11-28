@@ -555,6 +555,7 @@ fn open_in_browser_with_unsummarized_job_selected_emits_nothing() {
         tokens: None,
         bytes: None,
         links: vec![],
+        final_url: None,
         fetched_utc: None,
     }]);
     let job_id = state

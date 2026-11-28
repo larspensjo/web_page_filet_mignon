@@ -151,6 +151,8 @@ pub struct LinkSnapshotRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompletedJobSnapshot {
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub final_url: Option<String>,
     pub tokens: Option<u32>,
     pub bytes: Option<u64>,
     pub links: Vec<LinkSnapshotRecord>,
@@ -161,6 +163,7 @@ pub struct CompletedJobSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlimJobRecord {
     pub url: String,
+    pub final_url: Option<String>,
     pub tokens: Option<u32>,
     pub bytes: Option<u64>,
     pub fetched_utc: Option<String>,

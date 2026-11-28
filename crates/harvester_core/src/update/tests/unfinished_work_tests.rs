@@ -613,6 +613,7 @@ fn restoring_completed_jobs_clears_the_old_window_summary() {
             tokens: Some(100),
             bytes: Some(1_000),
             links: Vec::new(),
+            final_url: None,
             fetched_utc: Some("2026-09-20T12:00:00Z".into()),
         }]),
     );

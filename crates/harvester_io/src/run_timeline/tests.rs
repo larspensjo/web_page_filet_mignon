@@ -305,6 +305,7 @@ fn stopped_settlement_is_read_from_real_state_after_phase_returns_idle() {
                 reason: "cancelled".into(),
             },
             extracted_links: vec![],
+            final_url: None,
             fetched_utc: None,
         },
     )

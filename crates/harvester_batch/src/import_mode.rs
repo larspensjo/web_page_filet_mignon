@@ -195,6 +195,7 @@ pub(crate) fn run_import_mode(
             url: job.url,
             tokens: job.tokens,
             bytes: job.bytes,
+            final_url: job.final_url,
             fetched_utc: job.fetched_utc,
         })
         .collect::<Vec<_>>();
@@ -551,6 +552,7 @@ mod tests {
             tokens: Some(10),
             bytes: Some(100),
             links: Vec::new(),
+            final_url: None,
             fetched_utc: Some("2026-03-08T06:00:00Z".to_string()),
         }];
         let imported = vec![harvester_core::CompletedJobSnapshot {
@@ -558,6 +560,7 @@ mod tests {
             tokens: None,
             bytes: None,
             links: Vec::new(),
+            final_url: None,
             fetched_utc: Some("2026-03-08T06:01:56Z".to_string()),
         }];
 

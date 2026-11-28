@@ -146,6 +146,7 @@ fn fake_full_cycle_runner(
             tokens: Some(500),
             bytes: Some(3_000),
             links: Vec::new(),
+            final_url: None,
             fetched_utc: article.fetched_utc.clone(),
         }]),
     );
@@ -553,6 +554,7 @@ fn synchronous_staggered_downloads_dispatch_triage_and_settle_once() {
             job_id: jobs[0],
             result: JobResultKind::Success,
             extracted_links: Vec::new(),
+            final_url: None,
             fetched_utc: articles[0].fetched_utc.clone(),
         },
     )
@@ -616,6 +618,7 @@ fn synchronous_staggered_downloads_dispatch_triage_and_settle_once() {
             job_id: jobs[1],
             result: JobResultKind::Success,
             extracted_links: Vec::new(),
+            final_url: None,
             fetched_utc: articles[1].fetched_utc.clone(),
         },
     )
@@ -911,6 +914,7 @@ fn test_dispatch_loop_ticks_drive_pretriage_from_restore_signal() {
                 tokens: Some(123),
                 bytes: Some(4567),
                 links: Vec::new(),
+                final_url: None,
                 fetched_utc: Some("2026-03-05T00:00:00Z".to_string()),
             },
         ]))

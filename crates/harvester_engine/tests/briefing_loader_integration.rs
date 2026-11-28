@@ -450,7 +450,14 @@ fn scan_selected_with_progress(
     since: Option<chrono::DateTime<chrono::Utc>>,
     progress: impl FnMut(ArticleScanProgress),
 ) -> Result<Vec<LoadedArticle>, String> {
-    let (delta, _) =
-        CorpusScanIndex::default().load_delta(dir, max, registry, urls, since, &[], progress)?;
+    let (delta, _) = CorpusScanIndex::default().load_url_delta(
+        dir,
+        max,
+        registry,
+        urls,
+        since,
+        &[],
+        progress,
+    )?;
     Ok(delta.articles)
 }

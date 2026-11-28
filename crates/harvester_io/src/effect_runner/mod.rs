@@ -464,6 +464,7 @@ impl EffectRunner {
                                 result: JobResultKind::Success,
                                 extracted_links: outcome.extracted_links,
                                 fetched_utc: outcome.fetched_utc,
+                                final_url: Some(outcome.final_url),
                             },
                             Err(failure_kind) => {
                                 let reason = failure_kind.to_string();
@@ -476,6 +477,7 @@ impl EffectRunner {
                                     job_id,
                                     result: JobResultKind::Failed { reason },
                                     extracted_links: Vec::new(),
+                                    final_url: None,
                                     fetched_utc: None,
                                 }
                             }
@@ -554,6 +556,7 @@ impl EffectRunner {
                     job_id,
                     result: JobResultKind::Failed { reason },
                     extracted_links: Vec::new(),
+                    final_url: None,
                     fetched_utc: None,
                 });
             }

@@ -29,6 +29,7 @@ fn add_completed_job(state: AppState, url: &str) -> (AppState, u64) {
             job_id,
             result: JobResultKind::Success,
             extracted_links: Vec::new(),
+            final_url: None,
             fetched_utc: Some("2026-09-28T12:00:00Z".into()),
         },
     );

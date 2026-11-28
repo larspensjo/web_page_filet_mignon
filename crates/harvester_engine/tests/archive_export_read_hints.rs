@@ -102,7 +102,7 @@ fn fixture_with_scanned_index(index: &mut CorpusScanIndex) -> Fixture {
 
     let registry = PromptRegistry::with_defaults();
     index
-        .load_delta(dir, 20_000, &registry, &window_urls, None, &[], |_| {})
+        .load_url_delta(dir, 20_000, &registry, &window_urls, None, &[], |_| {})
         .unwrap();
 
     // After the scan: one file added inside the window.

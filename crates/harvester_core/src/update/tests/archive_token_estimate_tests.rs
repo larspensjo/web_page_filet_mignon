@@ -269,6 +269,7 @@ fn view_exposes_selected_meter_without_triage_or_download_fallback() {
             },
 
             extracted_links: Vec::new(),
+            final_url: None,
             fetched_utc: None,
         },
     );

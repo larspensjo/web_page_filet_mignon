@@ -63,6 +63,7 @@ fn start(
                         tokens: Some(1000),
                         bytes: Some(1024),
                         links: Vec::new(),
+                        final_url: None,
                         fetched_utc: article.fetched_utc.clone(),
                     })
                     .collect(),

@@ -38,6 +38,7 @@ fn completed_jobs_can_be_restored_for_resume() {
             job_id,
             result: JobResultKind::Success,
             extracted_links: Vec::new(),
+            final_url: None,
             fetched_utc: None,
         },
     );
@@ -69,6 +70,7 @@ fn restored_jobs_are_deduped_on_paste() {
             tokens: None,
             bytes: None,
             links: Vec::new(),
+            final_url: None,
             fetched_utc: None,
         }]),
     );
@@ -89,6 +91,7 @@ fn restore_completed_job_ignores_downloaded_paths_and_keeps_links() {
             url: "https://downloaded.example".to_string(),
             downloaded_path: Some("linked/123.md".to_string()),
         }],
+        final_url: None,
         fetched_utc: None,
     }];
 
@@ -119,6 +122,7 @@ fn selected_job_keeps_extracted_links_after_completion() {
                 text: Some("Read more".into()),
                 kind: harvester_engine::LinkKind::Hyperlink,
             }],
+            final_url: None,
             fetched_utc: None,
         },
     );
@@ -151,6 +155,7 @@ fn selection_loads_links_only_on_change_and_ignores_stale_replies() {
             tokens: None,
             bytes: None,
             links: vec![],
+            final_url: None,
             fetched_utc: None,
         });
     let (state, _) = update(
@@ -232,6 +237,7 @@ fn late_empty_or_failed_link_reply_preserves_completed_session_links() {
                 text: Some("Kept".into()),
                 kind: harvester_engine::LinkKind::Hyperlink,
             }],
+            final_url: None,
             fetched_utc: None,
         },
     );

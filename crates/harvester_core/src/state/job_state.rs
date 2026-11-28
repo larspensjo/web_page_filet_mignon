@@ -9,6 +9,7 @@ use std::collections::HashSet;
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(super) struct JobState {
     pub(super) url: String,
+    pub(super) final_url: Option<String>,
     /// Canonical archive identity, computed when a reducer creates or changes the URL.
     pub(super) archive_url_key: String,
     pub(super) stage: Stage,

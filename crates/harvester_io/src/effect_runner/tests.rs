@@ -115,6 +115,7 @@ fn completed_download_stores_links_and_restored_selection_loads_and_opens_them()
             job_id: 1,
             result: JobResultKind::Success,
             extracted_links: links.clone(),
+            final_url: None,
             fetched_utc: None,
         },
     );
@@ -227,13 +228,17 @@ fn incremental_load_prepares_only_arrivals_then_rebudgets_all_held_articles() {
     .unwrap();
     let (mut runner, rx) = runner_with_receiver(temp.path());
     runner.llm_max_input_bytes = Some(10_000);
-    let urls = vec![
+    let urls = [
         "https://example.com/a".to_string(),
         "https://example.com/b".to_string(),
     ];
     let load = |id, held| Effect::LoadArticlesForTriage {
         request_id: id,
-        ordered_urls: urls.clone(),
+        ordered_entries: urls
+            .iter()
+            .cloned()
+            .map(harvester_engine::TriageLoadEntry::Url)
+            .collect(),
         since_utc: None,
         held,
     };
@@ -327,6 +332,7 @@ fn runtime_persistence_effect_is_flushed_when_the_runner_shuts_down() {
             tokens: Some(1),
             bytes: Some(2),
             links: Vec::new(),
+            final_url: None,
             fetched_utc: None,
         }]),
     );
@@ -361,6 +367,7 @@ fn runner_without_persistence_does_not_write_runtime_state() {
             job_id: 1,
             result: JobResultKind::Success,
             extracted_links: Vec::new(),
+            final_url: None,
             fetched_utc: None,
         },
     );
@@ -638,10 +645,9 @@ fn load_articles_for_triage_respects_since_utc_filter() {
     runner.enqueue(vec![Effect::LoadArticlesForTriage {
         held: Vec::new(),
         request_id: 1,
-        ordered_urls: vec![
-            "https://example.com/old".to_string(),
-            "https://example.com/new".to_string(),
-        ],
+        ordered_entries: ["https://example.com/old", "https://example.com/new"]
+            .map(|url| harvester_engine::TriageLoadEntry::Url(url.into()))
+            .into(),
         since_utc: Some(since),
     }]);
 
@@ -1066,7 +1072,7 @@ fn archive_requested_uses_read_hints_from_the_triage_load() {
     let (runner, rx) = runner_with_receiver(&output);
     runner.enqueue(vec![Effect::LoadArticlesForTriage {
         request_id: 1,
-        ordered_urls: vec![new_url.into()],
+        ordered_entries: vec![harvester_engine::TriageLoadEntry::Url(new_url.into())],
         since_utc: Some(since),
         held: Vec::new(),
     }]);

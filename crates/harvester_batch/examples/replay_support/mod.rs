@@ -776,6 +776,7 @@ fn route_effects(
                             job_id,
                             result: JobResultKind::Failed { reason },
                             extracted_links: Vec::new(),
+                            final_url: None,
                             fetched_utc: None,
                         });
                     }
@@ -818,6 +819,7 @@ fn deliver_held_article(
             },
 
             extracted_links: Vec::new(),
+            final_url: None,
             fetched_utc: None,
         });
         return;
@@ -843,6 +845,7 @@ fn deliver_held_article(
         job_id,
         result: JobResultKind::Success,
         extracted_links: links,
+        final_url: None,
         fetched_utc: article.fetched_utc.clone(),
     });
 }
@@ -1103,6 +1106,7 @@ fn hold_back_newest(paths: &RuntimePaths, count: usize) -> Result<Vec<HeldArticl
                     url: job.url.clone(),
                     tokens: job.tokens,
                     bytes: job.bytes,
+                    final_url: job.final_url.clone(),
                     fetched_utc: job.fetched_utc.clone(),
                 })
                 .collect::<Vec<_>>(),
@@ -1363,7 +1367,7 @@ fn prepare_provider_routes(articles: &[HeldArticle]) -> Result<ProviderRoutes, S
     let registry = prompt_registry();
     let guard = registry.read().expect("replay prompt registry");
     let urls = articles.iter().map(|a| a.url.clone()).collect::<Vec<_>>();
-    let (delta, _) = harvester_engine::CorpusScanIndex::default().load_delta(
+    let (delta, _) = harvester_engine::CorpusScanIndex::default().load_url_delta(
         scratch.path(),
         MAX_INPUT_BYTES,
         &guard,

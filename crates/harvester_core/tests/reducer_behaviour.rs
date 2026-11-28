@@ -139,6 +139,7 @@ fn urls_pasted_again_after_stop_drain() {
             },
 
             extracted_links: Vec::new(),
+            final_url: None,
             fetched_utc: None,
         },
     );
@@ -451,6 +452,7 @@ fn extracted_links_do_not_bypass_stop_intake_drain() {
                 text: None,
                 kind: LinkKind::Hyperlink,
             }],
+            final_url: None,
             fetched_utc: None,
         },
     );
@@ -484,6 +486,7 @@ fn extracted_links_do_not_bypass_stop_intake_drain() {
                 reason: "cancelled from Stop queue drain".into(),
             },
             extracted_links: Vec::new(),
+            final_url: None,
             fetched_utc: None,
         },
     );

@@ -13,6 +13,7 @@ fn mark_done(state: AppState, job_id: u64) -> AppState {
             job_id,
             result: JobResultKind::Success,
             extracted_links: Vec::new(),
+            final_url: None,
             fetched_utc: Some("2026-03-03T10:00:00Z".to_string()),
         },
     )

@@ -582,6 +582,7 @@ fn run_requested_during_continuous_downloads_starts_triage_before_downloads_end(
                 job_id: jobs[index],
                 result: JobResultKind::Success,
                 extracted_links: vec![],
+                final_url: None,
                 fetched_utc: articles[index].fetched_utc.clone(),
             },
         );
@@ -720,6 +721,7 @@ fn three_download_bursts_release_overlapping_waves_and_monotonic_totals() {
                 job_id: jobs[burst],
                 result: JobResultKind::Success,
                 extracted_links: vec![],
+                final_url: None,
                 fetched_utc: articles[burst].fetched_utc.clone(),
             },
         );

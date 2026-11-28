@@ -6,8 +6,17 @@ use super::{
 use crate::pre_triage_filter::PreTriagePhase;
 use crate::triage::{ArticleTriageResult, TriageSession};
 use crate::view_model::JobFilterStatus;
-use harvester_engine::ExtractedLink;
-use harvester_engine::LinkKind;
+use harvester_engine::{ExtractedLink, LinkKind, TriageLoadEntry};
+use std::collections::HashMap;
+
+fn triage_load_entry(id: JobId, job: &JobState) -> TriageLoadEntry {
+    TriageLoadEntry::Job {
+        id: Some(id),
+        url: job.url.clone(),
+        final_url: job.final_url.clone(),
+        fetched_utc: job.fetched_utc,
+    }
+}
 
 impl AppState {
     pub(crate) fn set_runtime_state_notice(&mut self, message: String) {
@@ -22,15 +31,43 @@ impl AppState {
             .map(|job| job.url.as_str())
     }
     pub fn ordered_completed_job_urls_snapshot(&self) -> Vec<String> {
+        self.ordered_completed_jobs()
+            .map(|(_, job)| job.url.clone())
+            .collect()
+    }
+
+    fn ordered_completed_jobs(&self) -> impl DoubleEndedIterator<Item = (JobId, &JobState)> {
         self.jobs
-            .values()
-            .filter_map(|job| {
-                if job.stage == Stage::Done && job.outcome == Some(JobResultKind::Success) {
-                    Some(job.url.clone())
-                } else {
-                    None
-                }
+            .iter()
+            .filter(|(_, job)| {
+                job.stage == Stage::Done && job.outcome == Some(JobResultKind::Success)
             })
+            .map(|(&id, job)| (id, job))
+    }
+
+    pub(crate) fn ordered_completed_jobs_for_triage(
+        &self,
+    ) -> impl Iterator<Item = TriageLoadEntry> + '_ {
+        self.ordered_completed_jobs()
+            .map(|(id, job)| triage_load_entry(id, job))
+    }
+
+    pub(crate) fn triage_load_entries(&self, ordered_urls: Vec<String>) -> Vec<TriageLoadEntry> {
+        let mut jobs_by_url = HashMap::<_, Vec<_>>::new();
+        for (id, job) in self.ordered_completed_jobs().rev() {
+            jobs_by_url
+                .entry(job.url.as_str())
+                .or_default()
+                .push((id, job));
+        }
+        ordered_urls
+            .into_iter()
+            .map(
+                |url| match jobs_by_url.get_mut(url.as_str()).and_then(Vec::pop) {
+                    Some((id, job)) => triage_load_entry(id, job),
+                    None => TriageLoadEntry::Url(url),
+                },
+            )
             .collect()
     }
 
@@ -40,6 +77,7 @@ impl AppState {
             .filter(|job| job.outcome == Some(JobResultKind::Success))
             .map(|job| super::SlimJobRecord {
                 url: job.url.clone(),
+                final_url: job.final_url.clone(),
                 tokens: job.tokens,
                 bytes: job.bytes,
                 fetched_utc: job.fetched_utc.map(|dt| dt.to_rfc3339()),
@@ -72,6 +110,7 @@ impl AppState {
             .filter(|job| job.outcome == Some(JobResultKind::Success))
             .map(|job| CompletedJobSnapshot {
                 url: job.url.clone(),
+                final_url: job.final_url.clone(),
                 tokens: job.tokens,
                 bytes: job.bytes,
                 links: job
@@ -120,6 +159,7 @@ impl AppState {
         for entry in entries {
             let CompletedJobSnapshot {
                 url,
+                final_url,
                 tokens,
                 bytes,
                 links: link_snapshots,
@@ -134,6 +174,7 @@ impl AppState {
                 job_id,
                 JobState {
                     url: url.clone(),
+                    final_url: final_url.filter(|final_url| final_url != &url),
                     archive_url_key: harvester_engine::archive_url_key(&url),
                     stage: Stage::Done,
                     outcome: Some(JobResultKind::Success),

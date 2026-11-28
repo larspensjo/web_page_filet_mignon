@@ -15,6 +15,8 @@ use std::sync::Mutex;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PersistedJob {
     url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    final_url: Option<String>,
     tokens: Option<u32>,
     bytes: Option<u64>,
     #[serde(default, skip_serializing)]
@@ -515,6 +517,7 @@ pub fn load_completed_jobs(state_path: &Path) -> Vec<CompletedJobSnapshot> {
                 .collect();
             CompletedJobSnapshot {
                 url: job.url,
+                final_url: job.final_url,
                 tokens: job.tokens,
                 bytes: job.bytes,
                 links,
@@ -742,6 +745,11 @@ fn persist_runtime_state_with_existing(
                 tokens: job.tokens,
                 bytes: job.bytes,
                 links: vec![],
+                final_url: job
+                    .final_url
+                    .as_ref()
+                    .filter(|url| *url != &job.url)
+                    .cloned(),
                 fetched_utc: job.fetched_utc.clone(),
             })
             .collect(),
@@ -1043,6 +1051,7 @@ mod tests {
                 url: format!("https://example.com/article/{i}"),
                 tokens: Some(123),
                 bytes: Some(456),
+                final_url: None,
                 fetched_utc: Some("2026-10-01T00:00:00Z".into()),
             })
             .collect();
@@ -1114,7 +1123,74 @@ mod tests {
         let snapshot = load_completed_jobs(&state_path(temp.path()));
         assert_eq!(snapshot.len(), 1);
         assert!(snapshot[0].links.is_empty());
+        assert_eq!(snapshot[0].final_url, None);
         assert!(load_pending_intake(&state_path(temp.path())).is_empty());
+    }
+
+    #[test]
+    fn completed_job_final_url_survives_a_runtime_state_roundtrip() {
+        use harvester_core::{update, AppState, Effect, JobResultKind, Msg};
+
+        let temp = tempdir().unwrap();
+        let path = state_path(temp.path());
+        let requested = "https://example.com/requested";
+        let final_url = "https://example.com/final?article=214";
+        let unchanged = "https://example.com/unchanged";
+        write_state(
+            temp.path(),
+            &format!(
+                r#"(completed: [(url: "{requested}", tokens: None, bytes: None, final_url: Some("{final_url}"))])"#
+            ),
+        );
+        let jobs = load_completed_jobs(&path);
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].url, requested);
+        assert_eq!(jobs[0].final_url.as_deref(), Some(final_url));
+        let (restored, _) = update(AppState::new(), Msg::RestoreCompletedJobs(jobs.clone()));
+        let (state, _) = update(restored, Msg::InputChanged(unchanged.into()));
+        let (state, effects) = update(state, Msg::UrlsSubmitted);
+        let job_id = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::EnqueueUrl { job_id, .. } => Some(*job_id),
+                _ => None,
+            })
+            .expect("unchanged URL is enqueued");
+        let (state, _) = update(
+            state,
+            Msg::JobDone {
+                job_id,
+                result: JobResultKind::Success,
+                extracted_links: Vec::new(),
+                fetched_utc: None,
+                final_url: Some(unchanged.into()),
+            },
+        );
+        let mut slim = state.slim_completed_jobs_snapshot();
+        let unchanged_job = slim.iter_mut().find(|job| job.url == unchanged).unwrap();
+        assert_eq!(unchanged_job.final_url, None);
+        // Older snapshots can carry a redundant final URL. Omit it on save too.
+        unchanged_job.final_url = Some(unchanged.into());
+        try_persist_runtime_state_with_pending(&path, &slim, &[]).unwrap();
+        let saved = load_completed_jobs(&path);
+        assert_eq!(saved.len(), 2);
+        assert_eq!(saved[0], jobs[0]);
+        assert_eq!(saved[1].url, unchanged);
+        assert_eq!(saved[1].final_url, None);
+
+        #[derive(serde::Deserialize)]
+        struct LegacyState {
+            completed: Vec<LegacyJob>,
+        }
+        #[derive(serde::Deserialize)]
+        struct LegacyJob {
+            url: String,
+        }
+        let content = fs::read_to_string(&path).unwrap();
+        assert_eq!(content.matches("final_url:").count(), 1);
+        let legacy: LegacyState = ron::from_str(&content).unwrap();
+        assert_eq!(legacy.completed[0].url, requested);
+        assert_eq!(legacy.completed[1].url, unchanged);
     }
 
     #[test]
@@ -1126,6 +1202,7 @@ mod tests {
             tokens: Some(10),
             bytes: Some(512),
             links: vec![],
+            final_url: None,
             fetched_utc: None,
         }];
         let pending = vec!["https://example.com/pending".to_string()];
@@ -1154,6 +1231,7 @@ mod tests {
                     downloaded_path: Some("linked/alpha.md".to_string()),
                 },
             ],
+            final_url: None,
             fetched_utc: None,
         }];
 
@@ -1237,6 +1315,7 @@ mod tests {
             tokens: Some(10),
             bytes: Some(512),
             links: vec![],
+            final_url: None,
             fetched_utc: None,
         }];
         persist_completed_jobs(&path, &slim(&jobs));
@@ -1279,6 +1358,7 @@ mod tests {
             tokens: Some(10),
             bytes: Some(512),
             links: vec![],
+            final_url: None,
             fetched_utc: None,
         }];
 
@@ -1371,6 +1451,7 @@ mod compatibility_tests {
                 url: "https://new.example/link".into(),
                 downloaded_path: None,
             }],
+            final_url: None,
             fetched_utc: Some("2026-09-20T09:15:00Z".into()),
         }];
 
@@ -1395,6 +1476,7 @@ fn slim(jobs: &[CompletedJobSnapshot]) -> Vec<SlimJobRecord> {
             url: job.url.clone(),
             tokens: job.tokens,
             bytes: job.bytes,
+            final_url: job.final_url.clone(),
             fetched_utc: job.fetched_utc.clone(),
         })
         .collect()

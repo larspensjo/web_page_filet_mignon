@@ -32,7 +32,7 @@ fn parse_rfc3339_utc(label: &str, value: &str) -> Result<chrono::DateTime<chrono
 mod corpus_index;
 pub use corpus_index::{
     ArchiveReadHints, CorpusScanIndex, CorpusScanStats, HeldArticle, TriageArticleDelta,
-    WindowArticle,
+    TriageLoadEntry, WindowArticle,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -389,111 +389,49 @@ fn prepare_article(package: &ArticlePackage, budget: usize) -> LoadedArticle {
     }
 }
 
-fn normalized_url_lookup_key(url: &str) -> String {
-    let trimmed = url.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-
-    if let Ok(mut parsed) = Url::parse(trimmed) {
-        parsed.set_fragment(None);
-        if let Some(port) = parsed.port() {
-            let normalized_port = match (parsed.scheme(), port) {
-                ("http", 80) | ("https", 443) => None,
-                _ => Some(port),
-            };
-            let _ = parsed.set_port(normalized_port);
+fn push_url_lookup_aliases(aliases: &mut Vec<String>, mut url: Url) {
+    let key = |url: &Url| {
+        if url.query().is_some() {
+            url.to_string()
+        } else {
+            url.as_str().trim_end_matches('/').to_owned()
         }
-        return parsed.to_string().trim_end_matches('/').to_string();
+    };
+    aliases.push(key(&url));
+    let scheme = match url.scheme() {
+        "http" => "https",
+        "https" => "http",
+        _ => return,
+    };
+    if url.set_scheme(scheme).is_ok() {
+        aliases.push(key(&url));
     }
-
-    trimmed.to_lowercase().trim_end_matches('/').to_string()
 }
 
-fn url_lookup_aliases(url: &str) -> Vec<String> {
-    let key = normalized_url_lookup_key(url);
-    if key.is_empty() {
-        return vec![key];
-    }
+fn url_lookup_aliases(raw: &str) -> Vec<String> {
+    let raw = raw.trim();
+    let Ok(mut url) = Url::parse(raw) else {
+        return vec![raw.to_lowercase().trim_end_matches('/').to_string()];
+    };
+    url.set_fragment(None);
+    let mut aliases = Vec::new();
+    push_url_lookup_aliases(&mut aliases, url.clone());
 
-    let mut aliases = vec![key.clone()];
-    if let Ok(parsed) = Url::parse(&key) {
-        let push_scheme_variants = |aliases: &mut Vec<String>, base: &Url| match base.scheme() {
-            "http" => {
-                let mut https = base.clone();
-                if https.set_scheme("https").is_ok() {
-                    aliases.push(https.to_string().trim_end_matches('/').to_string());
-                }
-            }
-            "https" => {
-                let mut http = base.clone();
-                if http.set_scheme("http").is_ok() {
-                    aliases.push(http.to_string().trim_end_matches('/').to_string());
-                }
-            }
-            _ => {}
-        };
-
-        if parsed.query().is_some() {
-            let mut no_query = parsed.clone();
-            no_query.set_query(None);
-            aliases.push(no_query.to_string().trim_end_matches('/').to_string());
-            push_scheme_variants(&mut aliases, &no_query);
-        }
-
-        push_scheme_variants(&mut aliases, &parsed);
-
-        let Some(host) = parsed.host_str() else {
-            aliases.sort();
-            aliases.dedup();
-            return aliases;
-        };
-        let lowered = host.to_lowercase();
+    if let Some(host) = url.host_str() {
         for prefix in ["www.", "eu.", "m.", "edition."] {
-            if let Some(stripped) = lowered.strip_prefix(prefix) {
-                let mut host_alias = parsed.clone();
-                let alias_host = stripped.to_string();
-                let _ = host_alias.set_host(Some(&alias_host));
-                aliases.push(host_alias.to_string().trim_end_matches('/').to_string());
-                push_scheme_variants(&mut aliases, &host_alias);
-                if host_alias.query().is_some() {
-                    let mut host_alias_no_query = host_alias.clone();
-                    host_alias_no_query.set_query(None);
-                    aliases.push(
-                        host_alias_no_query
-                            .to_string()
-                            .trim_end_matches('/')
-                            .to_string(),
-                    );
-                    push_scheme_variants(&mut aliases, &host_alias_no_query);
+            if let Some(stripped) = host.strip_prefix(prefix) {
+                let mut alias = url.clone();
+                if alias.set_host(Some(stripped)).is_ok() {
+                    push_url_lookup_aliases(&mut aliases, alias);
                 }
             }
         }
-
-        if parsed.host_str() == Some("newsroom.cisco.com")
-            && parsed.path().starts_with("/content/r/")
-        {
-            let mut cisco_alias = parsed.clone();
-            let new_path = parsed.path().replacen("/content/r/", "/c/r/", 1);
-            cisco_alias.set_path(&new_path);
-            aliases.push(cisco_alias.to_string().trim_end_matches('/').to_string());
-            push_scheme_variants(&mut aliases, &cisco_alias);
-            if cisco_alias.query().is_some() {
-                let mut cisco_alias_no_query = cisco_alias.clone();
-                cisco_alias_no_query.set_query(None);
-                aliases.push(
-                    cisco_alias_no_query
-                        .to_string()
-                        .trim_end_matches('/')
-                        .to_string(),
-                );
-                push_scheme_variants(&mut aliases, &cisco_alias_no_query);
-            }
-        }
     }
-
-    aliases.sort();
-    aliases.dedup();
+    if url.host_str() == Some("newsroom.cisco.com") && url.path().starts_with("/content/r/") {
+        let path = url.path().replacen("/content/r/", "/c/r/", 1);
+        url.set_path(&path);
+        push_url_lookup_aliases(&mut aliases, url);
+    }
     aliases
 }
 

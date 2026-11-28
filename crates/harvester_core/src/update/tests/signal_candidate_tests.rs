@@ -106,6 +106,7 @@ fn seed_cached_summary_only_state_for_signal_candidate() -> AppState {
         tokens: None,
         bytes: None,
         links: vec![],
+        final_url: None,
         fetched_utc: article.fetched_utc.clone(),
     }]);
 

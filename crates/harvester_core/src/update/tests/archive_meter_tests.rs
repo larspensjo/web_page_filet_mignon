@@ -272,6 +272,7 @@ impl Fixture {
                     .iter()
                     .map(|a| CompletedJobSnapshot {
                         url: a.url.clone(),
+                        final_url: None,
                         fetched_utc: a.fetched_utc.clone(),
                         tokens: Some(1000),
                         bytes: Some(10000),
@@ -686,6 +687,7 @@ fn selection_restore_waits_for_every_pending_startup_input_even_after_failure() 
             state,
             Msg::RestoreCompletedJobs(vec![CompletedJobSnapshot {
                 url: f.articles[0].url.clone(),
+                final_url: None,
                 fetched_utc: f.articles[0].fetched_utc.clone(),
                 tokens: Some(1000),
                 bytes: Some(10000),
@@ -1177,6 +1179,7 @@ fn mid_run_count_equals_recomputed_selection_while_scoring_is_pending() {
                     job_id: 5,
                     result: crate::JobResultKind::Success,
                     extracted_links: vec![],
+                    final_url: None,
                     fetched_utc: Some(now().to_rfc3339()),
                 },
             ] {

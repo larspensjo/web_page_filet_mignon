@@ -247,6 +247,7 @@ pub(super) fn make_state_with_summarized_job_for_update() -> AppState {
         tokens: None,
         bytes: None,
         links: vec![],
+        final_url: None,
         fetched_utc: None,
     }]);
     let mut briefing = crate::briefing::BriefingSession::new_loading();
@@ -390,6 +391,7 @@ pub(super) fn add_completed_job_for_test(state: AppState, url: &str) -> AppState
             job_id,
             result: JobResultKind::Success,
             extracted_links: Vec::new(),
+            final_url: None,
             fetched_utc: Some("2026-09-28T12:00:00Z".into()),
         },
     );
@@ -427,6 +429,7 @@ pub(super) fn add_completed_job_with_tokens_for_test(
             job_id,
             result: JobResultKind::Success,
             extracted_links: Vec::new(),
+            final_url: None,
             fetched_utc: Some("2026-09-28T12:00:00Z".into()),
         },
     );

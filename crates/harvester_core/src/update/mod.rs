@@ -187,6 +187,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             result,
             extracted_links,
             fetched_utc,
+            final_url,
         } => {
             let successful = matches!(result, crate::JobResultKind::Success);
             let stopped_drain = state.pipeline_run_phase() == crate::PipelineRunPhase::Stopping
@@ -199,7 +200,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                     })
                 })
                 .flatten();
-            state.apply_done(job_id, result, extracted_links, fetched_utc);
+            state.apply_done(job_id, result, extracted_links, fetched_utc, final_url);
             if successful {
                 if let Some(url) = state.job_url(job_id).map(str::to_owned) {
                     state.remove_pending_intake_url(&url);
@@ -746,6 +747,7 @@ mod desktop_contract_tests {
                 job_id,
                 result: crate::JobResultKind::Success,
                 extracted_links: Vec::new(),
+                final_url: None,
                 fetched_utc: None,
             },
         );
@@ -810,6 +812,7 @@ mod desktop_contract_tests {
                     text: None,
                     kind: harvester_engine::LinkKind::Hyperlink,
                 }],
+                final_url: None,
                 fetched_utc: None,
             },
         );

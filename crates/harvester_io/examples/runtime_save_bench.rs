@@ -19,6 +19,7 @@ fn main() {
             url: job.url,
             tokens: job.tokens,
             bytes: job.bytes,
+            final_url: job.final_url,
             fetched_utc: job.fetched_utc,
         })
         .collect();

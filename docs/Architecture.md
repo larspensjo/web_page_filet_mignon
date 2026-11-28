@@ -367,13 +367,19 @@ does not change the public corpus format.
 
 Cold reads and budget-driven re-preparation use a chunked worker pool.
 `LoadArticlesForTriage` carries held URL/content-hash identities and their preparation
-budgets. Its response contains one first-filename match per requested URL in download
-order, the current
-summary preparation budget, and prepared text only for missing or differently budgeted
-identities. The budget subtracts the effective summary template overhead, including
+budgets. Completed jobs match files by exact URL, then query-preserving URL aliases,
+then an exact fetch instant shared by one job and one file, then query-stripped aliases.
+At each URL step, the saved final URL takes priority over the requested URL. A lookup
+with multiple candidates prefers files in the active window.
+Only files in the active window enter pre-triage.
+The response carries matched members in download order, the current summary preparation
+budget, and prepared text only for missing or differently budgeted identities.
+The budget subtracts the effective summary template overhead, including
 saved overlays, from the configured input limit. Content hashes derive from untruncated
 clean text; a budget change does not change identity. This path builds no aggregate
-collection text. Scan counts and timings are logged with the request ID as `[corpus-index]`.
+collection text. `[corpus-index]` logs carry the pre-triage request ID. A load issues one matching
+warning when needed, naming up to 20 unmatched jobs in the window or without fetch times.
+It counts out-of-window unmatched jobs and jobs whose article was already claimed separately.
 
 The reducer merges these deltas into pre-triage, preserving verdicts for unchanged
 identities, replacing changed preparation, evaluating new identities and removing departed

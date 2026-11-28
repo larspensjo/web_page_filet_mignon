@@ -388,6 +388,7 @@ mod tests {
             tokens: Some(1),
             bytes: Some(1),
             links: vec![],
+            final_url: None,
             fetched_utc: None,
         }];
         let second_jobs = vec![
@@ -397,6 +398,7 @@ mod tests {
                 tokens: Some(2),
                 bytes: Some(2),
                 links: vec![],
+                final_url: None,
                 fetched_utc: None,
             },
         ];
@@ -430,6 +432,7 @@ mod tests {
                 tokens: Some(1),
                 bytes: Some(1),
                 links: vec![],
+                final_url: None,
                 fetched_utc: None,
             }]),
         );
@@ -450,6 +453,7 @@ mod tests {
                 tokens: Some(1),
                 bytes: Some(1),
                 links: vec![],
+                final_url: None,
                 fetched_utc: None,
             }]),
         );
@@ -536,6 +540,7 @@ mod tests {
                 tokens: None,
                 bytes: None,
                 links: vec![],
+                final_url: None,
                 fetched_utc: None,
             }]),
         );

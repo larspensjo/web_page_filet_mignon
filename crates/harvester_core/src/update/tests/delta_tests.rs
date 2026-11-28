@@ -75,6 +75,7 @@ fn completed_download_blocks_settlement_before_refresh_evaluation_is_served() {
             job_id: id,
             result: crate::JobResultKind::Success,
             extracted_links: vec![],
+            final_url: None,
             fetched_utc: None,
         },
     );
@@ -490,18 +491,24 @@ fn resume_run_triages_and_summarizes_the_current_window() {
         ]
     ));
     let (state, effects) = config(state, &effects, 1_000);
-    let (request_id, ordered_urls) = effects
+    let (request_id, ordered_entries) = effects
         .iter()
         .find_map(|effect| match effect {
             Effect::LoadArticlesForTriage {
                 request_id,
-                ordered_urls,
+                ordered_entries,
                 ..
-            } => Some((*request_id, ordered_urls)),
+            } => Some((*request_id, ordered_entries)),
             _ => None,
         })
         .expect("Resume refreshes the current article before model work");
-    assert_eq!(ordered_urls, &[url.to_string()]);
+    assert_eq!(
+        ordered_entries
+            .iter()
+            .map(|entry| entry.url())
+            .collect::<Vec<_>>(),
+        [url]
+    );
     let (state, effects) = reduce(
         state,
         Msg::TriageArticlesLoaded {

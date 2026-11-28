@@ -745,6 +745,7 @@ mod tests {
                             tokens: Some(10),
                             bytes: Some(100),
                             links: Vec::new(),
+                            final_url: None,
                             fetched_utc: None,
                         }]),
                     );
@@ -934,6 +935,7 @@ mod tests {
                 job_id: 1,
                 result: harvester_core::JobResultKind::Success,
                 extracted_links: Vec::new(),
+                final_url: None,
                 fetched_utc: None,
             })
             .unwrap();

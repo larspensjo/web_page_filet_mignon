@@ -191,7 +191,7 @@ pub(super) fn dispatch_pre_triage_if_due(
     vec![Effect::LoadArticlesForTriage {
         held: state.pre_triage().held_articles(),
         request_id,
-        ordered_urls,
+        ordered_entries: state.triage_load_entries(ordered_urls),
         since_utc,
     }]
 }

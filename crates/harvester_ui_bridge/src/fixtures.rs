@@ -415,6 +415,7 @@ fn selected_fixture_state(empty: &AppState) -> AppState {
                     url: "https://example.invalid/outside-checkpoint-link".into(),
                     downloaded_path: None,
                 }],
+                final_url: None,
                 fetched_utc: Some("1970-01-01T00:00:00Z".into()),
             },
             CompletedJobSnapshot {
@@ -422,6 +423,7 @@ fn selected_fixture_state(empty: &AppState) -> AppState {
                 tokens: Some(43),
                 bytes: Some(1025),
                 links: Vec::new(),
+                final_url: None,
                 fetched_utc: Some("1970-01-01T00:00:02Z".into()),
             },
         ]),
@@ -826,6 +828,7 @@ fn prepared_article_state_with_source_failure(
                 text: Some("Fixture link".into()),
                 kind: harvester_engine::LinkKind::Hyperlink,
             }],
+            final_url: None,
             fetched_utc: article.fetched_utc.clone(),
         },
     );
@@ -991,6 +994,7 @@ fn completed_job(url: &str, seconds: i64) -> CompletedJobSnapshot {
             url: "https://example.invalid/link".into(),
             downloaded_path: None,
         }],
+        final_url: None,
         fetched_utc: Some(format!("1970-01-01T00:00:0{seconds}Z")),
     }
 }
@@ -1001,6 +1005,7 @@ fn completed_job_with_fetch(url: &str, fetched_utc: Option<DateTime<Utc>>) -> Co
         tokens: Some(42),
         bytes: Some(1024),
         links: Vec::new(),
+        final_url: None,
         fetched_utc: fetched_utc.map(|timestamp| timestamp.to_rfc3339()),
     }
 }

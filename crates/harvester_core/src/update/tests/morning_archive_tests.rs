@@ -760,6 +760,203 @@ fn morning_reports_missing_results_even_when_the_pipeline_has_no_work() {
 }
 
 #[test]
+fn morning_triages_redirects_and_keeps_legacy_matches_before_the_window_out() {
+    let redirect =
+        "https://digitimes.com/news/a20261126VL214/huawei-ascend-chips-nvidia-atlas.html";
+    let final_url =
+        "https://www.digitimes.com/newsshow/article.asp?datePublish=2026/11/26&pages=vl&seq=214";
+    let old_requested = "https://example.com/old-request";
+    let old_url = "https://example.com/old-article";
+    let old_date = "2026-10-02T09:00:00Z";
+    let dir = tempfile::tempdir().unwrap();
+    for (filename, url, fetched, word) in [
+        ("today.md", final_url, DATE, "in-window "),
+        ("old.md", old_url, old_date, "historical "),
+    ] {
+        std::fs::write(
+            dir.path().join(filename),
+            format!(
+                "---\nurl: {url}\ntitle: {filename}\nfetched_utc: {fetched}\n---\n\n{}",
+                word.repeat(300)
+            ),
+        )
+        .unwrap();
+    }
+    let state = Fixture::new(&[]).hydrate();
+    let state = update(
+        state,
+        Msg::RestoreCompletedJobs(vec![CompletedJobSnapshot {
+            url: old_requested.into(),
+            tokens: Some(1000),
+            bytes: None,
+            links: vec![],
+            final_url: None,
+            fetched_utc: Some(old_date.into()),
+        }]),
+    )
+    .0;
+    let state = update(state, Msg::InputChanged(redirect.into())).0;
+    let (state, effects) = update(state, Msg::UrlsSubmitted);
+    let job_id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::EnqueueUrl { job_id, .. } => Some(*job_id),
+            _ => None,
+        })
+        .expect("requested URL is enqueued");
+    let state = update(
+        state,
+        Msg::JobDone {
+            job_id,
+            result: crate::JobResultKind::Success,
+            extracted_links: vec![],
+            final_url: Some(final_url.into()),
+            fetched_utc: Some(DATE.into()),
+        },
+    )
+    .0;
+    let (state, effects) = set_up(
+        metadata_replies(state),
+        persisted(A, record(START, Some(LAST), None)),
+        observation(SidecarObservation::Missing, None),
+        true,
+    );
+    assert!(effects.is_empty());
+    let (state, effects) = crate::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
+    let registry = harvester_engine::llm::PromptRegistry::with_defaults();
+    let input_limit = 20_000;
+    let budget = harvester_engine::summary_preparation_budget(input_limit, &registry).unwrap();
+    let (state, effects) =
+        crate::fixture_support::complete_processing_configuration(state, effects, budget);
+    let Effect::LoadArticlesForTriage {
+        request_id,
+        ordered_entries,
+        since_utc,
+        held,
+    } = effects
+        .into_iter()
+        .find(|effect| matches!(effect, Effect::LoadArticlesForTriage { .. }))
+        .expect("morning pre-triage load")
+    else {
+        unreachable!()
+    };
+    assert_eq!(since_utc, Some(date(START)));
+    assert!(ordered_entries.iter().any(|entry| matches!(
+        entry,
+        harvester_engine::TriageLoadEntry::Job { id: Some(id), final_url: Some(url), .. }
+            if *id == job_id && url == final_url
+    )));
+    let mut index = harvester_engine::CorpusScanIndex::default();
+    let (whole_corpus, _) = index
+        .load_delta(
+            dir.path(),
+            input_limit,
+            &registry,
+            &ordered_entries,
+            None,
+            &held,
+            Some(request_id),
+            |_| {},
+        )
+        .unwrap();
+    assert!(whole_corpus
+        .members
+        .iter()
+        .any(|article| article.url == old_url));
+    let (delta, _) = index
+        .load_delta(
+            dir.path(),
+            input_limit,
+            &registry,
+            &ordered_entries,
+            since_utc,
+            &held,
+            Some(request_id),
+            |_| {},
+        )
+        .unwrap();
+    let state = crate::update(
+        state,
+        Msg::SavedArticlesLoaded {
+            request_id,
+            articles: index.article_metadata(),
+        },
+    )
+    .0;
+    let (mut state, mut effects) =
+        crate::update(state, Msg::TriageArticlesLoaded { request_id, delta });
+    assert_eq!(
+        state
+            .triage()
+            .articles()
+            .iter()
+            .map(|article| article.url.as_str())
+            .collect::<Vec<_>>(),
+        [final_url]
+    );
+
+    for (prompt, model, output_json) in [
+        (
+            PromptId::ArticleTriage,
+            "triage-model",
+            r#"{"category":"news","priority":5,"tags":["ai"],"rationale":"ok"}"#,
+        ),
+        (
+            PromptId::ArticleSummary,
+            "summary-model",
+            r#"{"title":"Summary","summary":"Summary","key_points":["point"]}"#,
+        ),
+        (
+            PromptId::ArticleSignalCandidate,
+            "score-model",
+            r#"{"signal_score":95,"signal_key":"redirect","themes":["ai"],"draft_gist":"Publisher reports an infrastructure event.","source_tier":"Tier1","confidence":"High","reasoning":"Concrete event."}"#,
+        ),
+    ] {
+        let request_id = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::RequestLlmCompletion {
+                    request_id,
+                    prompt_id,
+                    ..
+                } if *prompt_id == prompt => Some(*request_id),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{prompt:?} was not dispatched"));
+        (state, effects) = crate::update(
+            state,
+            Msg::LlmCompleted {
+                request_id,
+                result: crate::LlmResultKind::Success {
+                    output_json: output_json.into(),
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    prompt_version: 1,
+                    resolved_model: model.into(),
+                },
+                metadata: None,
+            },
+        );
+    }
+    let (state, effect) = export(state, now());
+    assert!(matches!(
+        effect,
+        Effect::ArchiveRequested { window, ordered_urls, .. }
+            if window.since_utc() == Some(date(START)) && window.until_utc() == now()
+                && ordered_urls == [final_url]
+    ));
+    let (state, effects) = completed(state);
+    let (state, _) = acknowledge(state, &effects);
+    assert_outcome(&state, BatchArchiveStatus::Exported, None);
+    assert!(state.batch_archive_outcome().unwrap().left_out.is_empty());
+}
+
+#[test]
 fn scoring_failure_is_left_out_and_other_articles_are_published() {
     let fixture = Fixture::new(&[
         ("retry", Some(5), true, None),

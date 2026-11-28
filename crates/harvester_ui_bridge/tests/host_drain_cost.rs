@@ -276,6 +276,7 @@ fn drain_cost_state() -> (AppState, usize) {
                 tokens: Some(1_000 + (index % 900) as u32),
                 bytes: Some(32_768 + index as u64),
                 links: link_snapshots(index),
+                final_url: None,
                 fetched_utc: Some(if recent {
                     format!("2026-09-05T12:{:02}:00Z", index % 60)
                 } else {
@@ -360,6 +361,7 @@ fn seed_populated_run_progress() -> AppState {
                 job_id,
                 result: JobResultKind::Success,
                 extracted_links: Vec::new(),
+                final_url: None,
                 fetched_utc: Some("2026-09-05T12:00:00Z".into()),
             },
         )
@@ -607,6 +609,7 @@ fn load_production_scale_window() -> AppState {
             tokens: Some(1_000 + (index % 900) as u32),
             bytes: Some(32_768 + index as u64),
             links: Vec::new(),
+            final_url: None,
             fetched_utc: Some("2026-09-06T12:00:00Z".into()),
         })
         .collect();

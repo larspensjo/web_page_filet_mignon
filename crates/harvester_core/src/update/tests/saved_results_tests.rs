@@ -135,6 +135,7 @@ fn fixture() -> AppState {
                 .iter()
                 .map(|a| CompletedJobSnapshot {
                     url: a.url.clone(),
+                    final_url: None,
                     fetched_utc: a.fetched_utc.clone(),
                     tokens: Some(100),
                     bytes: Some(1000),
@@ -791,6 +792,7 @@ fn undated_window_articles_keep_archive_selection_annotations_priority_and_cover
             fixture(),
             Msg::RestoreCompletedJobs(vec![CompletedJobSnapshot {
                 url: a.url.clone(),
+                final_url: None,
                 fetched_utc: None,
                 tokens: Some(100),
                 bytes: Some(1000),

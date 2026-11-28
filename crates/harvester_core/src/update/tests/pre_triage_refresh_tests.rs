@@ -58,6 +58,7 @@ fn complete_job_for_test(state: AppState, job_id: crate::JobId) -> AppState {
             job_id,
             result: crate::JobResultKind::Success,
             extracted_links: Vec::new(),
+            final_url: None,
             fetched_utc: None,
         },
     );
@@ -243,6 +244,7 @@ fn restore_completed_jobs_blocks_triage_during_startup_preparation() {
         tokens: None,
         bytes: None,
         links: Vec::new(),
+        final_url: None,
         fetched_utc: None,
     }];
 

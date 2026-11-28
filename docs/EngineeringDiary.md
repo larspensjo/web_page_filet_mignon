@@ -3037,3 +3037,11 @@ Change: The header tolerates a null view before rendering the fatal or schema-mi
 Lessons Learned: Check envelope-level errors before requiring fields from a renderable view.
 Prevention: The frontend regression exercises both error screens with a null view and separately checks rejection of malformed current-schema views.
 Refs: frontend/src/ipc/useSnapshot.ts, frontend/src/App.tsx, frontend/src/App.test.tsx
+
+## 2026-11-28 - Redirected articles missing from pre-triage
+Type: Bug Fix
+Context: Completed jobs kept the requested URL, while article frontmatter recorded the final URL after redirects. The pre-triage join silently dropped articles when the two URLs differed, and the morning result reported them as `not_finished`.
+Change: Persist the final URL on completed jobs when it differs from the requested URL. Match by exact URL, query-preserving alias, a unique exact fetch instant, then query-stripped alias. Prefer in-window files within a URL lookup. One warning per affected load names up to 20 unmatched jobs in the window or without a fetch time and separately counts unmatched jobs outside the window and jobs whose file was already matched. Based on the November 28 read-only count, the first morning run after the fix processes only newly matched articles inside its window, estimated at three. A whole-corpus run would cost about $1–3 at November 28 prices.
+Lessons Learned: A join on a derived identifier must be tested with redirects. Publisher query parameters can distinguish articles served from the same path.
+Prevention: Scanner tests cover the DigiTimes redirect, query variants, timestamp priority and uniqueness, file claims across matching steps, window boundaries and warning counts. The reducer test verifies triage and morning export with an older legacy match outside the window. Runtime state tests cover legacy records, redirects and downloads whose URL stayed the same.
+Refs: crates/harvester_engine/tests/corpus_scan_index.rs, crates/harvester_core/src/update/tests/morning_archive_tests.rs, crates/harvester_io/src/persistence.rs

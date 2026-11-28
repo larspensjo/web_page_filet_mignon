@@ -1,6 +1,6 @@
 use harvester_engine::llm::PromptRegistry;
 use harvester_engine::{
-    build_triage_archive_with, CorpusScanIndex, HeldArticle, TriageArticleDelta,
+    build_triage_archive_with, CorpusScanIndex, HeldArticle, TriageArticleDelta, TriageLoadEntry,
 };
 use std::{collections::HashMap, fs, path::Path};
 
@@ -24,6 +24,325 @@ fn held(delta: &TriageArticleDelta) -> Vec<HeldArticle> {
             preparation_budget: delta.preparation_budget,
         })
         .collect()
+}
+
+const REQUESTED: &str =
+    "https://digitimes.com/news/a20261126VL214/huawei-ascend-chips-nvidia-atlas.html";
+const FINAL: &str =
+    "https://www.digitimes.com/newsshow/article.asp?datePublish=2026/11/26&pages=vl&seq=214";
+const FETCHED: &str = "2026-11-27T15:34:37Z";
+const BEFORE_WINDOW: &str = "2026-11-26T15:34:37Z";
+
+type RedirectedJob<'a> = (&'a str, Option<&'a str>, Option<&'a str>);
+
+fn redirected_members(dir: &Path, jobs: &[RedirectedJob<'_>]) -> Vec<String> {
+    load_redirected_jobs(dir, jobs, None, None)
+        .members
+        .into_iter()
+        .map(|member| member.url)
+        .collect()
+}
+
+fn load_redirected_jobs(
+    dir: &Path,
+    jobs: &[RedirectedJob<'_>],
+    since: Option<&str>,
+    request_id: Option<u64>,
+) -> TriageArticleDelta {
+    let entries: Vec<_> = jobs
+        .iter()
+        .enumerate()
+        .map(|(index, (url, final_url, fetched))| TriageLoadEntry::Job {
+            id: Some(index as u64 + 1),
+            url: url.to_string(),
+            final_url: final_url.map(str::to_owned),
+            fetched_utc: fetched.map(|date| date.parse().unwrap()),
+        })
+        .collect();
+    CorpusScanIndex::default()
+        .load_delta(
+            dir,
+            20_000,
+            &PromptRegistry::with_defaults(),
+            &entries,
+            since.map(|date| date.parse().unwrap()),
+            &[],
+            request_id,
+            |_| {},
+        )
+        .unwrap()
+        .0
+}
+
+#[test]
+fn redirected_job_matches_by_final_url() {
+    let tmp = tempfile::tempdir().unwrap();
+    let output = tmp.path().join("output");
+    fs::create_dir(&output).unwrap();
+    fs::write(
+        output.join("a.md"),
+        format!(
+            "---\nurl: {FINAL}\ntitle: Redirected article\nfetched_utc: {FETCHED}\n---\n\n{}",
+            "article ".repeat(300)
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        redirected_members(&output, &[(REQUESTED, Some(FINAL), None)]),
+        [FINAL]
+    );
+}
+
+#[test]
+fn legacy_redirect_matches_by_exact_fetch_instant() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "a.md", FINAL, FETCHED, "article ");
+    for timestamp in [FETCHED, "2026-11-27T16:34:37.000+01:00"] {
+        assert_eq!(
+            redirected_members(dir.path(), &[(REQUESTED, None, Some(timestamp))]),
+            [FINAL]
+        );
+    }
+}
+
+#[test]
+fn legacy_redirect_with_two_files_at_one_instant_is_ambiguous() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "a.md", FINAL, FETCHED, "article ");
+    write(
+        dir.path(),
+        "b.md",
+        "https://example.com/b",
+        FETCHED,
+        "other ",
+    );
+    assert!(redirected_members(dir.path(), &[(REQUESTED, None, Some(FETCHED))]).is_empty());
+}
+
+#[test]
+fn legacy_redirect_with_two_jobs_at_one_instant_is_ambiguous() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "a.md", FINAL, FETCHED, "article ");
+    assert!(redirected_members(
+        dir.path(),
+        &[
+            (REQUESTED, None, Some(FETCHED)),
+            ("https://example.com/other", None, Some(FETCHED))
+        ],
+    )
+    .is_empty());
+}
+
+#[test]
+fn query_identified_redirects_match_distinct_files_in_job_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let other = FINAL.replace("seq=214", "seq=227");
+    write(dir.path(), "a.md", FINAL, FETCHED, "article ");
+    write(dir.path(), "b.md", &other, FETCHED, "other ");
+    assert_eq!(
+        redirected_members(
+            dir.path(),
+            &[
+                ("https://digitimes.com/news/other", Some(&other), None),
+                (REQUESTED, Some(FINAL), None)
+            ],
+        ),
+        [other.as_str(), FINAL]
+    );
+    fs::remove_file(dir.path().join("b.md")).unwrap();
+    assert!(redirected_members(
+        dir.path(),
+        &[("https://digitimes.com/news/other", Some(&other), None)],
+    )
+    .is_empty());
+}
+
+#[test]
+fn query_preserving_aliases_win_for_requested_urls() {
+    let dir = tempfile::tempdir().unwrap();
+    let other = FINAL.replace("seq=214", "seq=227");
+    let other_alias = other.replace("https://www.", "http://");
+    write(dir.path(), "a.md", FINAL, FETCHED, "article ");
+    write(dir.path(), "b.md", &other, FETCHED, "other ");
+    write(
+        dir.path(),
+        "c.md",
+        "https://example.com/timestamp-decoy",
+        BEFORE_WINDOW,
+        "decoy ",
+    );
+    assert_eq!(
+        redirected_members(
+            dir.path(),
+            &[
+                (&other_alias, None, Some(BEFORE_WINDOW)),
+                (FINAL, None, None),
+            ]
+        ),
+        [other.as_str(), FINAL]
+    );
+}
+
+#[test]
+fn unique_fetch_instant_wins_before_query_stripping_even_with_a_saved_final_url() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = "https://example.com/article";
+    let requested = "https://example.com/article?source=feed";
+    write(dir.path(), "a.md", base, BEFORE_WINDOW, "alias ");
+    write(dir.path(), "b.md", FINAL, FETCHED, "article ");
+
+    assert_eq!(
+        redirected_members(dir.path(), &[(requested, None, None)]),
+        [base]
+    );
+    for saved_final in [None, Some("https://example.com/previous-redirect")] {
+        assert_eq!(
+            redirected_members(dir.path(), &[(requested, saved_final, Some(FETCHED))]),
+            [FINAL]
+        );
+    }
+}
+
+#[test]
+fn unique_fetch_instant_cannot_reclaim_an_article_matched_by_url() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "article.md", FINAL, FETCHED, "article ");
+    assert_eq!(
+        redirected_members(
+            dir.path(),
+            &[(REQUESTED, None, Some(FETCHED)), (FINAL, None, None)]
+        ),
+        [FINAL]
+    );
+}
+
+#[test]
+fn url_matches_prefer_an_in_window_file() {
+    for (requested, older, newer) in [
+        (FINAL, FINAL, FINAL),
+        (
+            "http://www.example.com/article#section",
+            "https://www.example.com/article",
+            "https://example.com/article",
+        ),
+        (
+            "https://example.com/article",
+            "https://example.com/article?id=1",
+            "https://example.com/article?id=2",
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "a.md", older, BEFORE_WINDOW, "older ");
+        write(dir.path(), "b.md", newer, FETCHED, "current ");
+
+        let delta =
+            load_redirected_jobs(dir.path(), &[(requested, None, None)], Some(FETCHED), None);
+        assert_eq!(delta.members.len(), 1, "{requested}");
+        assert_eq!(delta.members[0].url, newer);
+        assert_eq!(delta.members[0].fetched_utc.as_deref(), Some(FETCHED));
+        assert_eq!(delta.articles.len(), 1);
+    }
+}
+
+#[test]
+fn out_of_window_url_match_cannot_admit_a_file_by_timestamp() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "older.md", FINAL, BEFORE_WINDOW, "older ");
+    write(dir.path(), "decoy.md", REQUESTED, FETCHED, "current ");
+    let jobs = [(FINAL, None, Some(FETCHED))];
+
+    assert_eq!(redirected_members(dir.path(), &jobs), [FINAL]);
+    let delta = load_redirected_jobs(dir.path(), &jobs, Some(FETCHED), None);
+    assert!(delta.members.is_empty());
+    assert!(delta.articles.is_empty());
+}
+
+#[test]
+fn different_fetch_instant_produces_one_capped_warning() {
+    // The log facade has one logger per process. Run this case alone so other tests
+    // can initialize their own logger without affecting the warning assertions.
+    const ISOLATED: &str = "HARVESTER_TEST_CORPUS_WARNING_ISOLATED";
+    if std::env::var_os(ISOLATED).is_none() {
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "different_fetch_instant_produces_one_capped_warning",
+            ])
+            .env(ISOLATED, "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&child.stdout);
+        assert!(
+            child.status.success() && stdout.contains("1 passed"),
+            "{stdout}\n{}",
+            String::from_utf8_lossy(&child.stderr)
+        );
+        return;
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let log_path = dir.path().join("warnings.log");
+    engine_logging::initialize_file_only_at(&log_path);
+    write(dir.path(), "a.md", FINAL, FETCHED, "article ");
+    let outside = "https://example.com/outside-window";
+    let claimed = "https://example.com/already-claimed";
+    let urls: Vec<_> = (0..21)
+        .map(|i| format!("https://example.com/missing/{i:02}"))
+        .collect();
+    let unnamed = [
+        (outside, None, Some(BEFORE_WINDOW)),
+        (claimed, None, Some(FETCHED)),
+        (FINAL, None, None),
+    ];
+    let mut jobs = unnamed.to_vec();
+    jobs.push((REQUESTED, None, Some("2026-11-27T15:34:37.000000001Z")));
+    jobs.extend(urls.iter().map(|url| (url.as_str(), None, None)));
+    let delta = load_redirected_jobs(dir.path(), &jobs, Some(FETCHED), Some(42));
+    assert_eq!(delta.members.len(), 1);
+    assert_eq!(delta.members[0].url, FINAL);
+    load_redirected_jobs(dir.path(), &unnamed, Some(FETCHED), Some(43));
+
+    log::logger().flush();
+    let log = fs::read_to_string(log_path).unwrap();
+    let warnings: Vec<_> = log
+        .lines()
+        .filter(|line| line.contains("[corpus-index]"))
+        .collect();
+    assert_eq!(warnings.len(), 2, "{log}");
+    let warning = warnings[0];
+    assert!(
+        warning.contains("[corpus-index] request_id=42"),
+        "{warning}"
+    );
+    assert!(warning.contains("22 completed job(s) in the load window or without a fetch time could not be matched to an article file"), "{warning}");
+    assert!(
+        warning.contains(
+            "1 completed job(s) outside the load window could not be matched to an article file"
+        ),
+        "{warning}"
+    );
+    assert!(
+        warning.contains(
+            "1 completed job(s) resolved to an article file already matched to another job"
+        ),
+        "{warning}"
+    );
+    assert!(warning.contains("Showing 20 of 22"), "{warning}");
+    assert!(warning.contains(REQUESTED));
+    assert!(warning.contains("job_id=4)"));
+    assert!(warning.contains(&urls[18]));
+    for url in [
+        urls[19].as_str(),
+        urls[20].as_str(),
+        outside,
+        claimed,
+        FINAL,
+    ] {
+        assert!(!warning.contains(url), "{warning}");
+    }
+    assert!(warnings[1].contains("[corpus-index] request_id=43"));
+    assert!(warnings[1].contains("0 completed job(s) in the load window"));
+    assert!(!warnings[1].contains("Showing"));
 }
 
 #[test]
@@ -59,7 +378,7 @@ fn archive_hints_preserve_frontmatter_and_checkpoint_boundary_behavior() {
     let urls = [url.to_string()];
     let mut index = CorpusScanIndex::default();
     index
-        .load_delta(
+        .load_url_delta(
             root,
             20_000,
             &PromptRegistry::with_defaults(),
@@ -115,7 +434,7 @@ fn unchanged_fingerprint_is_never_read_even_with_unparseable_bytes() {
     let registry = PromptRegistry::with_defaults();
     let mut index = CorpusScanIndex::default();
     let (first, _) = index
-        .load_delta(
+        .load_url_delta(
             dir.path(),
             20_000,
             &registry,
@@ -135,7 +454,7 @@ fn unchanged_fingerprint_is_never_read_even_with_unparseable_bytes() {
         .set_modified(metadata.modified().unwrap())
         .unwrap();
     let (second, stats) = index
-        .load_delta(
+        .load_url_delta(
             dir.path(),
             20_000,
             &registry,
@@ -168,7 +487,7 @@ fn scan_tracks_new_changed_deleted_files_and_requested_order_excluding_archives(
     let registry = PromptRegistry::with_defaults();
     let mut index = CorpusScanIndex::default();
     let (first, stats) = index
-        .load_delta(dir.path(), 20_000, &registry, &urls, None, &[], |_| {})
+        .load_url_delta(dir.path(), 20_000, &registry, &urls, None, &[], |_| {})
         .unwrap();
     assert_eq!(stats.read, 2);
     assert_eq!(first.members.len(), 1);
@@ -180,7 +499,7 @@ fn scan_tracks_new_changed_deleted_files_and_requested_order_excluding_archives(
         "new article ",
     );
     let (second, stats) = index
-        .load_delta(
+        .load_url_delta(
             dir.path(),
             20_000,
             &registry,
@@ -205,7 +524,7 @@ fn scan_tracks_new_changed_deleted_files_and_requested_order_excluding_archives(
     );
     fs::remove_file(dir.path().join("a.md")).unwrap();
     let (third, stats) = index
-        .load_delta(
+        .load_url_delta(
             dir.path(),
             20_000,
             &registry,
@@ -230,7 +549,7 @@ fn duplicate_url_selects_first_filename_once_and_reuses_held_preparation() {
     let registry = PromptRegistry::with_defaults();
     let mut index = CorpusScanIndex::default();
     let (first, _) = index
-        .load_delta(
+        .load_url_delta(
             dir.path(),
             20_000,
             &registry,
@@ -243,7 +562,7 @@ fn duplicate_url_selects_first_filename_once_and_reuses_held_preparation() {
     assert_eq!(first.members.len(), 1);
     assert_eq!(first.articles.len(), 1);
     let (second, stats) = index
-        .load_delta(
+        .load_url_delta(
             dir.path(),
             20_000,
             &registry,
@@ -284,11 +603,11 @@ fn since_filter_uses_cached_timestamp_and_includes_missing_or_invalid_dates() {
     let registry = PromptRegistry::with_defaults();
     let mut index = CorpusScanIndex::default();
     let (first, _) = index
-        .load_delta(dir.path(), 20_000, &registry, &urls, None, &[], |_| {})
+        .load_url_delta(dir.path(), 20_000, &registry, &urls, None, &[], |_| {})
         .unwrap();
     let since = Some("2026-09-20T00:00:00Z".parse().unwrap());
     let (filtered, stats) = index
-        .load_delta(
+        .load_url_delta(
             dir.path(),
             20_000,
             &registry,
@@ -319,7 +638,7 @@ fn triage_delta_preserves_summary_hash_and_preparation_budget() {
     );
     let registry = PromptRegistry::with_defaults();
     let (delta, _) = CorpusScanIndex::default()
-        .load_delta(dir.path(), 4_000, &registry, &urls, None, &[], |_| {})
+        .load_url_delta(dir.path(), 4_000, &registry, &urls, None, &[], |_| {})
         .unwrap();
     let metadata = harvester_engine::scan_archive_article_metadata(dir.path()).unwrap();
     assert_eq!(

@@ -52,7 +52,7 @@ fn main() {
         .with_timezone(&Utc);
     let mut index = CorpusScanIndex::default();
     index
-        .load_delta(
+        .load_url_delta(
             root,
             20_000,
             &PromptRegistry::with_defaults(),

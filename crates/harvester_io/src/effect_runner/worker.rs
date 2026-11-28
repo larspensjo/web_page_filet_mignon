@@ -8,7 +8,7 @@ use std::time::Instant;
 use engine_logging::{engine_info, engine_warn};
 use harvester_core::Msg;
 use harvester_engine::llm::PromptRegistry;
-use harvester_engine::ArticleScanProgress;
+use harvester_engine::{ArticleScanProgress, TriageLoadEntry};
 
 /// Execute a single pre-triage article load in the calling thread.
 ///
@@ -20,7 +20,7 @@ pub(super) fn run_triage_refresh_load(
     reset_requested: Arc<AtomicBool>,
     held: Vec<harvester_engine::HeldArticle>,
     request_id: u64,
-    ordered_urls: Vec<String>,
+    ordered_entries: Vec<TriageLoadEntry>,
     since_utc: Option<chrono::DateTime<chrono::Utc>>,
     msg_tx: mpsc::Sender<Msg>,
     output_dir: PathBuf,
@@ -33,7 +33,7 @@ pub(super) fn run_triage_refresh_load(
     engine_info!(
         "[pre-triage-refresh] load start request_id={} urls={}",
         request_id,
-        ordered_urls.len(),
+        ordered_entries.len(),
     );
 
     let guard = registry
@@ -49,9 +49,10 @@ pub(super) fn run_triage_refresh_load(
         &output_dir,
         max_input_bytes,
         &guard,
-        &ordered_urls,
+        &ordered_entries,
         since_utc,
         &held,
+        Some(request_id),
         |progress| {
             last_progress = Some(progress);
             let should_emit = progress.files_scanned == 1
@@ -85,7 +86,7 @@ pub(super) fn run_triage_refresh_load(
             engine_warn!(
                 "[pre-triage-refresh] load failed request_id={} urls={} files_scanned={} files_total={} elapsed_ms={} reason={}",
                 request_id,
-                ordered_urls.len(),
+                ordered_entries.len(),
                 files_scanned,
                 files_total,
                 load_started.elapsed().as_millis(),

@@ -161,6 +161,7 @@ fn excluded_initial_window_does_not_disarm_later_waves() {
             tokens: Some(1),
             bytes: Some(5),
             links: Vec::new(),
+            final_url: None,
             fetched_utc: excluded.fetched_utc.clone(),
         }]),
     );
@@ -338,6 +339,7 @@ fn prepare_pipeline(
                 },
 
                 extracted_links: Vec::new(),
+                final_url: None,
                 fetched_utc: Some("2026-09-07T12:00:00Z".into()),
             },
         )
@@ -1230,6 +1232,7 @@ fn stop_preserves_downloads_that_were_queued_but_never_started() {
             },
 
             extracted_links: Vec::new(),
+            final_url: None,
             fetched_utc: None,
         },
     );
@@ -1255,6 +1258,7 @@ fn pending_url_matching_restored_completed_job_is_not_downloaded_again() {
             tokens: None,
             bytes: None,
             links: Vec::new(),
+            final_url: None,
             fetched_utc: None,
         }]),
     );
@@ -1284,6 +1288,7 @@ fn pending_url_completed_successfully_during_stop_is_not_downloaded_again() {
             job_id: 1,
             result: crate::JobResultKind::Success,
             extracted_links: Vec::new(),
+            final_url: None,
             fetched_utc: None,
         },
     );
@@ -1323,6 +1328,7 @@ fn skipped_download_stage_stays_pending() {
         tokens: Some(100),
         bytes: Some(1_000),
         links: Vec::new(),
+        final_url: None,
         fetched_utc: None,
     }];
     let state =

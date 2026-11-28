@@ -85,10 +85,10 @@ mod app_state_tests {
         state.end_poll();
         assert_eq!(state.poll_pipeline_job_total(), Some(2));
 
-        state.apply_done(1, JobResultKind::Success, Vec::new(), None);
+        state.apply_done(1, JobResultKind::Success, Vec::new(), None, None);
         assert_eq!(state.poll_pipeline_job_total(), Some(2));
 
-        state.apply_done(2, JobResultKind::Success, Vec::new(), None);
+        state.apply_done(2, JobResultKind::Success, Vec::new(), None, None);
         assert_eq!(state.poll_pipeline_job_total(), None);
     }
 
@@ -277,6 +277,7 @@ mod app_state_tests {
                 job_id: 9,
                 result: JobResultKind::Success,
                 extracted_links: links,
+                final_url: None,
                 fetched_utc: None,
             },
         );
@@ -1800,6 +1801,7 @@ mod app_state_tests {
                     url: "https://example.com/link".to_string(),
                     downloaded_path: None,
                 }],
+                final_url: None,
                 fetched_utc: Some("2026-05-02T00:00:00Z".to_string()),
             }]),
         );
@@ -2149,6 +2151,7 @@ mod app_state_tests {
                     tokens: Some(10),
                     bytes: Some(100),
                     links: Vec::new(),
+                    final_url: None,
                     fetched_utc: Some("2026-05-25T03:54:45.911305400+00:00".to_string()),
                 },
                 CompletedJobSnapshot {
@@ -2156,6 +2159,7 @@ mod app_state_tests {
                     tokens: Some(20),
                     bytes: Some(200),
                     links: Vec::new(),
+                    final_url: None,
                     fetched_utc: Some("2026-05-23T03:54:45.911305400+00:00".to_string()),
                 },
             ]),
