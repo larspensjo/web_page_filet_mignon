@@ -1,5 +1,5 @@
 use super::signal_candidate_access::SignalCandidateDisplayState as SignalCandidateState;
-use super::{map_job_filter_status, AppState, JobState};
+use super::{map_job_filter_status, AppState, JobState, StoredKeyState};
 use crate::archive_display::ArchiveCoverage;
 use crate::briefing::ArticleSummaryResult;
 use crate::pre_triage_filter::PreTriagePhase;
@@ -31,6 +31,15 @@ fn compare_desktop_job_rows(left: &JobListRowView, right: &JobListRowView) -> Or
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (None, None) => left.job_id.cmp(&right.job_id),
+    }
+}
+
+fn stored_key_label(status: StoredKeyState) -> &'static str {
+    match status {
+        StoredKeyState::Found => "found",
+        StoredKeyState::Missing => "missing",
+        StoredKeyState::Unreadable => "unreadable",
+        StoredKeyState::NotRequested => "not requested",
     }
 }
 
@@ -111,6 +120,19 @@ impl AppState {
             stop_finish_button,
             signal_candidate_rows,
             ai_unavailable_message,
+            // No launcher asked for stored keys: the header stays silent.
+            key_status_line: self
+                .stored_key_status
+                .filter(|status| {
+                    *status != (StoredKeyState::NotRequested, StoredKeyState::NotRequested)
+                })
+                .map(|(openai, brave)| {
+                    format!(
+                        "Keys: OpenAI {}, Brave {}",
+                        stored_key_label(openai),
+                        stored_key_label(brave)
+                    )
+                }),
             run_progress: self.run_progress_view(),
             archive_enabled: self.export_available() && self.archive_export_in_flight.is_none(),
             archive_export_notice: self.archive_export_notice.clone(),

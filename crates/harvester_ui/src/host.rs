@@ -8,12 +8,13 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use engine_logging::{engine_error, engine_info, engine_warn};
 use harvester_core::{
-    update, AppState, IntentContext, IntentEffect, Msg, DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH,
+    update, AppState, IntentContext, IntentEffect, Msg, StoredKeyState, DEFAULT_WINDOW_HEIGHT,
+    DEFAULT_WINDOW_WIDTH,
 };
 use harvester_engine::llm::{ModelId, ProviderKind, OPENAI_MODEL_GPT_5_4_NANO};
 use harvester_io::{
     acquire_lock,
-    credentials::{read_host_keys, StoredKeyAccess, StoredKeyReads},
+    credentials::{read_host_keys, KeyReadOutcome, StoredKeyAccess, StoredKeyReads},
     host_bootstrap::{
         build_effect_runner, llm_max_concurrency_requests_from_env, prepare_desktop_startup_state,
         read_startup_key_outcomes, HostKeys, HostLlmDefaults,
@@ -253,7 +254,10 @@ pub fn run(probe: bool, stored_keys: Option<StoredKeyAccess>) -> Result<(), Stri
         running: Arc::new(AtomicBool::new(true)),
         probe_data: None,
     };
-    let keys = read_startup_keys(stored_keys.as_ref(), read_host_keys);
+    let (keys, key_status) = read_startup_keys(stored_keys.as_ref(), read_host_keys);
+    sender
+        .send(key_status)
+        .map_err(|_| "desktop startup message channel disconnected".to_owned())?;
     let (app_state, effect_runner) = prepare_state(&paths, &sender, keys)?;
     let run_state = state.clone();
     let builder = tauri::Builder::default()
@@ -763,8 +767,22 @@ fn finish_probe(host: &HostState, samples: Vec<harvester_ui_bridge::probe::Probe
 fn read_startup_keys(
     access: Option<&StoredKeyAccess>,
     reader: impl FnOnce(&StoredKeyAccess) -> StoredKeyReads,
-) -> HostKeys {
-    read_startup_key_outcomes(access, reader).into()
+) -> (HostKeys, Msg) {
+    let reads = read_startup_key_outcomes(access, reader);
+    let key_status = Msg::StoredKeyStatusDetected {
+        openai: stored_key_state(&reads.openai),
+        brave: stored_key_state(&reads.brave),
+    };
+    (reads.into(), key_status)
+}
+
+fn stored_key_state(outcome: &KeyReadOutcome) -> StoredKeyState {
+    match outcome {
+        KeyReadOutcome::Found { .. } => StoredKeyState::Found,
+        KeyReadOutcome::NotFound | KeyReadOutcome::Empty => StoredKeyState::Missing,
+        KeyReadOutcome::Unreadable { .. } => StoredKeyState::Unreadable,
+        KeyReadOutcome::NotRequested => StoredKeyState::NotRequested,
+    }
 }
 
 fn prepare_state(
@@ -934,9 +952,8 @@ mod tests {
 
     #[test]
     fn desktop_without_launch_flag_makes_zero_credential_reads() {
-        use harvester_io::credentials::KeyReadOutcome;
         let reads = std::cell::Cell::new(0);
-        let keys = read_startup_keys(None, |_| {
+        let (keys, key_status) = read_startup_keys(None, |_| {
             reads.set(reads.get() + 1);
             StoredKeyReads {
                 openai: KeyReadOutcome::NotFound,
@@ -946,6 +963,49 @@ mod tests {
         assert_eq!(reads.get(), 0);
         assert!(keys.brave.is_none());
         assert!(matches!(keys.openai, KeyReadOutcome::NotRequested));
+        assert_eq!(
+            key_status,
+            Msg::StoredKeyStatusDetected {
+                openai: StoredKeyState::NotRequested,
+                brave: StoredKeyState::NotRequested,
+            }
+        );
+    }
+
+    #[test]
+    fn desktop_maps_all_key_read_outcomes_to_status_only() {
+        use harvester_core::StoredKeyState::{Found, Missing, NotRequested, Unreadable};
+        use harvester_io::credentials::{decode_blob, CredentialEntry, DecodedBlob};
+
+        let DecodedBlob::Key {
+            key,
+            chars,
+            encoding,
+        } = decode_blob(b"synthetic-test-value")
+        else {
+            panic!("synthetic key must decode");
+        };
+        for (outcome, expected) in [
+            (
+                KeyReadOutcome::Found {
+                    key,
+                    chars,
+                    encoding,
+                },
+                Found,
+            ),
+            (KeyReadOutcome::NotFound, Missing),
+            (KeyReadOutcome::Empty, Missing),
+            (
+                KeyReadOutcome::Unreadable {
+                    entry: CredentialEntry::BraveSearch,
+                },
+                Unreadable,
+            ),
+            (KeyReadOutcome::NotRequested, NotRequested),
+        ] {
+            assert_eq!(stored_key_state(&outcome), expected);
+        }
     }
 
     fn main_thread_result_deadline() -> Instant {

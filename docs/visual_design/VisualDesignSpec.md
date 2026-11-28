@@ -297,6 +297,7 @@ Use:
 - Two clearly labeled header meters: archive articles toward the core-supplied target,
   and the LLM-call budget.
 - Muted default presentation using Text Tertiary.
+- Show stored-key status on one header line in Text Tertiary, with Accent Warning for missing or unreadable entries only. The line appears only when a launcher asked for stored keys.
 - The archive-count bar fills toward 150 articles, capped at full. It uses Accent Primary
   once the target is reached and never Accent Warning. Short hints explain loading saved
   results, unavailable results, unscored articles and an empty selection; a non-empty

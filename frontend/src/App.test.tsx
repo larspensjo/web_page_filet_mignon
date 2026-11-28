@@ -8,6 +8,7 @@ import emptyOutputFolderStarted from "@fixtures/snapshots/idle_empty_output_fold
 import last24Hours from "@fixtures/snapshots/idle_last_24_hours.json";
 import withCorpus from "@fixtures/snapshots/idle_with_corpus.json";
 import withSelection from "@fixtures/snapshots/idle_with_selection.json";
+import withStoredKeyStatus from "@fixtures/snapshots/idle_with_stored_key_status.json";
 import overlappingActiveStages from "@fixtures/snapshots/overlapping_active_stages.json";
 import reprocessNotice from "@fixtures/snapshots/reprocess_notice.json";
 import runFinishedWithNotice from "@fixtures/snapshots/run_finished_with_notice.json";
@@ -42,6 +43,7 @@ const corpus = withCorpus as unknown as SnapshotEnvelope;
 const empty = emptyCorpus as unknown as SnapshotEnvelope;
 const last24 = last24Hours as unknown as SnapshotEnvelope;
 const selected = withSelection as unknown as SnapshotEnvelope;
+const storedKeyStatus = withStoredKeyStatus as unknown as SnapshotEnvelope;
 const reviewFixtures = [
 	["idle empty corpus", emptyCorpus],
 	["idle empty output folder started", emptyOutputFolderStarted],
@@ -52,6 +54,7 @@ const reviewFixtures = [
 	["run finished with notice", runFinishedWithNotice],
 	["AI unavailable", aiUnavailable],
 	["idle with selection", withSelection],
+	["idle with stored key status", withStoredKeyStatus],
 	["overlapping active stages", overlappingActiveStages],
 	["unfinished work available", unfinishedWorkAvailable],
 	["stopping with in-flight work", stoppingWithInFlightWork],
@@ -131,7 +134,7 @@ describe("job list", () => {
 		}
 	});
 
-	it("pins the desktop IPC 19 snapshot in every bridge fixture", () => {
+	it("pins the desktop IPC 20 snapshot in every bridge fixture", () => {
 		const fields = [
 			"job_count",
 			"desktop_job_list",
@@ -141,6 +144,7 @@ describe("job list", () => {
 			"stop_finish_button",
 			"signal_candidate_rows",
 			"ai_unavailable_message",
+			"key_status_line",
 			"run_progress",
 			"archive_enabled",
 			"archive_export_notice",
@@ -155,9 +159,9 @@ describe("job list", () => {
 			"llm_quota",
 			"right_pane",
 		].sort();
-		expect(fields).toHaveLength(21);
+		expect(fields).toHaveLength(22);
 		for (const [, fixture] of reviewFixtures) {
-			expect(fixture.schema_version).toBe(19);
+			expect(fixture.schema_version).toBe(20);
 			expect(Object.keys(fixture.view).sort()).toEqual(fields);
 			expect(Object.keys(fixture.view.archive_meter).sort()).toEqual(
 				[
@@ -223,6 +227,86 @@ describe("job list", () => {
 			screen.queryByText("No jobs since checkpoint."),
 		).not.toBeInTheDocument();
 		expect(screen.queryByText("No matches.")).not.toBeInTheDocument();
+	});
+
+	it("shows the exact stored-key line in the header", async () => {
+		snapshot = storedKeyStatus;
+		await renderLoaded();
+		const line = screen.getByRole("banner").querySelector(".key-status");
+		expect(line).toHaveTextContent(/^Keys: OpenAI found, Brave missing$/);
+		// The fixture comes from the core, so this ties its wording to the warning style.
+		expect(
+			Array.from(
+				line?.querySelectorAll(".key-status--warning") ?? [],
+				(part) => part.textContent,
+			),
+		).toEqual(["Brave missing"]);
+	});
+
+	it("omits the stored-key line when it is null", async () => {
+		await renderLoaded();
+		await screen.findByText("https://example.invalid/higher-priority");
+		expect(screen.getByRole("banner").querySelector(".key-status")).toBeNull();
+	});
+
+	it.each([
+		["Keys: OpenAI found, Brave not requested", []],
+		["Keys: OpenAI found, Brave missing", ["Brave missing"]],
+		["Keys: OpenAI unreadable, Brave not requested", ["OpenAI unreadable"]],
+		[
+			"Keys: OpenAI missing, Brave unreadable",
+			["OpenAI missing", "Brave unreadable"],
+		],
+	] as const)(
+		"limits warning styling in %s",
+		async (keyStatusLine, warnings) => {
+			snapshot = {
+				...corpus,
+				view: { ...corpus.view, key_status_line: keyStatusLine },
+			};
+			await renderLoaded();
+			const line = screen.getByRole("banner").querySelector(".key-status");
+			expect(line).toHaveTextContent(keyStatusLine);
+			expect(
+				Array.from(
+					line?.querySelectorAll(".key-status--warning") ?? [],
+					(part) => part.textContent,
+				),
+			).toEqual(warnings);
+		},
+	);
+
+	it.each([undefined, 42, false, {}])(
+		"hides an invalid key status field and keeps the snapshot (%s)",
+		async (keyStatusLine) => {
+			const view: Record<string, unknown> = { ...corpus.view };
+			if (keyStatusLine === undefined) delete view.key_status_line;
+			else view.key_status_line = keyStatusLine;
+			snapshot = { ...corpus, view } as SnapshotEnvelope;
+			await renderLoaded();
+			await screen.findByText("https://example.invalid/higher-priority");
+			expect(
+				screen.getByRole("banner").querySelector(".key-status"),
+			).toBeNull();
+		},
+	);
+
+	it("still displays schema-mismatch and fatal envelopes without a view", async () => {
+		snapshot = {
+			...corpus,
+			schema_version: corpus.schema_version - 1,
+			view: null,
+		} as unknown as SnapshotEnvelope;
+		render(<App />);
+		await screen.findByText(/frontend bundle is out of date/);
+
+		emitSnapshot({
+			...corpus,
+			generation: corpus.generation + 1,
+			fatal_message: "Desktop driver stopped",
+			view: null,
+		} as unknown as SnapshotEnvelope);
+		expect(screen.getByText("Desktop driver stopped")).toBeInTheDocument();
 	});
 
 	it("renders no job rows in Results mode and falls back to signal candidates", async () => {

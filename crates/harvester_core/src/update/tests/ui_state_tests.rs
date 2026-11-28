@@ -2,6 +2,53 @@ use super::*;
 use harvester_engine::llm::prompt::PromptId;
 
 #[test]
+fn stored_key_status_is_shown_only_after_detection() {
+    use crate::StoredKeyState::{Found, Missing, Unreadable};
+
+    let state = AppState::new();
+    assert_eq!(state.view().key_status_line, None);
+    let (state, effects) = update(
+        state,
+        Msg::StoredKeyStatusDetected {
+            openai: Found,
+            brave: Missing,
+        },
+    );
+    assert!(effects.is_empty());
+    assert_eq!(
+        state.view().key_status_line.as_deref(),
+        Some("Keys: OpenAI found, Brave missing")
+    );
+    let (state, effects) = update(
+        state,
+        Msg::StoredKeyStatusDetected {
+            openai: Unreadable,
+            brave: Missing,
+        },
+    );
+    assert!(effects.is_empty());
+    assert_eq!(
+        state.view().key_status_line.as_deref(),
+        Some("Keys: OpenAI unreadable, Brave missing")
+    );
+}
+
+#[test]
+fn stored_key_status_without_launcher_request_shows_no_line() {
+    use crate::StoredKeyState::NotRequested;
+
+    let (state, effects) = update(
+        AppState::new(),
+        Msg::StoredKeyStatusDetected {
+            openai: NotRequested,
+            brave: NotRequested,
+        },
+    );
+    assert!(effects.is_empty());
+    assert_eq!(state.view().key_status_line, None);
+}
+
+#[test]
 fn job_list_mode_set_updates_state() {
     init_logging();
     let state = AppState::new();

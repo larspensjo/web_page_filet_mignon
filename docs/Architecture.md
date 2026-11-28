@@ -42,8 +42,9 @@ generic entries `Harvester/OpenAI` and `Harvester/BraveSearch` from Windows
 Credential Manager once each. Without the proof the host records that stored
 keys were not requested. The batch reports the entry status on stdout. The
 shared bootstrap configures OpenAI from the read result. Both hosts apply AI
-availability through a reducer message. The Brave key stays with the effect
-runner for all polls in the process.
+availability through a reducer message. The desktop host also sends a startup
+message containing only the two credential statuses for the header line.
+The Brave key stays with the effect runner for all polls in the process.
 
 Every Brave source uses `Harvester/BraveSearch`. The registry accepts a legacy
 `api_key_env` as a bare string, `Some`, `None`, or an omitted field. It retains

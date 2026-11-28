@@ -1,6 +1,6 @@
 {
   "generation": 1,
-  "schema_version": 19,
+  "schema_version": 20,
   "view": {
     "ai_unavailable_message": null,
     "archive_enabled": true,
@@ -51,6 +51,7 @@
       "visible_count": 1
     },
     "job_count": 1,
+    "key_status_line": null,
     "last_paste_stats": null,
     "llm_quota": {
       "label": "LLM calls 0 / unlimited",

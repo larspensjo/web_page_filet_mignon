@@ -448,6 +448,10 @@ mod tests {
         let first = synthetic_snapshot(ProbeCase::TypicalScope, 1);
         let second = synthetic_snapshot(ProbeCase::TypicalScope, 2);
         assert_eq!(
+            first.view.get("key_status_line"),
+            Some(&serde_json::Value::Null)
+        );
+        assert_eq!(
             first.view["desktop_job_list"]["rows"]
                 .as_array()
                 .unwrap()

@@ -52,7 +52,7 @@ export function App() {
 		setOpeningArchiveGeneration(null);
 		setArchiveRequest(command.ShowArchiveDialog);
 	});
-	const list = snapshot?.view.desktop_job_list;
+	const list = snapshot?.view?.desktop_job_list;
 	const mode: JobListMode = list?.mode ?? "SinceCheckpoint";
 	const query = list?.query ?? "";
 	useEffect(() => {
@@ -134,6 +134,7 @@ export function App() {
 		}, JOBS_SEARCH_DEBOUNCE_MS);
 	};
 	const candidates = snapshot?.view.signal_candidate_rows ?? [];
+	const keyStatusLine = snapshot?.view.key_status_line ?? null;
 	const archiveNotice = snapshot?.view.archive_export_notice;
 	const archiveWorking = archiveNotice?.kind === "Working";
 	// A newer snapshot can acknowledge a click that did not open a dialog.
@@ -162,6 +163,21 @@ export function App() {
 				<h1>Harvester</h1>
 				<div className="header-chrome">
 					{snapshot && <StatusMeters view={snapshot.view} />}
+					{keyStatusLine !== null && (
+						<span className="key-status" role="status">
+							{keyStatusLine
+								.split(/(\b(?:OpenAI|Brave) (?:missing|unreadable)\b)/)
+								.map((part, index) =>
+									index % 2 ? (
+										<span className="key-status--warning" key={part}>
+											{part}
+										</span>
+									) : (
+										part
+									),
+								)}
+						</span>
+					)}
 					{snapshot?.view.checkpoint_status_message && (
 						<span className="checkpoint-status" role="status">
 							{snapshot.view.checkpoint_status_message}

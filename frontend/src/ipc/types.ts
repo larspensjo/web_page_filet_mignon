@@ -287,6 +287,7 @@ export type SnapshotEnvelope = {
 		resume_enabled: boolean;
 		resume_disabled_reason: string | null;
 		ai_unavailable_message: string | null;
+		key_status_line: string | null;
 		unfinished_work: UnfinishedWork;
 		reprocess_notice: ReprocessNoticeView | null;
 		stop_finish_button: StopFinishButtonState;

@@ -171,6 +171,7 @@ pub struct AppViewModel {
     pub stop_finish_button: StopFinishButtonState,
     pub signal_candidate_rows: Vec<SignalCandidateRow>,
     pub ai_unavailable_message: Option<String>,
+    pub key_status_line: Option<String>,
     /// Reducer-owned cumulative timeline for the desktop pipeline experience.
     pub run_progress: RunProgressView,
     pub archive_enabled: bool,
@@ -202,6 +203,7 @@ impl Default for AppViewModel {
             stop_finish_button: StopFinishButtonState::Disabled,
             signal_candidate_rows: Vec::new(),
             ai_unavailable_message: None,
+            key_status_line: None,
             run_progress: RunProgressView::default(),
             archive_enabled: true,
             archive_export_notice: None,

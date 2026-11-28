@@ -21,6 +21,17 @@
 	line-height: var(--metadata-line-height);
 }
 
+.key-status {
+	color: var(--text-tertiary);
+	font-size: var(--metadata-size);
+	line-height: var(--metadata-line-height);
+	white-space: nowrap;
+}
+
+.key-status--warning {
+	color: var(--accent-warning);
+}
+
 .archive-export-notice {
 	display: inline-flex;
 	min-width: 0;

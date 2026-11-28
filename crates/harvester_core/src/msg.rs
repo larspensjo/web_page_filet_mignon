@@ -9,7 +9,7 @@ use harvester_engine::ExtractedLink;
 use serde::{Deserialize, Serialize};
 
 use crate::morning_archive::{PortfolioRecord, PortfolioRecords, TargetObservation};
-use crate::state::{AiAvailability, ArchiveTokenEstimates};
+use crate::state::{AiAvailability, ArchiveTokenEstimates, StoredKeyState};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[rustfmt::skip]
@@ -237,6 +237,8 @@ pub enum Msg {
     },
     /// Startup/effect boundary detected whether AI-backed workflows are available.
     AiAvailabilityDetected { availability: AiAvailability },
+    /// Desktop startup detected the status of both stored keys.
+    StoredKeyStatusDetected { openai: StoredKeyState, brave: StoredKeyState },
     /// Summary cache hydrated from persisted store at startup.
     SummaryCacheHydrated { cache: crate::SummaryCache },
     /// Signal-candidate cache hydrated from persisted store at startup.
@@ -333,6 +335,7 @@ impl Msg {
             Self::PromptTemplateFilesLoaded => "PromptTemplateFilesLoaded",
             Self::LlmMetadataLoaded { .. } => "LlmMetadataLoaded",
             Self::AiAvailabilityDetected { .. } => "AiAvailabilityDetected",
+            Self::StoredKeyStatusDetected { .. } => "StoredKeyStatusDetected",
             Self::SummaryCacheHydrated { .. } => "SummaryCacheHydrated",
             Self::SignalCandidateCacheLoaded { .. } => "SignalCandidateCacheLoaded",
             Self::SignalCandidateOverridesLoaded { .. } => "SignalCandidateOverridesLoaded",

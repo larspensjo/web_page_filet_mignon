@@ -50,7 +50,10 @@ Harvester-specific keys with provider spending limits.
 Both launchers ask Harvester to read the stored keys at startup. Starting either
 binary directly without the launcher flag leaves it key-free. At startup the
 batch prints the status of each credential, including the character count and
-encoding for a found key.
+encoding for a found key. When a launcher asked for stored keys, the desktop
+header shows a single line such as `Keys: OpenAI found, Brave missing`; each
+key is `found`, `missing`, or `unreadable`. Started without the launcher flag,
+the desktop shows no key line.
 
 Every Brave source uses `Harvester/BraveSearch`. New entries in
 `output/.sources.ron` omit `api_key_env`. Older entries still load, and the poll

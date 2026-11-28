@@ -102,6 +102,14 @@ pub enum AiUnavailableReason {
     NoTriageModel,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StoredKeyState {
+    Found,
+    Missing,
+    Unreadable,
+    NotRequested,
+}
+
 #[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PendingBriefingCheckpointSaveSnapshot {
@@ -324,6 +332,7 @@ pub struct AppState {
     active_prompt_versions: HashMap<PromptId, PromptVersion>,
     effective_models: HashMap<PromptId, String>,
     ai_availability: AiAvailability,
+    pub(crate) stored_key_status: Option<(StoredKeyState, StoredKeyState)>,
     result_store_failure: Option<String>,
     consecutive_rate_limit_failures: u32,
     summary_cache: SummaryCache,
@@ -452,6 +461,7 @@ impl Default for AppState {
             active_prompt_versions: HashMap::new(),
             effective_models: HashMap::new(),
             ai_availability: AiAvailability::Available,
+            stored_key_status: None,
             result_store_failure: None,
             consecutive_rate_limit_failures: 0,
             summary_cache: SummaryCache::new(),

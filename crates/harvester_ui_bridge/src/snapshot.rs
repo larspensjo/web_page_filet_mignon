@@ -241,6 +241,7 @@ mod desktop_shape_tests {
             "stop_finish_button",
             "signal_candidate_rows",
             "ai_unavailable_message",
+            "key_status_line",
             "run_progress",
             "archive_enabled",
             "archive_export_notice",
@@ -258,7 +259,7 @@ mod desktop_shape_tests {
         .into_iter()
         .collect();
         assert_eq!(actual, expected);
-        assert_eq!(actual.len(), 21);
+        assert_eq!(actual.len(), 22);
         assert_eq!(
             snapshot.view["archive_meter"]
                 .as_object()

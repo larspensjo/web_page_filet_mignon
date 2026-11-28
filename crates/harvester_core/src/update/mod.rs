@@ -564,6 +564,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             Vec::new()
         }
+        Msg::StoredKeyStatusDetected { openai, brave } => {
+            state.stored_key_status = Some((openai, brave));
+            state.mark_dirty();
+            Vec::new()
+        }
         Msg::SummaryCacheHydrated { cache } => {
             engine_info!(
                 "[summary-cache] Hydrated {} entries from persistent store",

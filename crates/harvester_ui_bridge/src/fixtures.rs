@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use harvester_core::morning_archive::PortfolioRecord;
 use harvester_core::{
     AiAvailability, AiUnavailableReason, AppState, CompletedJobSnapshot, Effect, JobListMode,
-    LinkSnapshotRecord, LlmResultKind, Msg, SelectedJobVisibility,
+    LinkSnapshotRecord, LlmResultKind, Msg, SelectedJobVisibility, StoredKeyState,
 };
 use harvester_engine::{llm::prompt::PromptId, SourceId, SourceKind};
 
@@ -67,12 +67,20 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
             },
         },
     );
+    let with_stored_key_status = reduce(
+        empty.clone(),
+        Msg::StoredKeyStatusDetected {
+            openai: StoredKeyState::Found,
+            brave: StoredKeyState::Missing,
+        },
+    );
     let states = [
         ("idle_empty_corpus", empty),
         ("idle_empty_output_folder_started", hydrated_empty),
         ("idle_with_corpus", with_corpus),
         ("idle_last_24_hours", last_24_hours),
         ("idle_with_selection", with_selection),
+        ("idle_with_stored_key_status", with_stored_key_status),
         ("run_in_progress_with_failures", run_in_progress),
         (
             "run_in_progress_with_reused_results",
@@ -106,6 +114,7 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
                 "idle_empty_corpus"
                 | "idle_last_24_hours"
                 | "idle_with_selection"
+                | "idle_with_stored_key_status"
                 | "ai_unavailable" => Status::Loading,
                 "run_finished_with_notice"
                 | "run_finished_with_source_failures"

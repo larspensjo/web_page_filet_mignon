@@ -3029,3 +3029,11 @@ Change: The morning gate handles run-level failures. Result line version 2 names
 Lessons Learned: Saved results can include files intake never loaded, so a publication gate cannot assume a missing result has a task that can finish it. Published archives and durably recorded empty mornings settle their omissions. Omissions from a failed publication can still be re-evaluated on retry.
 Prevention: Reducer and batch tests cover the zero-work mismatch, failed writes and replay. The formatter fixtures pin the consumer-visible bytes, and a checkpoint regression checks pruning across 32 confirmed mornings. A timestamp regression checks that omission dating follows archive-window parsing.
 Refs: crates/harvester_core/src/update/tests/morning_archive_tests.rs, crates/harvester_batch/tests/archive_out_contract.rs, crates/harvester_batch/tests/fixtures/result_line/, crates/harvester_io/src/morning_archive_tests.rs, docs/ArchiveExportFormat.md
+
+## 2026-11-27 - Desktop snapshot error screens need no view
+Type: Bug Fix
+Context: Testing the stored-key IPC field exposed a render crash when a fatal snapshot supplied a null view.
+Change: The header tolerates a null view before rendering the fatal or schema-mismatch screen.
+Lessons Learned: Check envelope-level errors before requiring fields from a renderable view.
+Prevention: The frontend regression exercises both error screens with a null view and separately checks rejection of malformed current-schema views.
+Refs: frontend/src/ipc/useSnapshot.ts, frontend/src/App.tsx, frontend/src/App.test.tsx
